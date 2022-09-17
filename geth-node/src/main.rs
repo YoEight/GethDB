@@ -1,6 +1,12 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    time::{Duration, Instant},
+};
 
-use tokio::sync::{mpsc, oneshot};
+use tokio::{
+    select,
+    sync::{mpsc, oneshot},
+};
 use uuid::Uuid;
 
 fn main() {
@@ -103,13 +109,13 @@ impl Network {
     }
 }
 
-struct State {
+struct PersistentState {
     current_term: u64,
     voted_for: Option<NodeId>,
     log: Vec<Entry>,
 }
 
-impl State {
+impl PersistentState {
     fn new() -> Self {
         Self {
             current_term: 0,
@@ -119,14 +125,54 @@ impl State {
     }
 }
 
-async fn raft_node(network: Network, mut state: State, mut mailbox: mpsc::UnboundedReceiver<Msg>) {
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+enum Status {
+    Follower,
+    Leader,
+    Candidate,
+}
+
+async fn raft_node(
+    network: Network,
+    mut state: PersistentState,
+    mut mailbox: mpsc::UnboundedReceiver<Msg>,
+) {
     let mut commit_index = 0u64;
     let mut last_applied = 0u64;
+    let mut status = Status::Follower;
+    let mut timeout_election = Duration::from_millis(150);
+    let mut clock = tokio::time::interval(Duration::from_millis(30));
+    let mut last_recv_msg = Instant::now();
 
-    while let Some(msg) = mailbox.recv().await {
-        match msg.rpc {
-            Rpc::AppendEntries { args, resp } => {}
-            Rpc::RequestVote { args, resp } => {}
+    loop {
+        select! {
+            Some(msg) = mailbox.recv() => {
+                match msg.rpc {
+                    Rpc::AppendEntries { args, resp } => {}
+                    Rpc::RequestVote { args, resp } => {
+                        if args.term < state.current_term {
+                            let _ = resp.send(Ok(RequestVoteResponse {
+                                term: state.current_term,
+                                vote_granted: false,
+                            }));
+                        }
+                    }
+                }
+            }
+
+            _ = clock.tick() => {
+                if last_recv_msg.elapsed() >= timeout_election {
+                    // TODO - Vote for myself.
+                    state.current_term += 1;
+                    status = Status::Candidate;
+                    network.request_vote(RequestVote {
+                        term: state.current_term,
+                        candidate_id: todo!(),
+                        last_log_index: todo!(),
+                        last_log_term: todo!(),
+                    }).await;
+                }
+            }
         }
     }
 }
@@ -146,7 +192,7 @@ fn in_memory_network(node_count: usize) {
             inner: net_send.clone(),
         };
 
-        tokio::spawn(raft_node(network, State::new(), mailbox));
+        tokio::spawn(raft_node(network, PersistentState::new(), mailbox));
 
         nodes.insert(node_id, sender);
     }
