@@ -30,19 +30,23 @@ impl NodeId {
 
 struct Msg {
     origin: NodeId,
-    rpc: Rpc,
+    target: NodeId,
+    payload: Payload,
 }
 
-enum Rpc {
-    AppendEntries {
-        args: AppendEntries,
-        resp: oneshot::Sender<crate::Result<AppendEntriesResponse>>,
-    },
+enum Payload {
+    Req(Req),
+    Resp(Resp),
+}
 
-    RequestVote {
-        args: RequestVote,
-        resp: oneshot::Sender<crate::Result<RequestVoteResponse>>,
-    },
+pub enum Req {
+    AppendEntries(AppendEntries),
+    RequestVote(RequestVote),
+}
+
+pub enum Resp {
+    AppendEntries(AppendEntriesResponse),
+    RequestVote(RequestVoteResponse),
 }
 
 pub struct AppendEntries {
@@ -79,15 +83,30 @@ pub struct Entry {
 pub struct Network {
     origin: NodeId,
     cluster: watch::Receiver<Vec<NodeId>>,
-    inner: mpsc::UnboundedSender<Msg>,
+    mailbox: mpsc::UnboundedSender<Msg>,
 }
 
 impl Network {
-    pub async fn request_vote(&self, args: RequestVote) -> crate::Result<RequestVoteResponse> {
+    pub fn send_req(&self, target: NodeId, req: Req) {
+        let _ = self.mailbox.send(Msg {
+            origin: self.origin,
+            target,
+            payload: Payload::Req(req),
+        });
+    }
+
+    pub fn send_resp(&self, target: NodeId, resp: Resp) {
+        let _ = self.mailbox.send(Msg {
+            origin: self.origin,
+            target,
+            payload: Payload::Resp(resp),
+        });
+    }
+/*    pub async fn request_vote(&self, target: NodeId, args: RequestVote) -> crate::Result<RequestVoteResponse> {
         let (resp, result) = oneshot::channel();
 
         let _ = self.inner.send(Msg {
-            origin: self.origin,
+            target,
             rpc: Rpc::RequestVote { args, resp },
         });
 
@@ -102,15 +121,19 @@ impl Network {
         let (resp, result) = oneshot::channel();
 
         let _ = self.inner.send(Msg {
-            origin: self.origin,
+            target,
             rpc: Rpc::AppendEntries { args, resp },
         });
 
         result.await.expect("fatal error")
     }
-
+*/
     pub fn origin(&self) -> NodeId {
         self.origin
+    }
+
+    pub fn other_nodes(&self) -> Vec<NodeId> {
+        self.cluster.borrow().iter().copied().filter(|id| id != &self.origin).collect()
     }
 }
 
@@ -152,16 +175,22 @@ async fn raft_node(
     loop {
         select! {
             Some(msg) = mailbox.recv() => {
-                match msg.rpc {
-                    Rpc::AppendEntries { args, resp } => {}
-                    Rpc::RequestVote { args, resp } => {
-                        if args.term < state.current_term {
-                            let _ = resp.send(Ok(RequestVoteResponse {
-                                term: state.current_term,
-                                vote_granted: false,
-                            }));
+                match msg.payload {
+                    Payload::Req(req) => {
+                        match req {
+                            Req::AppendEntries(args) => {}
+                            Req::RequestVote(args) => {
+                                if args.term < state.current_term {
+                                    network.send_resp(msg.origin, Resp::RequestVote(RequestVoteResponse {
+                                        term: state.current_term,
+                                        vote_granted: false,
+                                    }));
+                                }
+                            }
                         }
                     }
+
+                    Payload::Resp(_) => {}
                 }
             }
 
@@ -170,12 +199,15 @@ async fn raft_node(
                     state.voted_for = Some(network.origin());
                     state.current_term += 1;
                     status = Status::Candidate;
-                    network.request_vote(RequestVote {
-                        term: state.current_term,
-                        candidate_id: todo!(),
-                        last_log_index: todo!(),
-                        last_log_term: todo!(),
-                    }).await;
+
+                    for node_id in network.other_nodes() {
+                        network.send_req(node_id, Req::RequestVote(RequestVote{
+                            term: state.current_term,
+                            candidate_id: network.origin(),
+                            last_log_index: todo!(),
+                            last_log_term: todo!(),
+                        }));
+                    }
                 }
             }
         }
@@ -196,7 +228,7 @@ fn in_memory_network(node_count: usize) {
         let network = Network {
             origin: node_id,
             cluster: cluster_recv.clone(),
-            inner: net_send.clone(),
+            mailbox: net_send.clone(),
         };
 
         tokio::spawn(raft_node(network, PersistentState::new(), mailbox));
@@ -218,9 +250,8 @@ struct NetworkConfig {
 
 async fn in_memory_loop(config: NetworkConfig, mut socket: mpsc::UnboundedReceiver<Msg>) {
     while let Some(msg) = socket.recv().await {
-        match &msg.rpc {
-            Rpc::AppendEntries { args, resp } => {}
-            Rpc::RequestVote { args, resp } => {}
+        if let Some(mailbox) = config.nodes.get(&msg.target) {
+            let _ = mailbox.send(msg);
         }
     }
 }
