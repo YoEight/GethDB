@@ -5,7 +5,7 @@ use std::{
 
 use tokio::{
     select,
-    sync::{mpsc, oneshot},
+    sync::{mpsc, oneshot, watch},
 };
 use uuid::Uuid;
 
@@ -78,6 +78,7 @@ pub struct Entry {
 
 pub struct Network {
     origin: NodeId,
+    cluster: watch::Receiver<Vec<NodeId>>,
     inner: mpsc::UnboundedSender<Msg>,
 }
 
@@ -106,6 +107,10 @@ impl Network {
         });
 
         result.await.expect("fatal error")
+    }
+
+    pub fn origin(&self) -> NodeId {
+        self.origin
     }
 }
 
@@ -162,7 +167,7 @@ async fn raft_node(
 
             _ = clock.tick() => {
                 if last_recv_msg.elapsed() >= timeout_election {
-                    // TODO - Vote for myself.
+                    state.voted_for = Some(network.origin());
                     state.current_term += 1;
                     status = Status::Candidate;
                     network.request_vote(RequestVote {
@@ -180,27 +185,38 @@ async fn raft_node(
 type Nodes = HashMap<NodeId, mpsc::UnboundedSender<Msg>>;
 
 fn in_memory_network(node_count: usize) {
+    let node_ids = std::iter::repeat(()).take(node_count).map(|_| NodeId::new()).collect::<Vec<_>>();
     let mut nodes = HashMap::with_capacity(node_count);
     let (net_send, socket) = mpsc::unbounded_channel();
+    let (cluster_changes, cluster_recv) = watch::channel(node_ids.clone());
 
-    for _ in std::iter::repeat(()).take(node_count) {
-        let node_id = NodeId::new();
+    for node_id in node_ids {
         let (sender, mailbox) = mpsc::unbounded_channel();
 
         let network = Network {
             origin: node_id,
+            cluster: cluster_recv.clone(),
             inner: net_send.clone(),
         };
 
         tokio::spawn(raft_node(network, PersistentState::new(), mailbox));
-
         nodes.insert(node_id, sender);
     }
 
-    tokio::spawn(in_memory_loop(nodes, socket));
+    let config = NetworkConfig {
+        nodes,
+        cluster_changes,
+    };
+
+    tokio::spawn(in_memory_loop(config, socket));
 }
 
-async fn in_memory_loop(nodes: Nodes, mut socket: mpsc::UnboundedReceiver<Msg>) {
+struct NetworkConfig {
+    nodes: Nodes,
+    cluster_changes: watch::Sender<Vec<NodeId>>,
+}
+
+async fn in_memory_loop(config: NetworkConfig, mut socket: mpsc::UnboundedReceiver<Msg>) {
     while let Some(msg) = socket.recv().await {
         match &msg.rpc {
             Rpc::AppendEntries { args, resp } => {}
