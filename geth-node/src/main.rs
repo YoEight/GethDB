@@ -67,8 +67,7 @@ pub struct AppendEntriesResponse {
 pub struct RequestVote {
     pub term: u64,
     pub candidate_id: NodeId,
-    pub last_log_index: u64,
-    pub last_log_term: u64,
+    pub last_log_index: LogIndex,
 }
 
 pub struct RequestVoteResponse {
@@ -76,8 +75,21 @@ pub struct RequestVoteResponse {
     pub vote_granted: bool,
 }
 
+#[derive(Copy, Clone, Debug, Default)]
+pub struct LogIndex {
+    term: u64,
+    index: u64,
+}
+
+impl LogIndex {
+    pub fn is_as_up_to_date_as(&self, other: LogIndex) -> bool {
+        self.term >= other.term && self.index >= other.index
+    }
+}
+
 pub struct Entry {
     pub index: u64,
+    pub term: u64,
     pub data: u64,
 }
 
@@ -170,6 +182,95 @@ fn generate_timeout(rng: &mut SmallRng, low: u64, high: u64) -> Duration {
     Duration::from_millis((low..high).choose(rng).unwrap())
 }
 
+struct Volatile {
+    commit_index: u64,
+    last_applied: u64,
+    status: Status,
+    election_timeout: Duration,
+    election_tracker: Instant,
+}
+
+impl Volatile {
+    fn new(rng: &mut SmallRng) -> Self {
+        Self {
+            commit_index: 0,
+            last_applied: 0,
+            status: Status::Follower,
+            election_timeout: generate_timeout(rng, 150, 300),
+            election_tracker: Instant::now(),
+        }
+    }
+}
+
+struct Persistent {
+    current_term: u64,
+    voted_for: Option<NodeId>,
+    log: Vec<Entry>,
+}
+
+impl Persistent {
+    fn load_from_storage() -> Self {
+        Self {
+            current_term: 9,
+            voted_for: None,
+            log: Vec::new(),
+        }
+    }
+}
+
+struct Node {
+    persistent: Persistent,
+    volatile: Volatile,
+    rng: SmallRng,
+}
+
+impl Node {
+    fn new() -> Self {
+        let mut rng = SmallRng::from_entropy();
+
+        Self {
+            persistent: Persistent::load_from_storage(),
+            volatile: Volatile::new(&mut rng),
+            rng,
+        }
+    }
+
+    fn request_vote(&mut self, args: RequestVote) -> RequestVoteResponse {
+        if args.term < self.persistent.current_term {
+            return RequestVoteResponse {
+                term: self.persistent.current_term,
+                vote_granted: false,
+            };
+        }
+
+        let vote_granted = (self.persistent.voted_for.is_none()
+            || self.persistent.voted_for == Some(args.candidate_id))
+            && args
+                .last_log_index
+                .is_as_up_to_date_as(self.last_log_index());
+
+        RequestVoteResponse {
+            term: self.persistent.current_term,
+            vote_granted,
+        }
+    }
+
+    fn update_election_timeout(&mut self) {
+        self.volatile.election_timeout = generate_timeout(&mut self.rng, 150, 300);
+        self.volatile.election_tracker = Instant::now();
+    }
+
+    fn last_log_index(&self) -> LogIndex {
+        self.persistent
+            .log
+            .last()
+            .map_or(LogIndex::default(), |entry| LogIndex {
+                term: entry.term,
+                index: entry.index,
+            })
+    }
+}
+
 async fn raft_node(
     network: Network,
     mut state: PersistentState,
@@ -190,6 +291,19 @@ async fn raft_node(
                     Payload::Req(req) => {
                         match req {
                             Req::AppendEntries(args) => {
+                                if args.term < state.current_term {
+                                    network.send_resp(msg.origin, Resp::AppendEntries(AppendEntriesResponse {
+                                        term: state.current_term,
+                                        success: false,
+                                    }));
+
+                                    continue;
+                                }
+
+                                if args.term != state.current_term {
+                                    state.current_term = args.term;
+                                }
+
                                 if args.term >= state.current_term && status == Status::Candidate {
                                     status = Status::Follower;
                                 }
