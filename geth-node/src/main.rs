@@ -53,8 +53,7 @@ pub enum Resp {
 pub struct AppendEntries {
     pub term: u64,
     pub leader_id: NodeId,
-    pub prev_log_index: usize,
-    pub prev_log_term: u64,
+    pub last_log_index: LogIndex,
     pub entries: Vec<Entry>,
     pub leader_commit: usize,
 }
@@ -84,6 +83,10 @@ pub struct LogIndex {
 impl LogIndex {
     pub fn is_as_up_to_date_as(&self, other: LogIndex) -> bool {
         self.term >= other.term && self.index >= other.index
+    }
+
+    pub fn is_zero(&self) -> bool {
+        self.term == 0 && self.index == 0
     }
 }
 
@@ -115,32 +118,7 @@ impl Network {
             payload: Payload::Resp(resp),
         });
     }
-    /*    pub async fn request_vote(&self, target: NodeId, args: RequestVote) -> crate::Result<RequestVoteResponse> {
-            let (resp, result) = oneshot::channel();
 
-            let _ = self.inner.send(Msg {
-                target,
-                rpc: Rpc::RequestVote { args, resp },
-            });
-
-            result.await.expect("fatal error")
-        }
-
-        pub async fn append_entries(
-            &self,
-            target: NodeId,
-            args: AppendEntries,
-        ) -> crate::Result<AppendEntriesResponse> {
-            let (resp, result) = oneshot::channel();
-
-            let _ = self.inner.send(Msg {
-                target,
-                rpc: Rpc::AppendEntries { args, resp },
-            });
-
-            result.await.expect("fatal error")
-        }
-    */
     pub fn origin(&self) -> NodeId {
         self.origin
     }
@@ -188,6 +166,7 @@ struct Volatile {
     status: Status,
     election_timeout: Duration,
     election_tracker: Instant,
+    leader: Option<NodeId>,
 }
 
 impl Volatile {
@@ -198,6 +177,7 @@ impl Volatile {
             status: Status::Follower,
             election_timeout: generate_timeout(rng, 150, 300),
             election_tracker: Instant::now(),
+            leader: None,
         }
     }
 }
@@ -211,7 +191,7 @@ struct Persistent {
 impl Persistent {
     fn load_from_storage() -> Self {
         Self {
-            current_term: 9,
+            current_term: 0,
             voted_for: None,
             log: Vec::new(),
         }
@@ -235,6 +215,71 @@ impl Node {
         }
     }
 
+    fn last_log_index(&self) -> LogIndex {
+        self.persistent
+            .log
+            .last()
+            .map_or(LogIndex::default(), |entry| LogIndex {
+                term: entry.term,
+                index: entry.index,
+            })
+    }
+
+    fn contains_log_index(&self, log: LogIndex) -> bool {
+        for entry in self.persistent.log.iter() {
+            if entry.index == log.index && entry.term == log.term {
+                return true;
+            }
+        }
+
+        self.persistent.log.is_empty() && log.is_zero()
+    }
+
+    fn update_election_timeout(&mut self) {
+        self.volatile.election_timeout = generate_timeout(&mut self.rng, 150, 300);
+        self.volatile.election_tracker = Instant::now();
+    }
+
+    fn append_log_entries(&mut self, mut entries: Vec<Entry>) {
+        for entry in entries {
+            self.append_log_entry(entry);
+        }
+    }
+
+    fn append_log_entry(&mut self, entry: Entry) {
+        enum Appending {
+            Conflict,
+            Noop,
+            Append,
+        }
+
+        let idx = entry.index as usize - 1;
+        let status = if let Some(log) = self.persistent.log.get(idx) {
+            if entry.term != log.term {
+                Appending::Conflict
+            } else {
+                Appending::Noop
+            }
+        } else {
+            Appending::Append
+        };
+
+        match status {
+            Appending::Noop => {
+                // We already have the entry, nothing needs to be done.
+            }
+            Appending::Append => {
+                self.persistent.log.push(entry);
+            }
+            Appending::Conflict => {
+                self.persistent.log.drain(idx..);
+                self.persistent.log.push(entry);
+            }
+        }
+    }
+}
+
+impl Node {
     fn request_vote(&mut self, args: RequestVote) -> RequestVoteResponse {
         if args.term < self.persistent.current_term {
             return RequestVoteResponse {
@@ -255,19 +300,25 @@ impl Node {
         }
     }
 
-    fn update_election_timeout(&mut self) {
-        self.volatile.election_timeout = generate_timeout(&mut self.rng, 150, 300);
-        self.volatile.election_tracker = Instant::now();
-    }
+    fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResponse {
+        if args.term < self.persistent.current_term || !self.contains_log_index(args.last_log_index)
+        {
+            return AppendEntriesResponse {
+                term: self.persistent.current_term,
+                success: false,
+            };
+        }
 
-    fn last_log_index(&self) -> LogIndex {
-        self.persistent
-            .log
-            .last()
-            .map_or(LogIndex::default(), |entry| LogIndex {
-                term: entry.term,
-                index: entry.index,
-            })
+        self.volatile.status = Status::Follower;
+        self.persistent.current_term = args.term;
+        self.update_election_timeout();
+
+        self.append_log_entries(args.entries);
+
+        AppendEntriesResponse {
+            term: self.persistent.current_term,
+            success: true,
+        }
     }
 }
 
