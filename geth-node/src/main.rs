@@ -55,7 +55,7 @@ pub struct AppendEntries {
     pub leader_id: NodeId,
     pub last_log_index: LogIndex,
     pub entries: Vec<Entry>,
-    pub leader_commit: usize,
+    pub leader_commit: u64,
 }
 
 pub struct AppendEntriesResponse {
@@ -63,6 +63,7 @@ pub struct AppendEntriesResponse {
     pub success: bool,
 }
 
+#[derive(Clone)]
 pub struct RequestVote {
     pub term: u64,
     pub candidate_id: NodeId,
@@ -199,16 +200,18 @@ impl Persistent {
 }
 
 struct Node {
+    id: NodeId,
     persistent: Persistent,
     volatile: Volatile,
     rng: SmallRng,
 }
 
 impl Node {
-    fn new() -> Self {
+    fn new(id: NodeId) -> Self {
         let mut rng = SmallRng::from_entropy();
 
         Self {
+            id,
             persistent: Persistent::load_from_storage(),
             volatile: Volatile::new(&mut rng),
             rng,
@@ -240,10 +243,18 @@ impl Node {
         self.volatile.election_tracker = Instant::now();
     }
 
-    fn append_log_entries(&mut self, mut entries: Vec<Entry>) {
+    fn has_current_leader_timed_out(&self) -> bool {
+        self.volatile.election_tracker.elapsed() >= self.volatile.election_timeout
+    }
+
+    fn append_log_entries(&mut self, mut entries: Vec<Entry>) -> u64 {
+        let mut last_entry_index = 0;
         for entry in entries {
+            last_entry_index = entry.index;
             self.append_log_entry(entry);
         }
+
+        last_entry_index
     }
 
     fn append_log_entry(&mut self, entry: Entry) {
@@ -312,28 +323,34 @@ impl Node {
         self.volatile.status = Status::Follower;
         self.persistent.current_term = args.term;
         self.update_election_timeout();
+        let last_entry_index = self.append_log_entries(args.entries);
 
-        self.append_log_entries(args.entries);
+        if args.leader_commit > self.volatile.commit_index {
+            self.volatile.commit_index = args.leader_commit.min(last_entry_index);
+        }
 
         AppendEntriesResponse {
             term: self.persistent.current_term,
             success: true,
         }
     }
+
+    fn start_campaign(&mut self) -> RequestVote {
+        self.persistent.voted_for = Some(self.id);
+        self.persistent.current_term += 1;
+        self.volatile.status = Status::Candidate;
+
+        RequestVote {
+            term: self.persistent.current_term,
+            candidate_id: self.id,
+            last_log_index: self.last_log_index(),
+        }
+    }
 }
 
-async fn raft_node(
-    network: Network,
-    mut state: PersistentState,
-    mut mailbox: mpsc::UnboundedReceiver<Msg>,
-) {
-    let mut rng = SmallRng::from_entropy();
-    let mut commit_index = 0u64;
-    let mut last_applied = 0u64;
-    let mut status = Status::Follower;
-    let mut timeout_election = generate_timeout(&mut rng, 150, 300);
+async fn raft_node(network: Network, mut mailbox: mpsc::UnboundedReceiver<Msg>) {
     let mut clock = tokio::time::interval(Duration::from_millis(30));
-    let mut last_recv_msg = Instant::now();
+    let mut node = Node::new(network.origin());
 
     loop {
         select! {
@@ -342,44 +359,12 @@ async fn raft_node(
                     Payload::Req(req) => {
                         match req {
                             Req::AppendEntries(args) => {
-                                if args.term < state.current_term {
-                                    network.send_resp(msg.origin, Resp::AppendEntries(AppendEntriesResponse {
-                                        term: state.current_term,
-                                        success: false,
-                                    }));
-
-                                    continue;
-                                }
-
-                                if args.term != state.current_term {
-                                    state.current_term = args.term;
-                                }
-
-                                if args.term >= state.current_term && status == Status::Candidate {
-                                    status = Status::Follower;
-                                }
-
-                                if status == Status::Candidate {
-                                    // We ignore the request because it comes from a node that got
-                                    // recently demoted.
-                                    continue;
-                                }
+                                let resp = node.append_entries(args);
+                                network.send_resp(msg.origin, Resp::AppendEntries(resp));
                             }
                             Req::RequestVote(args) => {
-                                let last_log_index = state.log.last().map(|e| e.index).unwrap_or(0);
-
-                                let vote_granted = if args.term < state.current_term {
-                                    false
-                                } else if (state.voted_for.is_none() || state.voted_for == Some(args.candidate_id)) && args.last_log_index >= last_log_index {
-                                    true
-                                } else {
-                                    false
-                                };
-
-                                network.send_resp(msg.origin, Resp::RequestVote(RequestVoteResponse {
-                                    term: state.current_term,
-                                    vote_granted,
-                                }));
+                                let resp = node.request_vote(args);
+                                network.send_resp(msg.origin, Resp::RequestVote(resp));
                             }
                         }
                     }
@@ -389,18 +374,11 @@ async fn raft_node(
             }
 
             _ = clock.tick() => {
-                if last_recv_msg.elapsed() >= timeout_election {
-                    state.voted_for = Some(network.origin());
-                    state.current_term += 1;
-                    status = Status::Candidate;
+                if node.has_current_leader_timed_out() {
+                    let vote_req = node.start_campaign();
 
                     for node_id in network.other_nodes() {
-                        network.send_req(node_id, Req::RequestVote(RequestVote{
-                            term: state.current_term,
-                            candidate_id: network.origin(),
-                            last_log_index: todo!(),
-                            last_log_term: todo!(),
-                        }));
+                        network.send_req(node_id, Req::RequestVote(vote_req.clone()));
                     }
                 }
             }
@@ -428,7 +406,7 @@ fn in_memory_network(node_count: usize) {
             mailbox: net_send.clone(),
         };
 
-        tokio::spawn(raft_node(network, PersistentState::new(), mailbox));
+        tokio::spawn(raft_node(network, mailbox));
         nodes.insert(node_id, sender);
     }
 
