@@ -292,7 +292,7 @@ impl Node {
 
 impl Node {
     fn request_vote(&mut self, args: RequestVote) -> RequestVoteResponse {
-        if args.term < self.persistent.current_term {
+        if args.term < self.persistent.current_term || !self.has_current_leader_timed_out() {
             return RequestVoteResponse {
                 term: self.persistent.current_term,
                 vote_granted: false,
