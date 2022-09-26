@@ -299,16 +299,46 @@ impl Node {
             };
         }
 
-        let vote_granted = (self.persistent.voted_for.is_none()
-            || self.persistent.voted_for == Some(args.candidate_id))
-            && args
-                .last_log_index
-                .is_as_up_to_date_as(self.last_log_index());
-
-        RequestVoteResponse {
-            term: self.persistent.current_term,
-            vote_granted,
+        if args.term > self.persistent.current_term {
+            self.persistent.current_term = args.term;
+            self.volatile.status = Status::Follower;
+            self.update_election_timeout();
         }
+
+        if !args
+            .last_log_index
+            .is_as_up_to_date_as(self.last_log_index())
+        {
+            return RequestVoteResponse {
+                term: self.persistent.current_term,
+                vote_granted: false,
+            };
+        }
+
+        let resp = match self.persistent.voted_for {
+            Some(candidate_id) if candidate_id == args.candidate_id => RequestVoteResponse {
+                term: self.persistent.current_term,
+                vote_granted: true,
+            },
+
+            Some(_) => RequestVoteResponse {
+                term: self.persistent.current_term,
+                vote_granted: false,
+            },
+
+            None => {
+                self.update_election_timeout();
+                self.volatile.status = Status::Follower;
+                self.persistent.voted_for = Some(args.candidate_id);
+
+                RequestVoteResponse {
+                    term: self.persistent.current_term,
+                    vote_granted: true,
+                }
+            }
+        };
+
+        resp
     }
 
     fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResponse {
@@ -339,6 +369,7 @@ impl Node {
         self.persistent.voted_for = Some(self.id);
         self.persistent.current_term += 1;
         self.volatile.status = Status::Candidate;
+        self.update_election_timeout();
 
         RequestVote {
             term: self.persistent.current_term,
