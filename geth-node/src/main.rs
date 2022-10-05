@@ -7,11 +7,14 @@ use rand::{rngs::SmallRng, seq::IteratorRandom, SeedableRng};
 use tokio::{
     select,
     sync::{mpsc, oneshot, watch},
+    task::JoinHandle,
 };
 use uuid::Uuid;
 
-fn main() {
-    println!("Hello, world!");
+#[tokio::main]
+async fn main() {
+    let handle = in_memory_network(3);
+    let _ = handle.await;
 }
 
 pub type Result<A> = std::result::Result<A, Error>;
@@ -419,7 +422,7 @@ async fn raft_node(network: Network, mut mailbox: mpsc::UnboundedReceiver<Msg>) 
 
 type Nodes = HashMap<NodeId, mpsc::UnboundedSender<Msg>>;
 
-fn in_memory_network(node_count: usize) {
+fn in_memory_network(node_count: usize) -> JoinHandle<()> {
     let node_ids = std::iter::repeat(())
         .take(node_count)
         .map(|_| NodeId::new())
@@ -446,7 +449,7 @@ fn in_memory_network(node_count: usize) {
         cluster_changes,
     };
 
-    tokio::spawn(in_memory_loop(config, socket));
+    tokio::spawn(in_memory_loop(config, socket))
 }
 
 struct NetworkConfig {
