@@ -9,10 +9,18 @@ use tokio::{
     sync::{mpsc, oneshot, watch},
     task::JoinHandle,
 };
+use tracing::Level;
+use tracing_subscriber::FmtSubscriber;
 use uuid::Uuid;
 
 #[tokio::main]
 async fn main() {
+    let subscriber = FmtSubscriber::builder()
+        .with_max_level(Level::DEBUG)
+        .finish();
+
+    tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
     let handle = in_memory_network(3);
     let _ = handle.await;
 }
@@ -48,11 +56,21 @@ pub enum Req {
     RequestVote(RequestVote),
 }
 
+impl Req {
+    fn name(&self) -> &str {
+        match self {
+            Req::AppendEntries(_) => "append_entries",
+            Req::RequestVote(_) => "request_vote",
+        }
+    }
+}
+
 pub enum Resp {
     AppendEntries(AppendEntriesResponse),
     RequestVote(RequestVoteResponse),
 }
 
+#[derive(Clone)]
 pub struct AppendEntries {
     pub term: u64,
     pub leader_id: NodeId,
@@ -94,6 +112,7 @@ impl LogIndex {
     }
 }
 
+#[derive(Clone)]
 pub struct Entry {
     pub index: u64,
     pub term: u64,
@@ -135,6 +154,11 @@ impl Network {
             .filter(|id| id != &self.origin)
             .collect()
     }
+
+    /// TODO - Currently we don't support dynamic cluster configuration so all the node can vote.
+    pub fn voting_node_count(&self) -> usize {
+        self.cluster.borrow().len()
+    }
 }
 
 struct PersistentState {
@@ -171,6 +195,7 @@ struct Volatile {
     election_timeout: Duration,
     election_tracker: Instant,
     leader: Option<NodeId>,
+    received_votes: usize,
 }
 
 impl Volatile {
@@ -182,6 +207,7 @@ impl Volatile {
             election_timeout: generate_timeout(rng, 150, 300),
             election_tracker: Instant::now(),
             leader: None,
+            received_votes: 0,
         }
     }
 }
@@ -204,6 +230,7 @@ impl Persistent {
 
 struct Node {
     id: NodeId,
+    name: String,
     persistent: Persistent,
     volatile: Volatile,
     rng: SmallRng,
@@ -215,10 +242,15 @@ impl Node {
 
         Self {
             id,
+            name: format!("node:{}", id.0),
             persistent: Persistent::load_from_storage(),
             volatile: Volatile::new(&mut rng),
             rng,
         }
+    }
+
+    fn name(&self) -> &str {
+        self.name.as_str()
     }
 
     fn last_log_index(&self) -> LogIndex {
@@ -344,6 +376,34 @@ impl Node {
         resp
     }
 
+    fn request_vote_resp(
+        &mut self,
+        cluster_size: usize,
+        args: RequestVoteResponse,
+    ) -> Option<AppendEntries> {
+        if args.vote_granted {
+            self.volatile.received_votes += 1;
+
+            if self.volatile.received_votes >= cluster_size / 2 + 1 {
+                self.volatile.status = Status::Leader;
+                let last_log_index = LogIndex {
+                    term: self.persistent.current_term,
+                    index: 0,
+                };
+
+                return Some(AppendEntries {
+                    term: self.persistent.current_term,
+                    leader_id: self.id,
+                    last_log_index,
+                    entries: Vec::new(),
+                    leader_commit: self.volatile.commit_index,
+                });
+            }
+        }
+
+        None
+    }
+
     fn append_entries(&mut self, args: AppendEntries) -> AppendEntriesResponse {
         if args.term < self.persistent.current_term || !self.contains_log_index(args.last_log_index)
         {
@@ -372,6 +432,7 @@ impl Node {
         self.persistent.voted_for = Some(self.id);
         self.persistent.current_term += 1;
         self.volatile.status = Status::Candidate;
+        self.volatile.received_votes = 1;
         self.update_election_timeout();
 
         RequestVote {
@@ -386,6 +447,8 @@ async fn raft_node(network: Network, mut mailbox: mpsc::UnboundedReceiver<Msg>) 
     let mut clock = tokio::time::interval(Duration::from_millis(30));
     let mut node = Node::new(network.origin());
 
+    tracing::debug!(target = node.name(), "Node started");
+
     loop {
         select! {
             Some(msg) = mailbox.recv() => {
@@ -397,13 +460,27 @@ async fn raft_node(network: Network, mut mailbox: mpsc::UnboundedReceiver<Msg>) 
                                 network.send_resp(msg.origin, Resp::AppendEntries(resp));
                             }
                             Req::RequestVote(args) => {
+                                let candidate_id = args.candidate_id;
                                 let resp = node.request_vote(args);
+                                tracing::debug!(target = node.name(), "vote request from node:{}: {}", candidate_id.0, resp.vote_granted);
                                 network.send_resp(msg.origin, Resp::RequestVote(resp));
                             }
                         }
                     }
 
-                    Payload::Resp(_) => {}
+                    Payload::Resp(resp) => {
+                        match resp {
+                            Resp::RequestVote(args) => {
+                                if let Some(heartbeat) = node.request_vote_resp(network.voting_node_count(), args) {
+                                    for node_id in network.other_nodes() {
+                                        network.send_req(node_id, Req::AppendEntries(heartbeat.clone()));
+                                    }
+                                }
+                            }
+
+                            Resp::AppendEntries(_) => {}
+                        }
+                    }
                 }
             }
 
