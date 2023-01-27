@@ -1,3 +1,4 @@
+mod grpc;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
@@ -20,6 +21,8 @@ async fn main() {
         .finish();
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
+
+    grpc::start_server();
 
     let handle = in_memory_network(3);
     let _ = handle.await;
