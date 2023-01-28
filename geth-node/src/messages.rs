@@ -1,12 +1,13 @@
-use crate::types::Direction;
+use crate::types::{Direction, Revision};
 use geth_mikoshi::MikoshiStream;
 use uuid::Uuid;
 
 pub struct ReadStream {
-    correlation: Uuid,
-    stream: String,
-    direction: Direction,
-    count: usize,
+    pub correlation: Uuid,
+    pub stream_name: String,
+    pub direction: Direction,
+    pub starting: Revision<u64>,
+    pub count: usize,
 }
 
 pub struct ReadStreamCompleted {
