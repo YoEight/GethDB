@@ -1,4 +1,5 @@
 [workspace]
 members = [
     "geth-node",
+    "geth-mikoshi",
 ]

@@ -19,7 +19,18 @@ impl Streams for StreamsImpl {
     type BatchAppendStream = BoxStream<'static, Result<BatchAppendResp, Status>>;
 
     async fn read(&self, request: Request<ReadReq>) -> Result<Response<Self::ReadStream>, Status> {
-        todo!()
+        let req = request.into_inner();
+
+        let options = req
+            .options
+            .ok_or(Status::invalid_argument("Options was not provided"))?;
+
+        // let options = if let Some(options) = req.options {
+        //     options
+        // } else {
+        // }
+
+        Err(Status::invalid_argument("Options was not provided"))
     }
 
     async fn append(

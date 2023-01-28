@@ -17,8 +17,8 @@ pub mod generated {
 
 mod streams;
 
-use tonic::transport::{self, Server};
 use generated::geth::protocol::server::streams_server::StreamsServer;
+use tonic::transport::{self, Server};
 
 pub fn start_server() {
     let addr = "[::1]:2113".parse().unwrap();

@@ -1,4 +1,6 @@
 mod grpc;
+pub mod messages;
+pub mod types;
 use std::{
     collections::HashMap,
     time::{Duration, Instant},
