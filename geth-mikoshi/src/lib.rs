@@ -5,6 +5,12 @@ use uuid::Uuid;
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Position(u64);
 
+impl Position {
+    pub fn raw(&self) -> u64 {
+        self.0
+    }
+}
+
 #[derive(Debug)]
 pub struct Record {
     pub id: Uuid,

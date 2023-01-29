@@ -7,7 +7,10 @@ use tonic::Streaming;
 use super::generated::geth::protocol::{
     self,
     server::{
-        read_resp::{read_event::RecordedEvent, Content, ReadEvent},
+        read_resp::{
+            read_event::{self, RecordedEvent},
+            Content, ReadEvent,
+        },
         streams_server::Streams,
         AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, DeleteReq, DeleteResp, ReadReq,
         ReadResp, TombstoneReq, TombstoneResp,
@@ -143,16 +146,33 @@ impl Streams for StreamsImpl {
                         break;
                     }
                     Ok(record) => {
-                        // if let Some(record) = record {
-                        //     let event = RecordedEvent {
-                        //         id: Some(protocol::Uuid),
-                        //     };
-                        //
-                        //     let resp = ReadResp {
-                        //         content: Some(Content::Event()),
-                        //     };
-                        //     continue;
-                        // }
+                        if let Some(record) = record {
+                            let raw_pos = record.position.raw();
+                            let event = RecordedEvent {
+                                id: Some(uuid_to_grpc(record.id)),
+                                stream_identifier: Some(StreamIdentifier {
+                                    stream_name: record.stream.into_bytes(),
+                                }),
+                                stream_revision: record.revision,
+                                prepare_position: raw_pos,
+                                commit_position: raw_pos,
+                                metadata: Default::default(),
+                                custom_metadata: Default::default(),
+                                data: record.data.to_vec(),
+                            };
+
+                            let event = ReadEvent {
+                                event: Some(event),
+                                link: None,
+                                position: Some(read_event::Position::CommitPosition(raw_pos)),
+                            };
+
+                            yield Ok(ReadResp {
+                                content: Some(Content::Event(event)),
+                            });
+
+                            continue;
+                        }
 
                         break;
                     }
@@ -160,7 +180,7 @@ impl Streams for StreamsImpl {
             }
         };
 
-        Err(Status::invalid_argument("Options was not provided"))
+        Ok(Response::new(Box::pin(streaming)))
     }
 
     async fn append(
