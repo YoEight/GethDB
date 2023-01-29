@@ -17,12 +17,13 @@ pub mod generated {
 
 mod streams;
 
+use crate::bus::Bus;
 use generated::geth::protocol::server::streams_server::StreamsServer;
 use tonic::transport::{self, Server};
 
 pub fn start_server() {
     let addr = "[::1]:2113".parse().unwrap();
-    let streams = streams::StreamsImpl::default();
+    let streams = streams::StreamsImpl::new(Bus::new());
 
     tracing::info!("GethDB is listening on {}", addr);
 

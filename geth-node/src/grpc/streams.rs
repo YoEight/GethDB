@@ -1,27 +1,71 @@
+use byteorder::BigEndian;
 use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 use tonic::Streaming;
 
 use super::generated::geth::protocol::{
+    self,
     server::{
-        streams_server::Streams, AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, DeleteReq,
-        DeleteResp, ReadReq, ReadResp, TombstoneReq, TombstoneResp,
+        read_resp::{read_event::RecordedEvent, Content, ReadEvent},
+        streams_server::Streams,
+        AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, DeleteReq, DeleteResp, ReadReq,
+        ReadResp, TombstoneReq, TombstoneResp,
     },
     StreamIdentifier,
 };
 
+use crate::bus::Bus;
 use crate::grpc::generated::geth::protocol::server::read_req::options::stream_options::RevisionOption;
 use crate::grpc::generated::geth::protocol::server::read_req::options::{
     CountOption, StreamOption,
 };
 use crate::messages::ReadStream;
 use crate::types::{Direction, ExpectedRevision, Revision};
+use byteorder::ByteOrder;
 use futures::stream::BoxStream;
 use uuid::Uuid;
 
-#[derive(Default)]
-pub struct StreamsImpl {}
+fn uuid_to_grpc(value: Uuid) -> protocol::Uuid {
+    let buf = value.as_bytes();
+
+    let most_significant_bits = BigEndian::read_i64(&buf[0..8]);
+    let least_significant_bits = BigEndian::read_i64(&buf[8..16]);
+
+    protocol::Uuid {
+        value: Some(protocol::uuid::Value::Structured(
+            protocol::uuid::Structured {
+                most_significant_bits,
+                least_significant_bits,
+            },
+        )),
+    }
+}
+
+fn grpc_to_uuid(value: protocol::Uuid) -> Option<Uuid> {
+    match value.value? {
+        protocol::uuid::Value::Structured(s) => {
+            let mut buf = [0u8; 16];
+
+            BigEndian::write_i64(&mut buf, s.most_significant_bits);
+            BigEndian::write_i64(&mut buf[8..16], s.least_significant_bits);
+
+            Some(Uuid::from_bytes(buf))
+        }
+
+        protocol::uuid::Value::String(s) => Uuid::try_from(s.as_str()).ok(),
+    }
+}
+
+pub struct StreamsImpl {
+    bus: Bus,
+}
+
+impl StreamsImpl {
+    pub fn new(bus: Bus) -> Self {
+        Self { bus }
+    }
+}
 
 #[tonic::async_trait]
 impl Streams for StreamsImpl {
@@ -88,6 +132,32 @@ impl Streams for StreamsImpl {
             count,
             stream_name,
             direction,
+        };
+
+        let mut reader = self.bus.read_stream(msg).await.reader;
+        let streaming = async_stream::stream! {
+            loop {
+                match reader.next().await {
+                    Err(e) => {
+                        yield Err(Status::unavailable(e.to_string()));
+                        break;
+                    }
+                    Ok(record) => {
+                        // if let Some(record) = record {
+                        //     let event = RecordedEvent {
+                        //         id: Some(protocol::Uuid),
+                        //     };
+                        //
+                        //     let resp = ReadResp {
+                        //         content: Some(Content::Event()),
+                        //     };
+                        //     continue;
+                        // }
+
+                        break;
+                    }
+                }
+            }
         };
 
         Err(Status::invalid_argument("Options was not provided"))

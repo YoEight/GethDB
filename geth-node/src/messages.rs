@@ -11,6 +11,6 @@ pub struct ReadStream {
 }
 
 pub struct ReadStreamCompleted {
-    correlation: Uuid,
-    reader: MikoshiStream,
+    pub correlation: Uuid,
+    pub reader: MikoshiStream,
 }

@@ -1,3 +1,4 @@
+mod bus;
 mod grpc;
 pub mod messages;
 pub mod types;

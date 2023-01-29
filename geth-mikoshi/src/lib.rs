@@ -17,7 +17,7 @@ pub struct Record {
 pub struct MikoshiStream {}
 
 impl MikoshiStream {
-    pub async fn next(&mut self) -> eyre::Result<Record> {
+    pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
         bail!("Not implemented")
     }
 }
