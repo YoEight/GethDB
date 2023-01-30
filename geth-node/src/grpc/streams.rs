@@ -7,9 +7,12 @@ use tonic::Streaming;
 use super::generated::geth::protocol::{
     self,
     server::{
+        append_req::{self, ProposedMessage},
+        append_resp::{self, Success},
         read_resp::{
+            self,
             read_event::{self, RecordedEvent},
-            Content, ReadEvent,
+            ReadEvent,
         },
         streams_server::Streams,
         AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, DeleteReq, DeleteResp, ReadReq,
@@ -23,10 +26,11 @@ use crate::grpc::generated::geth::protocol::server::read_req::options::stream_op
 use crate::grpc::generated::geth::protocol::server::read_req::options::{
     CountOption, StreamOption,
 };
-use crate::messages::ReadStream;
-use crate::types::{Direction, ExpectedRevision, Revision};
+use crate::messages::{AppendStream, ReadStream};
+use crate::types::{Direction, ExpectedRevision, Propose, Revision};
 use byteorder::ByteOrder;
 use futures::stream::BoxStream;
+use futures::{StreamExt, TryStreamExt};
 use uuid::Uuid;
 
 fn uuid_to_grpc(value: Uuid) -> protocol::Uuid {
@@ -168,7 +172,7 @@ impl Streams for StreamsImpl {
                             };
 
                             yield Ok(ReadResp {
-                                content: Some(Content::Event(event)),
+                                content: Some(read_resp::Content::Event(event)),
                             });
 
                             continue;
@@ -187,7 +191,53 @@ impl Streams for StreamsImpl {
         &self,
         request: Request<Streaming<AppendReq>>,
     ) -> Result<Response<AppendResp>, Status> {
-        todo!()
+        let mut reader = request.into_inner();
+        let mut events = Vec::new();
+
+        let (stream_name, expected) =
+            if let Some(options) = reader.try_next().await?.and_then(parse_append_options) {
+                options
+            } else {
+                return Err(Status::invalid_argument(
+                    "No stream name or expected version was provided",
+                ));
+            };
+
+        while let Some(event) = reader.try_next().await?.and_then(parse_propose) {
+            events.push(event);
+        }
+
+        let resp = self
+            .bus
+            .append_stream(AppendStream {
+                correlation: Uuid::new_v4(),
+                stream_name,
+                events,
+                expected,
+            })
+            .await;
+
+        let commit_position = resp.result.position.raw();
+        let prepare_position = commit_position;
+        let next_revision = if let Some(revision) = resp.next_revision {
+            append_resp::success::CurrentRevisionOption::CurrentRevision(revision)
+        } else {
+            append_resp::success::CurrentRevisionOption::NoStream(protocol::Empty::default())
+        };
+
+        let resp = AppendResp {
+            result: Some(append_resp::Result::Success(Success {
+                current_revision_option: Some(next_revision),
+                position_option: Some(append_resp::success::PositionOption::Position(
+                    append_resp::Position {
+                        commit_position,
+                        prepare_position,
+                    },
+                )),
+            })),
+        };
+
+        Ok(Response::new(resp))
     }
 
     async fn delete(&self, request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
@@ -209,4 +259,38 @@ impl Streams for StreamsImpl {
     ) -> Result<Response<Self::BatchAppendStream>, Status> {
         todo!()
     }
+}
+
+fn parse_append_options(req: AppendReq) -> Option<(String, ExpectedRevision)> {
+    if let append_req::Content::Options(options) = req.content? {
+        let expected_revision = match options.expected_stream_revision? {
+            append_req::options::ExpectedStreamRevision::Revision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+
+            append_req::options::ExpectedStreamRevision::NoStream(_) => ExpectedRevision::NoStream,
+            append_req::options::ExpectedStreamRevision::StreamExists(_) => {
+                ExpectedRevision::StreamsExists
+            }
+            append_req::options::ExpectedStreamRevision::Any(_) => ExpectedRevision::Any,
+        };
+
+        let ident = options.stream_identifier?;
+        let stream_name = String::from_utf8(ident.stream_name).ok()?;
+
+        return Some((stream_name, expected_revision));
+    }
+
+    None
+}
+
+fn parse_propose(req: AppendReq) -> Option<Propose> {
+    if let append_req::Content::ProposedMessage(msg) = req.content? {
+        let id = msg.id.and_then(grpc_to_uuid)?;
+        let data = msg.data.into();
+
+        return Some(Propose { id, data });
+    }
+
+    None
 }

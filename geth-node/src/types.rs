@@ -32,10 +32,6 @@ pub struct WrongDirectionError;
 #[derive(Debug)]
 pub struct Propose {
     pub id: Uuid,
-    pub stream: String,
-    pub position: Position,
-    pub revision: u64,
-    pub expected: ExpectedRevision,
     pub data: Bytes,
 }
 
@@ -45,4 +41,9 @@ pub enum ExpectedRevision {
     NoStream,
     Any,
     StreamsExists,
+}
+
+pub struct WriteResult {
+    pub correlation: Uuid,
+    pub position: Position,
 }
