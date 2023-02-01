@@ -1,4 +1,4 @@
-use std::string::{FromUtf16Error, FromUtf8Error};
+use std::string::FromUtf8Error;
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
@@ -224,6 +224,16 @@ impl From<Position> for protocol::streams::read_event::Position {
             protocol::streams::read_event::Position::NoPosition(protocol::Empty::default())
         } else {
             protocol::streams::read_event::Position::CommitPosition(value.raw())
+        }
+    }
+}
+
+impl From<Option<u64>> for protocol::streams::CurrentRevisionOption {
+    fn from(value: Option<u64>) -> Self {
+        if let Some(v) = value {
+            protocol::streams::CurrentRevisionOption::CurrentRevision(v)
+        } else {
+            protocol::streams::CurrentRevisionOption::NoStream(protocol::Empty::default())
         }
     }
 }

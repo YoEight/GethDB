@@ -3,21 +3,17 @@ use tonic::Response;
 use tonic::Status;
 use tonic::Streaming;
 
-use geth_common::protocol::{
-    streams::{
-        append_req, append_resp, read_event, read_resp, server::Streams, AppendReq, AppendResp,
-        BatchAppendReq, BatchAppendResp, CountOption, CurrentRevisionOption, DeleteReq, DeleteResp,
-        ReadEvent, ReadReq, ReadResp, RecordedEvent, RevisionOption, StreamOption, Success,
-        TombstoneReq, TombstoneResp,
-    },
-    Empty,
+use geth_common::protocol::streams::{
+    append_req, append_resp, read_resp, server::Streams, AppendReq, AppendResp, BatchAppendReq,
+    BatchAppendResp, CountOption, DeleteReq, DeleteResp, ReadEvent, ReadReq, ReadResp,
+    RecordedEvent, StreamOption, Success, TombstoneReq, TombstoneResp,
 };
 
 use crate::bus::Bus;
 use crate::messages::{AppendStream, ReadStream};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
-use geth_common::{Direction, ExpectedRevision, Propose, Revision};
+use geth_common::{Direction, ExpectedRevision, Propose};
 use uuid::Uuid;
 
 pub struct StreamsImpl {
@@ -167,15 +163,9 @@ impl Streams for StreamsImpl {
             })
             .await;
 
-        let next_revision = if let Some(revision) = resp.next_revision {
-            CurrentRevisionOption::CurrentRevision(revision)
-        } else {
-            CurrentRevisionOption::NoStream(Empty::default())
-        };
-
         let resp = AppendResp {
             result: Some(append_resp::Result::Success(Success {
-                current_revision_option: Some(next_revision),
+                current_revision_option: Some(resp.next_revision.into()),
                 position_option: Some(append_resp::success::PositionOption::Position(
                     resp.result.position.into(),
                 )),
@@ -185,13 +175,13 @@ impl Streams for StreamsImpl {
         Ok(Response::new(resp))
     }
 
-    async fn delete(&self, request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
+    async fn delete(&self, _request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
         todo!()
     }
 
     async fn tombstone(
         &self,
-        request: Request<TombstoneReq>,
+        _request: Request<TombstoneReq>,
     ) -> Result<Response<TombstoneResp>, Status> {
         todo!()
     }
@@ -200,7 +190,7 @@ impl Streams for StreamsImpl {
 
     async fn batch_append(
         &self,
-        request: Request<Streaming<BatchAppendReq>>,
+        _request: Request<Streaming<BatchAppendReq>>,
     ) -> Result<Response<Self::BatchAppendStream>, Status> {
         todo!()
     }
