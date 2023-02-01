@@ -1,16 +1,21 @@
 [package]
-name = "geth-mikoshi"
+name = "geth-common"
 version = "0.1.0"
 edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
-[dependencies.geth-common]
-path = "../geth-common"
 
 [dependencies.uuid]
 version = "1"
 features = ["v4"]
 
 [dependencies]
+tonic = "0.8"
+prost = "0.11"
+prost-types = "0.11"
+prost-derive = "0.11"
+byteorder = "1"
 bytes = "1"
-eyre = "0.6"
+
+[build-dependencies]
+tonic-build = "0.8"

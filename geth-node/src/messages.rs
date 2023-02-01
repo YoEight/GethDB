@@ -1,4 +1,5 @@
-use crate::types::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
+use crate::types::WriteResult;
+use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use geth_mikoshi::MikoshiStream;
 use uuid::Uuid;
 

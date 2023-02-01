@@ -8,6 +8,9 @@ edition = "2021"
 [dependencies.geth-mikoshi]
 path = "../geth-mikoshi"
 
+[dependencies.geth-common]
+path = "../geth-common"
+
 [dependencies.tokio]
 version = "1.20"
 features = ["full"]

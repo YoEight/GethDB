@@ -283,11 +283,39 @@ dependencies = [
 ]
 
 [[package]]
+name = "geth-client"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "prost",
+ "prost-derive",
+ "prost-types",
+ "tokio",
+ "tonic",
+ "tonic-build",
+]
+
+[[package]]
+name = "geth-common"
+version = "0.1.0"
+dependencies = [
+ "byteorder",
+ "bytes",
+ "prost",
+ "prost-derive",
+ "prost-types",
+ "tonic",
+ "tonic-build",
+ "uuid",
+]
+
+[[package]]
 name = "geth-mikoshi"
 version = "0.1.0"
 dependencies = [
  "bytes",
  "eyre",
+ "geth-common",
  "uuid",
 ]
 
@@ -300,6 +328,7 @@ dependencies = [
  "bytes",
  "eyre",
  "futures",
+ "geth-common",
  "geth-mikoshi",
  "prost",
  "prost-derive",

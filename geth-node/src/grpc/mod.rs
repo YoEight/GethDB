@@ -1,24 +1,7 @@
-pub mod generated {
-    pub mod google {
-        pub mod rpc {
-            include!(concat!(env!("OUT_DIR"), "/google.rpc.rs"));
-        }
-    }
-
-    pub mod geth {
-        pub mod protocol {
-            include!(concat!(env!("OUT_DIR"), "/event_store.client.rs"));
-            pub mod server {
-                include!(concat!(env!("OUT_DIR"), "/event_store.client.streams.rs"));
-            }
-        }
-    }
-}
-
 mod streams;
 
 use crate::bus::Bus;
-use generated::geth::protocol::server::streams_server::StreamsServer;
+use geth_common::protocol::streams::server::StreamsServer;
 use tonic::transport::{self, Server};
 
 pub fn start_server() {
