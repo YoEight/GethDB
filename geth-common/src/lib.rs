@@ -1,7 +1,9 @@
-use std::string::FromUtf8Error;
+use std::{fmt::Display, string::FromUtf8Error};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
+use protocol::streams::append_resp;
+use thiserror::Error;
 use uuid::Uuid;
 
 mod google {
@@ -42,6 +44,10 @@ pub mod protocol {
         };
         pub mod server {
             pub use super::super::super::geth::protocol::streams::streams_server::*;
+        }
+
+        pub mod client {
+            pub use super::super::super::geth::protocol::streams::streams_client::*;
         }
     }
 }
@@ -104,6 +110,16 @@ pub enum Revision<A> {
     Revision(A),
 }
 
+impl<D: Display> Display for Revision<D> {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Revision::Start => write!(f, "Start"),
+            Revision::End => write!(f, "End"),
+            Revision::Revision(v) => write!(f, "{}", v),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Direction {
     Forward,
@@ -135,7 +151,34 @@ pub enum ExpectedRevision {
     Revision(u64),
     NoStream,
     Any,
-    StreamsExists,
+    StreamExists,
+}
+
+impl Display for ExpectedRevision {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ExpectedRevision::Revision(v) => write!(f, "{}", v),
+            ExpectedRevision::NoStream => write!(f, "NoStream"),
+            ExpectedRevision::Any => write!(f, "Any"),
+            ExpectedRevision::StreamExists => write!(f, "StreamExists"),
+        }
+    }
+}
+
+#[derive(Error, Debug)]
+pub struct WrongExpectedRevisionError {
+    pub expected: ExpectedRevision,
+    pub current: ExpectedRevision,
+}
+
+impl Display for WrongExpectedRevisionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            f,
+            "Expected revision {} but got {} instead",
+            self.expected, self.current
+        )
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -190,10 +233,35 @@ impl From<protocol::streams::append_req::options::ExpectedStreamRevision> for Ex
                 ExpectedRevision::NoStream
             }
             protocol::streams::append_req::options::ExpectedStreamRevision::StreamExists(_) => {
-                ExpectedRevision::StreamsExists
+                ExpectedRevision::StreamExists
             }
             protocol::streams::append_req::options::ExpectedStreamRevision::Revision(v) => {
                 ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
+impl From<ExpectedRevision> for protocol::streams::append_req::options::ExpectedStreamRevision {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Any => {
+                protocol::streams::append_req::options::ExpectedStreamRevision::Any(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::NoStream => {
+                protocol::streams::append_req::options::ExpectedStreamRevision::NoStream(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::StreamExists => {
+                protocol::streams::append_req::options::ExpectedStreamRevision::StreamExists(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::Revision(v) => {
+                protocol::streams::append_req::options::ExpectedStreamRevision::Revision(v)
             }
         }
     }
@@ -228,6 +296,58 @@ impl From<Position> for protocol::streams::read_event::Position {
     }
 }
 
+impl From<append_resp::success::PositionOption> for Position {
+    fn from(value: append_resp::success::PositionOption) -> Self {
+        match value {
+            append_resp::success::PositionOption::NoPosition(_) => Position(0),
+            append_resp::success::PositionOption::Position(pos) => Position(pos.prepare_position),
+        }
+    }
+}
+
+impl From<append_resp::success::CurrentRevisionOption> for ExpectedRevision {
+    fn from(value: append_resp::success::CurrentRevisionOption) -> Self {
+        match value {
+            append_resp::success::CurrentRevisionOption::CurrentRevision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+            append_resp::success::CurrentRevisionOption::NoStream(_) => ExpectedRevision::NoStream,
+        }
+    }
+}
+
+impl From<append_resp::wrong_expected_version::CurrentRevisionOption> for ExpectedRevision {
+    fn from(value: append_resp::wrong_expected_version::CurrentRevisionOption) -> Self {
+        match value {
+            append_resp::wrong_expected_version::CurrentRevisionOption::CurrentNoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            append_resp::wrong_expected_version::CurrentRevisionOption::CurrentRevision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
+impl From<append_resp::wrong_expected_version::ExpectedRevisionOption> for ExpectedRevision {
+    fn from(value: append_resp::wrong_expected_version::ExpectedRevisionOption) -> Self {
+        match value {
+            append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedAny(_) => {
+                ExpectedRevision::Any
+            }
+            append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedNoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedStreamExists(
+                _,
+            ) => ExpectedRevision::StreamExists,
+            append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedRevision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
 impl From<Option<u64>> for protocol::streams::CurrentRevisionOption {
     fn from(value: Option<u64>) -> Self {
         if let Some(v) = value {
@@ -236,4 +356,10 @@ impl From<Option<u64>> for protocol::streams::CurrentRevisionOption {
             protocol::streams::CurrentRevisionOption::NoStream(protocol::Empty::default())
         }
     }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
+pub struct WriteResult {
+    pub next_expected_version: ExpectedRevision,
+    pub position: Position,
 }

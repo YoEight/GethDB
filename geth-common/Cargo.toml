@@ -16,6 +16,7 @@ prost-types = "0.11"
 prost-derive = "0.11"
 byteorder = "1"
 bytes = "1"
+thiserror = "1"
 
 [build-dependencies]
 tonic-build = "0.8"
