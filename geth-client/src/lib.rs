@@ -1,18 +1,26 @@
 mod types;
 
+use futures_util::TryStreamExt;
 use geth_common::{
-    protocol::streams::{
-        append_req::{self, ProposedMessage},
-        append_resp,
-        client::StreamsClient,
-        AppendReq,
+    protocol::{
+        self,
+        streams::{
+            append_req::{self, ProposedMessage},
+            append_resp,
+            client::StreamsClient,
+            read_req::{self, options::StreamOptions},
+            read_resp, AppendReq, ReadReq, ReadResp,
+        },
     },
-    ExpectedRevision, Propose, WriteResult, WrongExpectedRevisionError,
+    Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
+    WrongExpectedRevisionError,
 };
 use tonic::{
     codegen::StdError,
     transport::{self, Channel, Endpoint},
+    Request, Streaming,
 };
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Client {
@@ -79,5 +87,64 @@ impl Client {
                 Err(WrongExpectedRevisionError { expected, current }.into())
             }
         }
+    }
+
+    pub async fn read_stream(
+        &mut self,
+        stream_name: impl AsRef<str>,
+        start: Revision<u64>,
+        direction: Direction,
+    ) -> eyre::Result<ReadStream> {
+        let stream = self
+            .inner
+            .read(Request::new(ReadReq {
+                options: Some(read_req::Options {
+                    read_direction: direction.into(),
+                    resolve_links: false,
+                    uuid_option: Some(read_req::options::UuidOption {
+                        content: Some(read_req::options::uuid_option::Content::Structured(
+                            Default::default(),
+                        )),
+                    }),
+                    control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
+                    stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        stream_identifier: Some(stream_name.as_ref().into()),
+                        revision_option: Some(start.into()),
+                    })),
+                    count_option: Some(read_req::options::CountOption::Count(u64::MAX)),
+                    filter_option: Some(read_req::options::FilterOption::NoFilter(
+                        Default::default(),
+                    )),
+                }),
+            }))
+            .await?
+            .into_inner();
+
+        Ok(ReadStream { inner: stream })
+    }
+}
+
+pub struct ReadStream {
+    inner: Streaming<ReadResp>,
+}
+
+impl ReadStream {
+    pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
+        if let Some(item) = self.inner.try_next().await? {
+            if let read_resp::Content::Event(item) = item.content.unwrap() {
+                let item = item.event.unwrap();
+                return Ok(Some(Record {
+                    id: item
+                        .id
+                        .map_or_else(Uuid::nil, |x| x.try_into().unwrap_or_default()),
+                    stream: item.stream_identifier.unwrap().try_into()?,
+                    position: Position(item.prepare_position),
+                    revision: item.stream_revision,
+                    data: item.data.into(),
+                }));
+            }
+        }
+
+        Ok(None)
     }
 }

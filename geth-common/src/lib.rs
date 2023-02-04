@@ -138,11 +138,29 @@ impl TryFrom<i32> for Direction {
     }
 }
 
+impl From<Direction> for i32 {
+    fn from(value: Direction) -> Self {
+        match value {
+            Direction::Forward => 0,
+            Direction::Backward => 1,
+        }
+    }
+}
+
 pub struct WrongDirectionError;
 
 #[derive(Debug)]
 pub struct Propose {
     pub id: Uuid,
+    pub data: Bytes,
+}
+
+#[derive(Debug)]
+pub struct Record {
+    pub id: Uuid,
+    pub stream: String,
+    pub position: Position,
+    pub revision: u64,
     pub data: Bytes,
 }
 
@@ -182,7 +200,7 @@ impl Display for WrongExpectedRevisionError {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Position(u64);
+pub struct Position(pub u64);
 
 impl Position {
     pub fn raw(&self) -> u64 {
@@ -273,6 +291,16 @@ impl From<protocol::streams::RevisionOption> for Revision<u64> {
             protocol::streams::RevisionOption::Start(_) => Revision::Start,
             protocol::streams::RevisionOption::End(_) => Revision::End,
             protocol::streams::RevisionOption::Revision(v) => Revision::Revision(v),
+        }
+    }
+}
+
+impl From<Revision<u64>> for protocol::streams::RevisionOption {
+    fn from(value: Revision<u64>) -> Self {
+        match value {
+            Revision::Start => protocol::streams::RevisionOption::Start(Default::default()),
+            Revision::End => protocol::streams::RevisionOption::End(Default::default()),
+            Revision::Revision(v) => protocol::streams::RevisionOption::Revision(v),
         }
     }
 }
