@@ -9,5 +9,16 @@ edition = "2021"
 git = "https://github.com/YoEight/glyph.git"
 branch = "master"
 
-[dependencies]
+[dependencies.geth-client]
+path = "../geth-client"
 
+[dependencies.geth-common]
+path = "../geth-common"
+
+[dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[dependencies]
+eyre = "0.6"
+structopt = "0.3"
