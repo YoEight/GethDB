@@ -158,7 +158,7 @@ pub struct Propose {
 #[derive(Debug)]
 pub struct Record {
     pub id: Uuid,
-    pub stream: String,
+    pub stream_name: String,
     pub position: Position,
     pub revision: u64,
     pub data: Bytes,

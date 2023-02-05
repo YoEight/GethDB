@@ -102,7 +102,7 @@ impl Streams for StreamsImpl {
                             let raw_pos = record.position.raw();
                             let event = RecordedEvent {
                                 id: Some(record.id.into()),
-                                stream_identifier: Some(record.stream.into()),
+                                stream_identifier: Some(record.stream_name.into()),
                                 stream_revision: record.revision,
                                 prepare_position: raw_pos,
                                 commit_position: raw_pos,
