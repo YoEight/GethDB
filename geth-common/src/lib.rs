@@ -120,7 +120,7 @@ impl<D: Display> Display for Revision<D> {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Direction {
     Forward,
     Backward,
