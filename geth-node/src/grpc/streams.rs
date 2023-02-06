@@ -89,7 +89,11 @@ impl Streams for StreamsImpl {
             direction,
         };
 
-        let mut reader = self.bus.read_stream(msg).await.reader;
+        let mut reader = match self.bus.read_stream(msg).await {
+            Ok(resp) => resp.reader,
+            Err(e) => return Err(Status::unavailable(e.to_string())),
+        };
+
         let streaming = async_stream::stream! {
             loop {
                 match reader.next().await {
@@ -161,7 +165,8 @@ impl Streams for StreamsImpl {
                 events,
                 expected,
             })
-            .await;
+            .await
+            .map_err(|e| Status::unavailable(e.to_string()))?;
 
         let resp = AppendResp {
             result: Some(append_resp::Result::Success(Success {

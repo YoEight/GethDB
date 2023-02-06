@@ -1,7 +1,9 @@
 mod bus;
 mod grpc;
 pub mod messages;
+mod process;
 pub mod types;
+use bus::new_bus;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -13,5 +15,8 @@ async fn main() {
 
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
-    let _ = grpc::start_server().await;
+    let (bus, mailbox) = new_bus(500);
+
+    process::start(mailbox);
+    let _ = grpc::start_server(bus).await;
 }
