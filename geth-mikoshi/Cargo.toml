@@ -11,6 +11,10 @@ path = "../geth-common"
 version = "1"
 features = ["v4"]
 
+[dependencies.tokio]
+version = "1"
+features = ["full"]
+
 [dependencies]
 bytes = "1"
 eyre = "0.6"

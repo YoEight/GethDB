@@ -444,6 +444,7 @@ dependencies = [
  "chrono",
  "eyre",
  "geth-common",
+ "tokio",
  "uuid",
 ]
 

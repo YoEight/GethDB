@@ -4,12 +4,13 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use eyre::bail;
 use geth_common::{Position, Record};
+use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Debug)]
 struct Entry {
     pub id: Uuid,
-    pub stream: String,
+    pub stream_name: String,
     pub revision: u64,
     pub data: Bytes,
     pub position: Position,
@@ -30,10 +31,22 @@ impl Mikoshi {
     }
 }
 
-pub struct MikoshiStream {}
+pub struct MikoshiStream {
+    inner: mpsc::Receiver<Entry>,
+}
 
 impl MikoshiStream {
     pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
-        bail!("Not implemented")
+        if let Some(entry) = self.inner.recv().await {
+            return Ok(Some(Record {
+                id: entry.id,
+                stream_name: entry.stream_name,
+                position: entry.position,
+                revision: entry.revision,
+                data: entry.data,
+            }));
+        }
+
+        Ok(None)
     }
 }
