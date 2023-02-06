@@ -170,7 +170,7 @@ impl Streams for StreamsImpl {
 
         let resp = AppendResp {
             result: Some(append_resp::Result::Success(Success {
-                current_revision_option: Some(resp.next_revision.into()),
+                current_revision_option: Some(resp.result.next_expected_version.into()),
                 position_option: Some(append_resp::success::PositionOption::Position(
                     resp.result.position.into(),
                 )),

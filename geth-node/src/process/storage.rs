@@ -1,13 +1,11 @@
 use eyre::bail;
+use geth_mikoshi::Mikoshi;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
     oneshot,
 };
 
-use crate::{
-    bus::Mailbox,
-    messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted},
-};
+use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted};
 enum Msg {
     ReadStream(ReadStream, oneshot::Sender<ReadStreamCompleted>),
     AppendStream(AppendStream, oneshot::Sender<AppendStreamCompleted>),
@@ -52,5 +50,25 @@ pub fn start() -> StorageClient {
 }
 
 async fn service(mut mailbox: UnboundedReceiver<Msg>) {
-    while let Some(msg) = mailbox.recv().await {}
+    let mut mikoshi = Mikoshi::in_memory();
+
+    while let Some(msg) = mailbox.recv().await {
+        match msg {
+            Msg::ReadStream(params, callback) => {
+                let reader = mikoshi.read(params.stream_name, params.starting, params.direction);
+                let _ = callback.send(ReadStreamCompleted {
+                    correlation: params.correlation,
+                    reader,
+                });
+            }
+
+            Msg::AppendStream(params, callback) => {
+                let result = mikoshi.append(params.stream_name, params.expected, params.events);
+                let _ = callback.send(AppendStreamCompleted {
+                    correlation: params.correlation,
+                    result,
+                });
+            }
+        }
+    }
 }

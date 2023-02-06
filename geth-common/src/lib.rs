@@ -344,6 +344,20 @@ impl From<append_resp::success::CurrentRevisionOption> for ExpectedRevision {
     }
 }
 
+impl From<ExpectedRevision> for append_resp::success::CurrentRevisionOption {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                append_resp::success::CurrentRevisionOption::CurrentRevision(v)
+            }
+            ExpectedRevision::NoStream => {
+                append_resp::success::CurrentRevisionOption::NoStream(Default::default())
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
 impl From<append_resp::wrong_expected_version::CurrentRevisionOption> for ExpectedRevision {
     fn from(value: append_resp::wrong_expected_version::CurrentRevisionOption) -> Self {
         match value {

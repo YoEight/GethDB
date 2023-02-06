@@ -3,7 +3,7 @@ use std::collections::HashMap;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use eyre::bail;
-use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision};
+use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
@@ -34,7 +34,7 @@ impl Mikoshi {
         stream_name: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) {
+    ) -> WriteResult {
         let mut log_position = self.log.len();
         let rev = self.revisions.entry(stream_name.clone()).or_default();
         let indexes = self.indexes.entry(stream_name.clone()).or_default();
@@ -53,6 +53,11 @@ impl Mikoshi {
 
             *rev += 1;
             log_position += 1;
+        }
+
+        WriteResult {
+            next_expected_version: ExpectedRevision::Revision(*rev),
+            position: Position(log_position as u64),
         }
     }
 
@@ -87,6 +92,17 @@ async fn read_forward(
     starting: Revision<u64>,
     sender: mpsc::Sender<Entry>,
 ) {
+    for (rev, idx) in indexes.into_iter().enumerate() {
+        if let Revision::Revision(start) = starting {
+            if (rev as u64) < start {
+                continue;
+            }
+
+            if let Some(entry) = log.get(idx).cloned() {
+                let _ = sender.send(entry).await;
+            }
+        }
+    }
 }
 
 pub struct MikoshiStream {

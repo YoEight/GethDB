@@ -2,15 +2,12 @@ mod types;
 
 use futures_util::TryStreamExt;
 use geth_common::{
-    protocol::{
-        self,
-        streams::{
-            append_req::{self, ProposedMessage},
-            append_resp,
-            client::StreamsClient,
-            read_req::{self, options::StreamOptions},
-            read_resp, AppendReq, ReadReq, ReadResp,
-        },
+    protocol::streams::{
+        append_req::{self, ProposedMessage},
+        append_resp,
+        client::StreamsClient,
+        read_req::{self, options::StreamOptions},
+        read_resp, AppendReq, ReadReq, ReadResp,
     },
     Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
     WrongExpectedRevisionError,

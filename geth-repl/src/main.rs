@@ -1,6 +1,9 @@
+use std::{fs::File, path::PathBuf};
+
 use geth_client::Client;
-use geth_common::{Direction, Revision};
+use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use structopt::StructOpt;
+use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -31,11 +34,13 @@ async fn main() -> eyre::Result<()> {
                         Cmd::ReadStream(opts) => {
                             read_stream(&mut client, opts).await?;
                         }
+
+                        Cmd::AppendStream(opts) => {
+                            append_stream(&mut client, opts).await?;
+                        }
                     },
                 }
             }
-
-            _ => {}
         }
     }
 
@@ -48,14 +53,26 @@ enum Cmd {
     #[structopt(name = "read", about = "Read a stream")]
     ReadStream(ReadStream),
 
+    #[structopt(name = "append", about = "Append a stream")]
+    AppendStream(AppendStream),
+
     #[structopt(about = "Exit the application")]
     Exit,
 }
 
 #[derive(StructOpt, Debug)]
 struct ReadStream {
-    #[structopt(long)]
+    #[structopt(long, short)]
     stream_name: String,
+}
+
+#[derive(StructOpt, Debug)]
+struct AppendStream {
+    #[structopt(long, short)]
+    stream_name: String,
+
+    #[structopt(long, short = "f")]
+    json_file: PathBuf,
 }
 
 async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()> {
@@ -76,5 +93,26 @@ async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()
         println!("{}", serde_json::to_string_pretty(&record)?);
     }
 
+    println!();
+    Ok(())
+}
+
+async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Result<()> {
+    let file = File::open(params.json_file)?;
+    let events = serde_json::from_reader::<_, Vec<serde_json::Value>>(file)?;
+    let mut proposes = Vec::new();
+
+    for event in events {
+        proposes.push(Propose {
+            id: Uuid::new_v4(),
+            data: serde_json::to_vec(&event)?.into(),
+        });
+    }
+
+    client
+        .append_stream(params.stream_name, proposes, ExpectedRevision::Any)
+        .await?;
+
+    println!();
     Ok(())
 }

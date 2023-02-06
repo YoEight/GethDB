@@ -1,5 +1,4 @@
-use crate::types::WriteResult;
-use geth_common::{Direction, ExpectedRevision, Propose, Revision};
+use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 use geth_mikoshi::MikoshiStream;
 use uuid::Uuid;
 
@@ -28,5 +27,4 @@ pub struct AppendStream {
 pub struct AppendStreamCompleted {
     pub correlation: Uuid,
     pub result: WriteResult,
-    pub next_revision: Option<u64>,
 }
