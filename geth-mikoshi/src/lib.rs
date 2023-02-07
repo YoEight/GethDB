@@ -93,6 +93,7 @@ async fn read_forward(
     sender: mpsc::Sender<Entry>,
 ) {
     for (rev, idx) in indexes.into_iter().enumerate() {
+        tracing::info!("Reading from index {}", idx);
         if let Revision::Revision(start) = starting {
             if (rev as u64) < start {
                 continue;
@@ -100,6 +101,8 @@ async fn read_forward(
 
             if let Some(entry) = log.get(idx).cloned() {
                 let _ = sender.send(entry).await;
+            } else {
+                tracing::error!("Index {} is invalid", idx);
             }
         }
     }

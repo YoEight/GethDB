@@ -81,6 +81,7 @@ async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()
         .await?;
 
     while let Some(record) = stream.next().await? {
+        println!(">> {:?}", record);
         let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
         let record = serde_json::json!({
             "stream_name": record.stream_name,
@@ -109,10 +110,10 @@ async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Resul
         });
     }
 
-    client
+    let result = client
         .append_stream(params.stream_name, proposes, ExpectedRevision::Any)
         .await?;
 
-    println!();
+    println!(">> {:?}", result);
     Ok(())
 }

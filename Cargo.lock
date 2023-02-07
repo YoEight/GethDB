@@ -445,6 +445,7 @@ dependencies = [
  "eyre",
  "geth-common",
  "tokio",
+ "tracing",
  "uuid",
 ]
 

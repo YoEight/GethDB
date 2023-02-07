@@ -30,6 +30,7 @@ impl StreamsImpl {
 impl Streams for StreamsImpl {
     type ReadStream = BoxStream<'static, Result<ReadResp, Status>>;
     async fn read(&self, request: Request<ReadReq>) -> Result<Response<Self::ReadStream>, Status> {
+        tracing::info!("ReadStream request received!");
         let req = request.into_inner();
 
         let options = req
@@ -89,19 +90,25 @@ impl Streams for StreamsImpl {
             direction,
         };
 
+        tracing::info!("Managed to parse read stream successfully");
         let mut reader = match self.bus.read_stream(msg).await {
             Ok(resp) => resp.reader,
-            Err(e) => return Err(Status::unavailable(e.to_string())),
+            Err(e) => {
+                tracing::error!("Error when reading from mikoshi: {}", e);
+                return Err(Status::unavailable(e.to_string()));
+            }
         };
 
         let streaming = async_stream::stream! {
             loop {
                 match reader.next().await {
                     Err(e) => {
+                        tracing::error!("Error when streaming from mikoshi: {}", e);
                         yield Err(Status::unavailable(e.to_string()));
                         break;
                     }
                     Ok(record) => {
+                        tracing::info!("Record received: {:?}", record);
                         if let Some(record) = record {
                             let raw_pos = record.position.raw();
                             let event = RecordedEvent {
@@ -141,6 +148,7 @@ impl Streams for StreamsImpl {
         &self,
         request: Request<Streaming<AppendReq>>,
     ) -> Result<Response<AppendResp>, Status> {
+        tracing::info!("AppendStream request received!");
         let mut reader = request.into_inner();
         let mut events = Vec::new();
 
@@ -157,6 +165,7 @@ impl Streams for StreamsImpl {
             events.push(event);
         }
 
+        tracing::info!("Manage to parse append stream request");
         let resp = self
             .bus
             .append_stream(AppendStream {
@@ -177,6 +186,7 @@ impl Streams for StreamsImpl {
             })),
         };
 
+        tracing::info!("Append to stream successfully");
         Ok(Response::new(resp))
     }
 

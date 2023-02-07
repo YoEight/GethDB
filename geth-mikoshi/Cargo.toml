@@ -19,3 +19,4 @@ features = ["full"]
 bytes = "1"
 eyre = "0.6"
 chrono = "0.4"
+tracing = "*"
