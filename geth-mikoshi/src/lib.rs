@@ -98,12 +98,12 @@ async fn read_forward(
             if (rev as u64) < start {
                 continue;
             }
+        }
 
-            if let Some(entry) = log.get(idx).cloned() {
-                let _ = sender.send(entry).await;
-            } else {
-                tracing::error!("Index {} is invalid", idx);
-            }
+        if let Some(entry) = log.get(idx).cloned() {
+            let _ = sender.send(entry).await;
+        } else {
+            tracing::error!("Index {} is invalid", idx);
         }
     }
 }

@@ -4,7 +4,7 @@ pub mod messages;
 mod process;
 pub mod types;
 use bus::new_bus;
-use tracing::Level;
+use tracing::{debug, Level};
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
@@ -18,5 +18,6 @@ async fn main() {
     let (bus, mailbox) = new_bus(500);
 
     process::start(mailbox);
-    let _ = grpc::start_server(bus).await;
+    let result = grpc::start_server(bus).await;
+    debug!(">> {:?}", result);
 }
