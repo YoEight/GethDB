@@ -1,4 +1,7 @@
+mod manager;
+mod parsing;
 mod types;
+mod utils;
 
 use std::collections::HashMap;
 

@@ -1,13 +1,31 @@
+use crate::parsing::{read_string, read_uuid, write_string};
+use crate::utils::variable_string_length_bytes_size;
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use bytes::BufMut;
+use bytes::{Buf, BufMut, Bytes};
+use nom::{
+    bytes::complete::{tag, take_till1},
+    IResult,
+};
+use serde::de::DeserializeOwned;
+use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
+use std::path::Path;
 use uuid::Uuid;
 
-const CHUNK_SIZE: usize = 256 * 1024 * 1024;
-const CHUNK_FOOTER_SIZE: usize = 128;
-const CHUNK_HEADER_SIZE: usize = 128;
+pub const CHUNK_SIZE: usize = 256 * 1024 * 1024;
+pub const CHUNK_FOOTER_SIZE: usize = 128;
+pub const CHUNK_HEADER_SIZE: usize = 128;
+pub const CHUNK_FILE_SIZE: usize = aligned_size(CHUNK_SIZE + CHUNK_HEADER_SIZE + CHUNK_FOOTER_SIZE);
+
+const fn aligned_size(size: usize) -> usize {
+    if size % 4_096 == 0 {
+        return size;
+    }
+
+    (size / 4_096 + 1) * 4_096
+}
 
 bitflags! {
     pub struct PrepareFlags: u16 {
@@ -25,6 +43,58 @@ bitflags! {
     pub struct FooterFlags: u8 {
         const IS_COMPLETED = 0x1;
         const IS_MAP_12_BYTES = 0x2;
+    }
+}
+
+pub struct Checkpoint {
+    file: File,
+    cached: Option<i64>,
+}
+
+impl Checkpoint {
+    pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
+        let create_new = std::fs::metadata(path.as_ref()).is_err();
+        let file = OpenOptions::new()
+            .create_new(create_new)
+            .read(true)
+            .write(true)
+            .open(path)?;
+
+        let mut chk = Checkpoint { file, cached: None };
+
+        if create_new {
+            chk.write(0)?;
+            chk.cached = Some(0);
+        }
+
+        Ok(chk)
+    }
+
+    pub fn read(&mut self) -> io::Result<i64> {
+        if let Some(value) = self.cached {
+            return Ok(value);
+        }
+
+        self.file.seek(SeekFrom::Start(0))?;
+        let value = self.file.read_i64::<LittleEndian>()?;
+        self.cached = Some(value);
+
+        Ok(value)
+    }
+
+    pub fn write(&mut self, pos: i64) -> io::Result<()> {
+        self.cached = Some(pos);
+
+        Ok(())
+    }
+
+    pub fn flush(&mut self) -> io::Result<()> {
+        if let Some(value) = self.cached {
+            self.file.seek(SeekFrom::Start(0))?;
+            self.file.write_i64::<LittleEndian>(value)?;
+        }
+
+        Ok(())
     }
 }
 
@@ -227,13 +297,53 @@ impl ChunkFooter {
 }
 
 #[derive(Debug, Copy, Clone)]
+pub struct ChunkInfo {
+    pub seq_num: usize,
+    pub version: usize,
+}
+
+impl ChunkInfo {
+    pub fn parse(input: &str) -> IResult<&str, Self> {
+        let (input, _) = tag("chunk-")(input)?;
+        let (input, seq_str) = take_till1(|c: char| !c.is_ascii_digit())(input)?;
+
+        let seq_num = match seq_str.parse::<usize>() {
+            Ok(n) => n,
+            Err(_) => {
+                return Err(nom::Err::Failure(nom::error::Error::new(
+                    seq_str,
+                    nom::error::ErrorKind::ParseTo,
+                )))
+            }
+        };
+
+        let (input, _) = tag(".")(input)?;
+        let (input, ver_str) = take_till1(|c: char| !c.is_ascii_digit())(input)?;
+
+        let version = match ver_str.parse::<usize>() {
+            Ok(n) => n,
+            Err(_) => {
+                return Err(nom::Err::Failure(nom::error::Error::new(
+                    ver_str,
+                    nom::error::ErrorKind::ParseTo,
+                )))
+            }
+        };
+
+        let info = ChunkInfo { seq_num, version };
+
+        Ok((input, info))
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
 pub struct Chunk {
-    header: ChunkHeader,
-    footer: Option<ChunkFooter>,
+    pub header: ChunkHeader,
+    pub footer: Option<ChunkFooter>,
 }
 
 impl Chunk {
-    fn new(chunk_num: usize) -> Self {
+    pub fn new(chunk_num: usize) -> Self {
         let header = ChunkHeader {
             file_type: FileType::ChunkFile,
             version: 3,
@@ -250,11 +360,133 @@ impl Chunk {
         }
     }
 
-    fn start_position(&self) -> u64 {
+    pub fn start_position(&self) -> u64 {
         self.header.chunk_start_number as u64 * CHUNK_SIZE as u64
     }
 
-    fn logical_position(&self, physical_pos: u64) -> u64 {
+    pub fn logical_position(&self, physical_pos: u64) -> u64 {
         physical_pos + self.start_position()
+    }
+}
+
+pub struct ProposedEvent {
+    // #[rune(get, set)]
+    // pub id: Uuid,
+    pub is_json: bool,
+    pub stream_id: String,
+    pub event_type: String,
+    pub expected_version: i64,
+    pub data: Bytes,
+    pub metadata: Bytes,
+}
+
+#[derive(Debug, Clone)]
+pub struct PrepareLog {
+    // #[rune(get, set)]
+    pub flags: PrepareFlags,
+    pub transaction_position: i64,
+    pub transaction_offset: i32,
+    pub expected_version: i64,
+    pub event_stream_id: String,
+    pub event_id: uuid::Uuid,
+    pub correlation_id: uuid::Uuid,
+    pub timestamp: i64,
+    pub event_type: String,
+    pub data: Bytes,
+    pub metadata: Bytes,
+}
+
+impl PrepareLog {
+    pub fn is_data_json(&self) -> bool {
+        self.flags.contains(PrepareFlags::IS_JSON)
+    }
+
+    pub fn data_as_json<A: DeserializeOwned>(&self) -> serde_json::Result<A> {
+        serde_json::from_slice(self.data.as_ref())
+    }
+
+    pub fn size_of_without_raw_bytes(&self, version: u8) -> usize {
+        let expected_version_size = if version == 0 { 4 } else { 8 };
+
+        2 + 8
+            + 4
+            + expected_version_size
+            + variable_string_length_bytes_size(self.event_stream_id.len())
+            + self.event_stream_id.len()
+            + 16
+            + 16
+            + 8
+            + variable_string_length_bytes_size(self.event_type.len())
+            + self.event_type.len()
+    }
+
+    pub fn read<R>(version: u8, mut src: R) -> io::Result<Self>
+    where
+        R: Buf,
+    {
+        let flags =
+            PrepareFlags::from_bits(src.get_u16_le()).expect("Invalid prepare flags parsing");
+        let transaction_position = src.get_i64_le();
+        let transaction_offset = src.get_i32_le();
+        let mut expected_version = if version == 0 {
+            src.get_i32_le() as i64
+        } else {
+            src.get_i64_le()
+        };
+
+        if version == 0 && expected_version == (i32::MAX as i64) - 1 {
+            expected_version = i64::MAX - 1;
+        }
+
+        let event_stream_id = read_string(&mut src)?;
+        let event_id = read_uuid(&mut src)?;
+        let correlation_id = read_uuid(&mut src)?;
+        let timestamp = src.get_i64_le();
+        let event_type = read_string(&mut src)?;
+
+        let data_len = src.get_i32_le() as usize;
+        let data = src.copy_to_bytes(data_len as usize);
+
+        let metadata_len = src.get_i32_le() as usize;
+        let metadata = src.copy_to_bytes(metadata_len as usize);
+
+        Ok(PrepareLog {
+            flags,
+            transaction_offset,
+            transaction_position,
+            expected_version,
+            event_stream_id,
+            event_id,
+            correlation_id,
+            timestamp,
+            event_type,
+            data,
+            metadata,
+        })
+    }
+
+    pub fn write(self, version: u8, log_position: i64, buffer: &mut bytes::BytesMut) {
+        buffer.put_u8(0); // prepare log record type.
+        buffer.put_u8(version); // record version.
+        buffer.put_u64_le(log_position as u64);
+        buffer.put_u16_le(self.flags.bits());
+        buffer.put_i64_le(self.transaction_position);
+        buffer.put_i32_le(self.transaction_offset);
+
+        if version == 0 {
+            buffer.put_i32_le(self.expected_version as i32);
+        } else {
+            buffer.put_i64_le(self.expected_version);
+        }
+
+        write_string(&self.event_stream_id, buffer);
+        buffer.extend_from_slice(self.event_id.as_bytes());
+        buffer.extend_from_slice(self.correlation_id.as_bytes());
+        buffer.put_i64_le(self.timestamp);
+        write_string(&self.event_type, buffer);
+        buffer.put_i32_le(self.data.len() as i32);
+        buffer.extend_from_slice(self.data.as_ref());
+        buffer.put_i32_le(self.metadata.len() as i32);
+        buffer.extend_from_slice(self.metadata.as_ref());
     }
 }
