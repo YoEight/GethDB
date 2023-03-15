@@ -6,6 +6,7 @@ use crate::utils::{chunk_filename_from, list_chunk_files, md5_hash_chunk_file};
 use byteorder::{LittleEndian, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Utc;
+use geth_common::Propose;
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -33,6 +34,7 @@ impl ChunkManager {
         let mut chunks = HashMap::<usize, Chunk>::new();
 
         db_root.push(path);
+        // Configuration
         std::fs::create_dir_all(db_root.as_path())?;
 
         // writer checkpoint.
@@ -44,9 +46,6 @@ impl ChunkManager {
         db_root.push("epoch.chk");
         let mut epoch_chk = Checkpoint::new(db_root.as_path())?;
         db_root.pop();
-
-        // Configuration
-        std::fs::create_dir_all(db_root.as_path())?;
 
         let mut all_chunks = list_chunk_files(db_root.as_path())?;
 
@@ -199,6 +198,17 @@ impl ChunkManager {
         Ok(self.chunks.get_mut(&chunk_num).expect("to be defined"))
     }
 
+    pub fn append_propose<Events>(
+        &mut self,
+        stream_id: String,
+        mut events: Events,
+    ) -> io::Result<()>
+    where
+        Events: Iterator<Item = Propose>,
+    {
+        Ok(())
+    }
+
     pub fn append_log_records<Events>(&mut self, mut events: Events) -> io::Result<()>
     where
         Events: Iterator<Item = ProposedEvent>,
@@ -234,7 +244,7 @@ impl ChunkManager {
                 transaction_offset: 0,
                 expected_version: event.expected_version,
                 event_stream_id: event.stream_id,
-                event_id: uuid::Uuid::new_v4(),
+                event_id: Uuid::new_v4(),
                 correlation_id,
                 timestamp,
                 event_type: event.event_type,
