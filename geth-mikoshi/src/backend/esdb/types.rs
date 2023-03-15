@@ -1,12 +1,10 @@
-use crate::parsing::{read_string, read_uuid, write_string};
-use crate::utils::variable_string_length_bytes_size;
+use crate::backend::esdb::parsing::{read_string, read_uuid, write_string};
+use crate::backend::esdb::utils::variable_string_length_bytes_size;
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{Buf, BufMut, Bytes};
-use nom::{
-    bytes::complete::{tag, take_till1},
-    IResult,
-};
+use nom::bytes::complete::{tag, take_till1};
+use nom::IResult;
 use serde::de::DeserializeOwned;
 use std::fs::{File, OpenOptions};
 use std::io;

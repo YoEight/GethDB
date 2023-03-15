@@ -1,4 +1,4 @@
-use crate::types::{Chunk, ChunkInfo, CHUNK_HEADER_SIZE};
+use crate::backend::esdb::types::{Chunk, ChunkInfo, CHUNK_HEADER_SIZE};
 use md5::Digest;
 use std::cmp::min;
 use std::collections::HashMap;

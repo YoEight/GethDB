@@ -1,26 +1,30 @@
-mod esdb;
-mod in_memory;
-
-use crate::backend::in_memory::InMemoryBackend;
+use crate::backend::Backend;
 use crate::MikoshiStream;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 
-pub trait Backend {
+mod manager;
+pub mod parsing;
+pub mod types;
+mod utils;
+
+pub struct EsdbBackend {}
+
+impl Backend for EsdbBackend {
     fn append(
         &mut self,
         stream_name: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> WriteResult;
+    ) -> WriteResult {
+        todo!()
+    }
 
     fn read(
         &self,
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> MikoshiStream;
-}
-
-pub fn in_memory_backend() -> InMemoryBackend {
-    InMemoryBackend::default()
+    ) -> MikoshiStream {
+        todo!()
+    }
 }
