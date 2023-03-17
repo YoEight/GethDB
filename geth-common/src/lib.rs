@@ -152,6 +152,7 @@ pub struct WrongDirectionError;
 #[derive(Debug)]
 pub struct Propose {
     pub id: Uuid,
+    pub r#type: String,
     pub data: Bytes,
 }
 

@@ -3,6 +3,7 @@ use crate::{Entry, MikoshiStream};
 use chrono::Utc;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
 use std::collections::HashMap;
+use std::io;
 use tokio::sync::mpsc;
 
 #[derive(Default)]
@@ -18,7 +19,7 @@ impl Backend for InMemoryBackend {
         stream_name: String,
         _expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> WriteResult {
+    ) -> io::Result<WriteResult> {
         let mut log_position = self.log.len();
         let rev = self.revisions.entry(stream_name.clone()).or_default();
         let indexes = self.indexes.entry(stream_name.clone()).or_default();
@@ -39,10 +40,10 @@ impl Backend for InMemoryBackend {
             log_position += 1;
         }
 
-        WriteResult {
+        Ok(WriteResult {
             next_expected_version: ExpectedRevision::Revision(*rev),
             position: Position(log_position as u64),
-        }
+        })
     }
 
     fn read(

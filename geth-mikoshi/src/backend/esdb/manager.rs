@@ -6,7 +6,7 @@ use crate::backend::esdb::utils::{chunk_filename_from, list_chunk_files, md5_has
 use byteorder::{LittleEndian, WriteBytesExt};
 use bytes::BytesMut;
 use chrono::Utc;
-use geth_common::Propose;
+use geth_common::{Position, Propose};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
@@ -209,7 +209,7 @@ impl ChunkManager {
         Ok(())
     }
 
-    pub fn append_log_records<Events>(&mut self, mut events: Events) -> io::Result<()>
+    pub fn append_log_records<Events>(&mut self, mut events: Events) -> io::Result<Position>
     where
         Events: Iterator<Item = ProposedEvent>,
     {
@@ -280,7 +280,9 @@ impl ChunkManager {
         }
 
         self.writer_chk.write(log_position)?;
-        self.writer_chk.flush()
+        self.writer_chk.flush()?;
+
+        Ok(Position(log_position as u64))
     }
 
     pub fn last_epoch_record(&mut self) -> io::Result<Option<()>> {

@@ -37,7 +37,8 @@ impl Mikoshi {
         expected: ExpectedRevision,
         events: Vec<Propose>,
     ) -> WriteResult {
-        self.backend.append(stream_name, expected, events)
+        // TODO - Implement better error handling.
+        self.backend.append(stream_name, expected, events).unwrap()
     }
 
     pub fn read(

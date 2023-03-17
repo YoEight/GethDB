@@ -227,8 +227,9 @@ fn parse_propose(req: AppendReq) -> Option<Propose> {
     if let append_req::Content::ProposedMessage(msg) = req.content? {
         let id = msg.id.and_then(|x| x.try_into().ok())?;
         let data = msg.data.into();
+        let r#type = msg.metadata.get("event-type").cloned().unwrap_or_default();
 
-        return Some(Propose { id, data });
+        return Some(Propose { id, data, r#type });
     }
 
     None
