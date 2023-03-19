@@ -1,3 +1,4 @@
+use crate::backend::esdb::index::StreamIndex;
 use crate::backend::esdb::manager::ChunkManager;
 use crate::backend::esdb::types::{
     Checkpoint, Chunk, ChunkFooter, ChunkHeader, FooterFlags, PrepareFlags, PrepareLog,
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, error};
 use uuid::Uuid;
 
+mod index;
 mod manager;
 pub mod parsing;
 pub mod types;
@@ -25,6 +27,7 @@ mod utils;
 
 pub struct EsdbBackend {
     revisions: HashMap<String, u64>,
+    stream_index: StreamIndex,
     #[allow(dead_code)]
     chunk_count: usize,
     #[allow(dead_code)]
@@ -122,6 +125,7 @@ impl EsdbBackend {
         };
 
         Ok(Self {
+            stream_index: StreamIndex::new(),
             revisions: Default::default(),
             chunk_count,
             db_root,
@@ -216,12 +220,7 @@ impl Backend for EsdbBackend {
         _expected: ExpectedRevision,
         events: Vec<Propose>,
     ) -> io::Result<WriteResult> {
-        let mut revision = self
-            .revisions
-            .get(stream_name.as_str())
-            .copied()
-            .unwrap_or_default();
-
+        let mut revision = self.stream_index.stream_current_revision(&stream_name);
         let mut log_position = self.writer_chk.read()?;
         debug!("Current log position: {}", log_position);
         let mut current_chunk = self.current_chunk()?;
@@ -234,6 +233,7 @@ impl Backend for EsdbBackend {
 
         for propose in events {
             let correlation_id = Uuid::new_v4();
+            let record_position = log_position;
             let mut flags: PrepareFlags = PrepareFlags::HAS_DATA
                 | PrepareFlags::TRANSACTION_START
                 | PrepareFlags::TRANSACTION_END
@@ -287,6 +287,9 @@ impl Backend for EsdbBackend {
             let current_position = self.ongoing_chunk_file.stream_position()?;
             physical_data_size = current_position as i32 - CHUNK_HEADER_SIZE as i32;
             log_position = current_chunk.logical_position(physical_data_size as u64) as i64;
+
+            self.stream_index.index(&stream_name, record_position);
+
             revision += 1;
         }
 
@@ -306,6 +309,11 @@ impl Backend for EsdbBackend {
         starting: Revision<u64>,
         direction: Direction,
     ) -> MikoshiStream {
-        todo!()
+        if let Some(events) = self.stream_index.stream_events(&stream_name) {
+            todo!("Implement fetching events from the transaction log");
+        }
+
+        // In this case it means the stream probably doesn't exist so we return an empty stream.
+        MikoshiStream::empty()
     }
 }

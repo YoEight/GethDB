@@ -56,6 +56,12 @@ pub struct MikoshiStream {
 }
 
 impl MikoshiStream {
+    pub fn empty() -> Self {
+        let (_, inner) = mpsc::channel(0);
+
+        Self { inner }
+    }
+
     pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
         if let Some(entry) = self.inner.recv().await {
             return Ok(Some(Record {

@@ -106,6 +106,7 @@ async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Resul
     for event in events {
         proposes.push(Propose {
             id: Uuid::new_v4(),
+            r#type: "<repl-type>".to_string(),
             data: serde_json::to_vec(&event)?.into(),
         });
     }
