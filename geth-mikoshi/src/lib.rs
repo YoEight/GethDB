@@ -42,12 +42,12 @@ impl Mikoshi {
     }
 
     pub fn read(
-        &self,
+        &mut self,
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
     ) -> MikoshiStream {
-        self.backend.read(stream_name, starting, direction)
+        self.backend.read(stream_name, starting, direction).unwrap()
     }
 }
 
@@ -58,6 +58,18 @@ pub struct MikoshiStream {
 impl MikoshiStream {
     pub fn empty() -> Self {
         let (_, inner) = mpsc::channel(0);
+
+        Self { inner }
+    }
+
+    pub fn from_vec(entries: Vec<Entry>) -> Self {
+        let (mut sender, inner) = mpsc::channel(entries.len());
+
+        tokio::spawn(async move {
+            for entry in entries {
+                let _ = sender.send(entry).await;
+            }
+        });
 
         Self { inner }
     }

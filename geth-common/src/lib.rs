@@ -110,6 +110,16 @@ pub enum Revision<A> {
     Revision(A),
 }
 
+impl Revision<u64> {
+    pub fn is_greater_than(&self, rev: u64) -> bool {
+        match self {
+            Revision::Start => false,
+            Revision::End => true,
+            Revision::Revision(point) => *point > rev,
+        }
+    }
+}
+
 impl<D: Display> Display for Revision<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

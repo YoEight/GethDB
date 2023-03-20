@@ -1,5 +1,5 @@
 use crate::backend::esdb::parsing::{read_string, read_uuid, write_string};
-use crate::backend::esdb::utils::variable_string_length_bytes_size;
+use crate::backend::esdb::utils::{chunk_filename_from, variable_string_length_bytes_size};
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{Buf, BufMut, Bytes};
@@ -9,7 +9,8 @@ use serde::de::DeserializeOwned;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
+use tracing::error;
 use uuid::Uuid;
 
 pub const CHUNK_SIZE: usize = 256 * 1024 * 1024;
@@ -334,14 +335,23 @@ impl ChunkInfo {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+// #[derive(Debug, Copy, Clone)]
 pub struct Chunk {
+    pub file: File,
     pub header: ChunkHeader,
     pub footer: Option<ChunkFooter>,
 }
 
 impl Chunk {
-    pub fn new(chunk_num: usize) -> Self {
+    pub fn new(mut dir: PathBuf, chunk_num: usize) -> io::Result<Self> {
+        dir.push(chunk_filename_from(chunk_num, 0));
+
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(dir.as_path())?;
+
         let header = ChunkHeader {
             file_type: FileType::ChunkFile,
             version: 3,
@@ -349,13 +359,72 @@ impl Chunk {
             chunk_start_number: chunk_num as i32,
             chunk_end_number: chunk_num as i32,
             is_scavenged: false,
-            chunk_id: uuid::Uuid::new_v4(),
+            chunk_id: Uuid::new_v4(),
         };
 
-        Self {
+        file.set_len(CHUNK_FILE_SIZE as u64)?;
+        header.write(&mut file)?;
+        file.flush()?;
+
+        Ok(Self {
+            file,
             header,
             footer: None,
+        })
+    }
+
+    pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
+        let mut file = OpenOptions::new()
+            .create_new(true)
+            .read(true)
+            .write(true)
+            .open(path)?;
+
+        let header = ChunkHeader::read(&mut file)?;
+        let footer = ChunkFooter::read(&mut file)?;
+
+        Ok(Self {
+            file,
+            header,
+            footer,
+        })
+    }
+
+    pub fn write(&mut self, content: Bytes) -> io::Result<i64> {
+        self.file.write_i32::<LittleEndian>(content.len() as i32)?;
+        self.file.write_all(content.as_ref())?;
+        self.file.write_i32::<LittleEndian>(content.len() as i32)?;
+
+        let raw_position = self.file.stream_position()?;
+        let local_log_position = raw_position - CHUNK_HEADER_SIZE as u64;
+
+        Ok(self.logical_position(local_log_position) as i64)
+    }
+
+    pub fn read(&mut self, log_position: i64) -> io::Result<PrepareLog> {
+        let physical_position =
+            log_position as u64 - self.start_position() + CHUNK_HEADER_SIZE as u64;
+
+        self.file.seek(SeekFrom::Start(physical_position))?;
+        let header_size = self.file.read_i32::<LittleEndian>()?;
+        let mut buffer = vec![0u8; header_size as usize];
+        self.file.read_exact(buffer.as_mut_slice())?;
+        let record = PrepareLog::read(1u8, Bytes::from(buffer))?;
+        let footer_size = self.file.read_i32::<LittleEndian>()?;
+
+        if header_size != footer_size {
+            error!(
+                "Record header and footer size don't match! {} != {}",
+                header_size, footer_size
+            );
+
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                "Record header and footer size don't match!",
+            ));
         }
+
+        Ok(record)
     }
 
     pub fn start_position(&self) -> u64 {

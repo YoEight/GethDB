@@ -15,11 +15,11 @@ pub trait Backend {
     ) -> io::Result<WriteResult>;
 
     fn read(
-        &self,
+        &mut self,
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> MikoshiStream;
+    ) -> io::Result<MikoshiStream>;
 }
 
 pub fn in_memory_backend() -> InMemoryBackend {

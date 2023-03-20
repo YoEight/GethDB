@@ -47,11 +47,11 @@ impl Backend for InMemoryBackend {
     }
 
     fn read(
-        &self,
+        &mut self,
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> MikoshiStream {
+    ) -> io::Result<MikoshiStream> {
         let (sender, inner) = mpsc::channel(500);
         let log = self.log.clone();
         let indexes = self
@@ -67,7 +67,7 @@ impl Backend for InMemoryBackend {
             }
         });
 
-        MikoshiStream { inner }
+        Ok(MikoshiStream { inner })
     }
 }
 
