@@ -4,7 +4,7 @@ use crate::backend::esdb::utils::{
 };
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nom::bytes::complete::{tag, take_till1};
 use nom::IResult;
 use serde::de::DeserializeOwned;
@@ -561,5 +561,95 @@ impl PrepareLog {
         buffer.extend_from_slice(self.data.as_ref());
         buffer.put_i32_le(self.metadata.len() as i32);
         buffer.extend_from_slice(self.metadata.as_ref());
+    }
+}
+
+#[derive(Debug, Clone)]
+pub enum SystemRecordType {
+    Invalid,
+    Epoch,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum SystemRecordFormat {
+    Invalid,
+    Binary,
+    Json,
+    Bson,
+}
+
+#[derive(Debug, Clone)]
+pub struct SystemLog {
+    pub timestamp: i64,
+    pub kind: SystemRecordType,
+    pub format: SystemRecordFormat,
+    pub data: Bytes,
+}
+
+impl SystemLog {
+    pub fn read<R>(mut src: R) -> io::Result<Self>
+    where
+        R: Buf,
+    {
+        let timestamp = src.get_i64_le();
+        let kind = match src.get_u8() {
+            0 => SystemRecordType::Invalid,
+            1 => SystemRecordType::Epoch,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unknown system record type",
+                ))
+            }
+        };
+        let format = match src.get_u8() {
+            0 => SystemRecordFormat::Invalid,
+            1 => SystemRecordFormat::Binary,
+            2 => SystemRecordFormat::Json,
+            3 => SystemRecordFormat::Bson,
+            _ => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    "Unknown system record format",
+                ))
+            }
+        };
+
+        // Reserved unused data.
+        let _ = src.get_i64_le();
+        let data_length = src.get_i32_le() as i64;
+        let data = src.copy_to_bytes(data_length as usize);
+
+        Ok(SystemLog {
+            timestamp,
+            kind,
+            format,
+            data,
+        })
+    }
+
+    pub fn write(&self, buf: &mut BytesMut) {
+        buf.put_i64_le(self.timestamp);
+
+        match self.kind {
+            SystemRecordType::Invalid => buf.put_u8(0),
+            SystemRecordType::Epoch => buf.put_u8(1),
+        }
+
+        match self.format {
+            SystemRecordFormat::Invalid => buf.put_u8(0),
+            SystemRecordFormat::Binary => buf.put_u8(1),
+            SystemRecordFormat::Json => buf.put_u8(2),
+            SystemRecordFormat::Bson => buf.put_u8(3),
+        }
+
+        // Reserved unused data.
+        buf.put_i64_le(0);
+        buf.put_i32_le(self.data.len() as i32);
+        buf.put_slice(self.data.as_ref());
+    }
+
+    pub fn is_json_format(&self) -> bool {
+        self.format == SystemRecordFormat::Json
     }
 }
