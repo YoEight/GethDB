@@ -109,6 +109,12 @@ impl ChunkManager {
             .expect("to be defined")
     }
 
+    fn current_chunk_local_raw_position(&mut self, log_position: i64) -> u64 {
+        self.current_chunk()
+            .header
+            .raw_position(log_position as u64) as u64
+    }
+
     pub fn log_position(&mut self) -> io::Result<i64> {
         self.writer.read()
     }
@@ -126,8 +132,7 @@ impl ChunkManager {
         let content = self.buffer.split().freeze();
 
         {
-            let current = self.current_chunk();
-            let raw_position = current.header.raw_position(log_position as u64) as usize;
+            let raw_position = self.current_chunk_local_raw_position(log_position) as usize;
 
             debug!("Starting switching to newer chunk...");
             debug!("Computed physical_data_size: {}", raw_position);
@@ -147,15 +152,17 @@ impl ChunkManager {
                 };
 
                 footer.write(&mut self.buffer);
+
+                let content = self.buffer.split().freeze();
+                let current = self.current_chunk();
+
                 current
                     .file
                     .seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
-                current
-                    .file
-                    .write_all(self.buffer.split().freeze().as_ref())?;
+                current.file.write_all(content.as_ref())?;
 
                 debug!("Start computing MD5 hash of '{:?}'...", current.file);
-                let hash = md5_hash_chunk_file(&current, &mut current.file)?;
+                let hash = current.md5_hash()?;
                 current.file.seek(SeekFrom::End(-16))?;
                 current.file.write_all(&hash)?;
                 footer.hash = hash;

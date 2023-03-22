@@ -11,7 +11,7 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
-struct Entry {
+pub struct Entry {
     pub id: Uuid,
     pub stream_name: String,
     pub revision: u64,

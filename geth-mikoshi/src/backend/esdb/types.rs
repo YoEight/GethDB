@@ -1,5 +1,7 @@
 use crate::backend::esdb::parsing::{read_string, read_uuid, write_string};
-use crate::backend::esdb::utils::{chunk_filename_from, variable_string_length_bytes_size};
+use crate::backend::esdb::utils::{
+    chunk_filename_from, md5_hash_chunk_file, variable_string_length_bytes_size,
+};
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{Buf, BufMut, Bytes};
@@ -433,6 +435,10 @@ impl Chunk {
 
     pub fn logical_position(&self, physical_pos: u64) -> u64 {
         physical_pos + self.start_position()
+    }
+
+    pub fn md5_hash(&mut self) -> io::Result<[u8; 16]> {
+        md5_hash_chunk_file(&mut self.file, self.footer.expect("to be defined"))
     }
 }
 

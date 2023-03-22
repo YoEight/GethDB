@@ -21,8 +21,10 @@ use uuid::Uuid;
 
 mod index;
 // mod manager;
+mod asynchronous;
 mod manager;
 pub mod parsing;
+mod synchronous;
 pub mod types;
 mod utils;
 

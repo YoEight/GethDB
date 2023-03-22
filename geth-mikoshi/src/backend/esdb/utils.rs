@@ -1,4 +1,4 @@
-use crate::backend::esdb::types::{Chunk, ChunkInfo, CHUNK_HEADER_SIZE};
+use crate::backend::esdb::types::{Chunk, ChunkFooter, ChunkInfo, CHUNK_HEADER_SIZE};
 use md5::Digest;
 use std::cmp::min;
 use std::collections::HashMap;
@@ -40,7 +40,7 @@ pub fn chunk_filename_from(seq_number: usize, version: usize) -> String {
     format!("chunk-{:06}.{:06}", seq_number, version)
 }
 
-pub fn md5_hash_chunk_file(chunk: &Chunk, file: &mut File) -> io::Result<[u8; 16]> {
+pub fn md5_hash_chunk_file(file: &mut File, footer: ChunkFooter) -> io::Result<[u8; 16]> {
     #[derive(Debug)]
     enum State {
         HeaderAndRecords,
@@ -50,7 +50,6 @@ pub fn md5_hash_chunk_file(chunk: &Chunk, file: &mut File) -> io::Result<[u8; 16
     let mut state = State::HeaderAndRecords;
     let mut buffer = [0u8; 4_096];
     let mut digest = md5::Md5::default();
-    let footer = chunk.footer.expect("to be defined");
 
     file.seek(SeekFrom::Start(0))?;
 
