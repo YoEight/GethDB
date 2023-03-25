@@ -5,9 +5,10 @@ use crate::backend::esdb::utils::{
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use chrono::{DateTime, Utc};
 use nom::bytes::complete::{tag, take_till1};
 use nom::IResult;
-use serde::de::DeserializeOwned;
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -651,5 +652,40 @@ impl SystemLog {
 
     pub fn is_json_format(&self) -> bool {
         self.format == SystemRecordFormat::Json
+    }
+}
+
+#[derive(Serialize, Deserialize, Debug)]
+#[serde(rename_all = "PascalCase")]
+pub struct EpochRecord {
+    #[serde(rename = "EpochId")]
+    pub id: Uuid,
+    pub leader_instance_id: Uuid,
+    #[serde(rename = "EpochPosition")]
+    pub position: i64,
+    #[serde(rename = "EpochNumber")]
+    pub number: u64,
+    #[serde(rename = "PrevEpochPosition")]
+    pub previous_position: i64,
+    #[serde(rename = "TimeStamp")]
+    pub time: DateTime<Utc>,
+}
+
+impl EpochRecord {
+    pub fn new(
+        id: Uuid,
+        leader_instance_id: Uuid,
+        number: u64,
+        position: i64,
+        last_epoch_position: i64,
+    ) -> Self {
+        Self {
+            id,
+            leader_instance_id,
+            position,
+            number,
+            previous_position: last_epoch_position,
+            time: Utc::now(),
+        }
     }
 }
