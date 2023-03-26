@@ -571,6 +571,7 @@ dependencies = [
  "eyre",
  "geth-client",
  "geth-common",
+ "geth-mikoshi",
  "glyph",
  "serde_json",
  "structopt",

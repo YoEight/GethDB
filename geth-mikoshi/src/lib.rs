@@ -1,6 +1,8 @@
 mod backend;
 
 use std::collections::HashMap;
+use std::io;
+use std::path::Path;
 
 use crate::backend::Backend;
 use bytes::Bytes;
@@ -22,13 +24,23 @@ pub struct Entry {
 
 pub struct Mikoshi {
     backend: Box<dyn Backend + Send + 'static>,
+    root: String,
 }
 
 impl Mikoshi {
     pub fn in_memory() -> Self {
         Self {
             backend: Box::new(backend::in_memory_backend()),
+            root: "<in memory>".to_string(),
         }
+    }
+
+    pub fn esdb(path: impl AsRef<Path>) -> io::Result<Self> {
+        let root = path.as_ref().to_string_lossy().to_string();
+        Ok(Self {
+            backend: Box::new(backend::esdb_backend(path)?),
+            root,
+        })
     }
 
     pub fn append(
@@ -48,6 +60,10 @@ impl Mikoshi {
         direction: Direction,
     ) -> MikoshiStream {
         self.backend.read(stream_name, starting, direction).unwrap()
+    }
+
+    pub fn root(&self) -> &str {
+        self.root.as_str()
     }
 }
 

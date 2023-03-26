@@ -6,6 +6,7 @@ use crate::MikoshiStream;
 use async_trait::async_trait;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 use std::io;
+use std::path::Path;
 
 pub trait Backend {
     fn append(
@@ -25,6 +26,10 @@ pub trait Backend {
 
 pub fn in_memory_backend() -> InMemoryBackend {
     InMemoryBackend::default()
+}
+
+pub fn esdb_backend(root: impl AsRef<Path>) -> io::Result<esdb::EsdbBackend> {
+    esdb::EsdbBackend::new(root)
 }
 
 #[async_trait::async_trait]

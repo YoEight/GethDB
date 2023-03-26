@@ -15,6 +15,9 @@ path = "../geth-client"
 [dependencies.geth-common]
 path = "../geth-common"
 
+[dependencies.geth-mikoshi]
+path = "../geth-mikoshi"
+
 [dependencies.tokio]
 version = "1"
 features = ["full"]

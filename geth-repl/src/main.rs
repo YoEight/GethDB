@@ -2,6 +2,7 @@ use std::{fs::File, path::PathBuf};
 
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
+use geth_mikoshi::Mikoshi;
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -9,7 +10,10 @@ use uuid::Uuid;
 async fn main() -> eyre::Result<()> {
     let options = glyph::Options::default();
     let mut inputs = glyph::in_memory_inputs(options)?;
-    let mut client = Client::new("http://[::1]:2113").await?;
+    let mut client = None;
+    let mut state = ReplState {
+        mikoshi_backend: Mikoshi::in_memory(),
+    };
 
     while let Some(input) = inputs.next_input()? {
         match input {
@@ -31,13 +35,34 @@ async fn main() -> eyre::Result<()> {
 
                     Ok(cmd) => match cmd {
                         Cmd::Exit => break,
+                        Cmd::Connect => {
+                            if client.is_none() {
+                                client = Some(Client::new("http://[::1]:2113").await?);
+                            }
+                        }
                         Cmd::ReadStream(opts) => {
-                            read_stream(&mut client, opts).await?;
+                            if let Some(client) = client.as_mut() {
+                                read_stream(client, opts).await?;
+                                continue;
+                            }
+
+                            println!("ERR: Not connected")
                         }
 
                         Cmd::AppendStream(opts) => {
-                            append_stream(&mut client, opts).await?;
+                            if let Some(client) = client.as_mut() {
+                                append_stream(client, opts).await?;
+                                continue;
+                            }
+
+                            println!("ERR: Not connected")
                         }
+
+                        Cmd::Mikoshi(cmd) => match cmd {
+                            MikoshiCmd::Root(args) => {
+                                mikoshi_root(&mut state, args)?;
+                            }
+                        },
                     },
                 }
             }
@@ -45,6 +70,10 @@ async fn main() -> eyre::Result<()> {
     }
 
     Ok(())
+}
+
+struct ReplState {
+    mikoshi_backend: Mikoshi,
 }
 
 #[derive(StructOpt, Debug)]
@@ -55,6 +84,12 @@ enum Cmd {
 
     #[structopt(name = "append", about = "Append a stream")]
     AppendStream(AppendStream),
+
+    #[structopt(name = "mikoshi", about = "Database files management")]
+    Mikoshi(MikoshiCmd),
+
+    #[structopt(name = "connect", about = "Connect to a GethDB node")]
+    Connect,
 
     #[structopt(about = "Exit the application")]
     Exit,
@@ -73,6 +108,18 @@ struct AppendStream {
 
     #[structopt(long, short = "f")]
     json_file: PathBuf,
+}
+
+#[derive(StructOpt, Debug)]
+enum MikoshiCmd {
+    #[structopt(name = "root", about = "database root folder")]
+    Root(MikoshiRoot),
+}
+
+#[derive(StructOpt, Debug)]
+struct MikoshiRoot {
+    #[structopt(long, short)]
+    directory: Option<PathBuf>,
 }
 
 async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()> {
@@ -116,5 +163,22 @@ async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Resul
         .await?;
 
     println!(">> {:?}", result);
+    Ok(())
+}
+
+fn mikoshi_root(state: &mut ReplState, args: MikoshiRoot) -> eyre::Result<()> {
+    match args.directory {
+        None => {
+            println!(">> {}", state.mikoshi_backend.root());
+            println!(">> {}", state.mikoshi_backend.root());
+        }
+        Some(dir) => {
+            let new_backend = Mikoshi::esdb(dir)?;
+            state.mikoshi_backend = new_backend;
+
+            println!(">> Mikoshi backend root directory was updated successfully");
+        }
+    }
+
     Ok(())
 }
