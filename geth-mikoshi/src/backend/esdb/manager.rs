@@ -1,9 +1,10 @@
 use crate::backend::esdb::types::{
-    Checkpoint, Chunk, ChunkFooter, ChunkInfo, FooterFlags, PrepareLog, CHUNK_FILE_SIZE,
-    CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
+    Checkpoint, Chunk, ChunkFooter, ChunkInfo, EpochRecord, FooterFlags, PrepareLog, SystemLog,
+    SystemRecordFormat, SystemRecordType, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE,
+    CHUNK_SIZE,
 };
 use crate::backend::esdb::utils::md5_hash_chunk_file;
-use bytes::BytesMut;
+use bytes::{BufMut, BytesMut};
 use std::collections::HashMap;
 use std::fs::{read_dir, OpenOptions};
 use std::io;
@@ -126,59 +127,85 @@ impl ChunkManager {
         Ok(())
     }
 
+    fn prepare_write(&mut self, log_position: i64, byte_count: usize) -> io::Result<()> {
+        let raw_position = self.current_chunk_local_raw_position(log_position) as usize;
+
+        if raw_position + byte_count + 8 > CHUNK_HEADER_SIZE + CHUNK_SIZE {
+            debug!("Starting switching to newer chunk...");
+
+            let physical_data_size = raw_position as i32 - CHUNK_HEADER_SIZE as i32;
+            let mut footer = ChunkFooter {
+                flags: FooterFlags::IS_COMPLETED | FooterFlags::IS_MAP_12_BYTES,
+                is_completed: true,
+                is_map_12bytes: true,
+                physical_data_size,
+                logical_data_size: physical_data_size as i64,
+                map_size: 0,
+                hash: [0u8; 16],
+            };
+
+            footer.write(&mut self.buffer);
+
+            let content = self.buffer.split().freeze();
+            let current = self.current_chunk();
+
+            current
+                .file
+                .seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
+            current.file.write_all(content.as_ref())?;
+
+            debug!("Start computing MD5 hash of '{:?}'...", current.file);
+            let hash = current.md5_hash()?;
+            current.file.seek(SeekFrom::End(-16))?;
+            current.file.write_all(&hash)?;
+            footer.hash = hash;
+            debug!("Complete");
+
+            let new_chunk = Chunk::new(self.root_fs.clone(), self.chunk_count)?;
+            self.chunk_count += 1;
+            self.writer.write(new_chunk.start_position() as i64)?;
+            self.current_chunk_idx += 1;
+            self.chunks.push(new_chunk);
+
+            debug!("Chunk switching completed");
+        }
+
+        Ok(())
+    }
+
     pub fn write_prepare_record(&mut self, prepare: PrepareLog) -> io::Result<i64> {
         let log_position = self.writer.read()?;
         prepare.write(1u8, log_position, &mut self.buffer);
         let content = self.buffer.split().freeze();
 
-        {
-            let raw_position = self.current_chunk_local_raw_position(log_position) as usize;
-
-            debug!("Starting switching to newer chunk...");
-            debug!("Computed physical_data_size: {}", raw_position);
-
-            // It means we need to create a new chunk because there no space in the current one.
-            // 8 stands for the 4bits we add at the beginning and end of the record when writing to a file.
-            if raw_position + content.len() + 8 > CHUNK_HEADER_SIZE + CHUNK_SIZE {
-                let physical_data_size = raw_position as i32 - CHUNK_HEADER_SIZE as i32;
-                let mut footer = ChunkFooter {
-                    flags: FooterFlags::IS_COMPLETED | FooterFlags::IS_MAP_12_BYTES,
-                    is_completed: true,
-                    is_map_12bytes: true,
-                    physical_data_size,
-                    logical_data_size: physical_data_size as i64,
-                    map_size: 0,
-                    hash: [0u8; 16],
-                };
-
-                footer.write(&mut self.buffer);
-
-                let content = self.buffer.split().freeze();
-                let current = self.current_chunk();
-
-                current
-                    .file
-                    .seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
-                current.file.write_all(content.as_ref())?;
-
-                debug!("Start computing MD5 hash of '{:?}'...", current.file);
-                let hash = current.md5_hash()?;
-                current.file.seek(SeekFrom::End(-16))?;
-                current.file.write_all(&hash)?;
-                footer.hash = hash;
-                debug!("Complete");
-
-                let new_chunk = Chunk::new(self.root_fs.clone(), self.chunk_count)?;
-                self.chunk_count += 1;
-                self.writer.write(new_chunk.start_position() as i64)?;
-                self.current_chunk_idx += 1;
-                self.chunks.push(new_chunk);
-            }
-        }
+        self.prepare_write(log_position, content.len())?;
 
         let log_position = self.current_chunk().write(content)?;
 
         self.writer.write(log_position)?;
+
+        Ok(log_position)
+    }
+
+    pub fn write_epoch_record(&mut self, record: EpochRecord) -> io::Result<i64> {
+        let log_position = self.writer.read()?;
+        let mut writer = self.buffer.clone().writer();
+        serde_json::to_writer(&mut writer, &record)?;
+
+        let record = SystemLog {
+            timestamp: record.time.timestamp(),
+            kind: SystemRecordType::Epoch,
+            format: SystemRecordFormat::Json,
+            data: writer.into_inner().freeze(),
+        };
+
+        record.write(&mut self.buffer);
+        let content = self.buffer.clone().freeze();
+
+        self.prepare_write(log_position, content.len())?;
+        let log_position = self.current_chunk().write(content)?;
+        self.writer.write(log_position)?;
+        self.flush()?;
 
         Ok(log_position)
     }
