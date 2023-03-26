@@ -593,7 +593,7 @@ dependencies = [
 [[package]]
 name = "glyph"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/glyph.git?branch=master#08d54d554ae36a21b43f52cec087ef43e2d4518c"
+source = "git+https://github.com/YoEight/glyph.git?branch=master#859b10b3053ceffe2b8053753b10bb6b0981048d"
 dependencies = [
  "bytes",
  "crossterm",

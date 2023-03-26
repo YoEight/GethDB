@@ -60,6 +60,7 @@ async fn main() -> eyre::Result<()> {
 
                         Cmd::Mikoshi(cmd) => match cmd {
                             MikoshiCmd::Root(args) => {
+                                // println!();
                                 mikoshi_root(&mut state, args)?;
                             }
                         },
@@ -169,7 +170,6 @@ async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Resul
 fn mikoshi_root(state: &mut ReplState, args: MikoshiRoot) -> eyre::Result<()> {
     match args.directory {
         None => {
-            println!(">> {}", state.mikoshi_backend.root());
             println!(">> {}", state.mikoshi_backend.root());
         }
         Some(dir) => {
