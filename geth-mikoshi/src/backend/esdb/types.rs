@@ -66,7 +66,7 @@ impl Checkpoint {
 
         if create_new {
             chk.write(0)?;
-            chk.cached = Some(0);
+            chk.flush()?;
         }
 
         Ok(chk)
@@ -378,7 +378,6 @@ impl Chunk {
 
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let mut file = OpenOptions::new()
-            .create_new(true)
             .read(true)
             .write(true)
             .open(path)?;
@@ -434,12 +433,20 @@ impl Chunk {
         self.header.chunk_start_number as u64 * CHUNK_SIZE as u64
     }
 
+    pub fn end_position(&self) -> u64 {
+        self.header.chunk_end_number as u64 * CHUNK_SIZE as u64
+    }
+
     pub fn logical_position(&self, physical_pos: u64) -> u64 {
         physical_pos + self.start_position()
     }
 
     pub fn md5_hash(&mut self) -> io::Result<[u8; 16]> {
         md5_hash_chunk_file(&mut self.file, self.footer.expect("to be defined"))
+    }
+
+    pub fn contains_log_position(&self, log_position: u64) -> bool {
+        log_position >= self.start_position() && log_position < self.end_position()
     }
 }
 

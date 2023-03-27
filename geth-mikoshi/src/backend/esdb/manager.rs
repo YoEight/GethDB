@@ -24,23 +24,17 @@ pub struct ChunkManager {
 
 impl ChunkManager {
     pub fn new(path: impl AsRef<Path>) -> io::Result<Self> {
-        let mut root_fs = PathBuf::new();
+        let root_fs = PathBuf::from(path.as_ref());
         let mut chunk_count = 0usize;
         let mut current_chunk_idx = 0usize;
 
         // Configuration
-        root_fs.push(path);
         std::fs::create_dir_all(root_fs.as_path())?;
 
         // writer checkpoint.
-        root_fs.push("writer.chk");
-        let mut writer = Checkpoint::new(root_fs.as_path())?;
-        root_fs.pop();
-
+        let mut writer = Checkpoint::new(root_fs.join("writer.chk"))?;
         // epoch checkpoint.
-        root_fs.push("epoch.chk");
-        let mut epoch = Checkpoint::new(root_fs.as_path())?;
-        root_fs.pop();
+        let mut epoch = Checkpoint::new(root_fs.join("epoch.chk"))?;
 
         let chunk_files = list_chunk_files(root_fs.as_path())?;
         let mut chunks = Vec::new();
@@ -49,25 +43,19 @@ impl ChunkManager {
             chunks.push(Chunk::new(root_fs.clone(), 0)?);
             chunk_count = 1;
         } else {
-            let last_chunk_idx = chunk_files.len() - 1;
             let log_position = writer.read()?;
             for (idx, chunk_file_name) in chunk_files.into_iter().enumerate() {
-                root_fs.push(chunk_file_name);
-                let mut chunk = Chunk::load(root_fs.as_path())?;
-                let chunk_start_number = chunk.header.chunk_start_number;
-                let chunk_end_number = chunk.header.chunk_end_number;
+                let mut chunk = Chunk::load(root_fs.join(chunk_file_name))?;
 
                 chunk_count = chunk.header.chunk_end_number as usize + 1;
-                root_fs.pop();
 
-                if idx == last_chunk_idx {
+                // Means that we are dealling with the ongoing chunk.
+                if chunk.contains_log_position(log_position as u64) {
                     // TODO - handle the case where it's a complete chunk.
                     // TODO - handle the case where it's full ongoing chunk.
                     // TODO - In both cases, we would need to create a new chunk on the spot.
 
-                    let local_log_position =
-                        log_position as u64 - chunk_start_number as u64 * CHUNK_SIZE as u64;
-                    let raw_position = CHUNK_HEADER_SIZE as u64 + local_log_position;
+                    let raw_position = chunk.header.raw_position(log_position as u64);
 
                     // Because that chunk if the ongoing chunk we move its offset next to
                     // available space.
@@ -83,8 +71,8 @@ impl ChunkManager {
             writer,
             epoch,
             root_fs,
-            current_chunk_idx: 0,
-            chunks: vec![],
+            current_chunk_idx,
+            chunks,
             chunk_count,
             buffer: BytesMut::new(),
         })

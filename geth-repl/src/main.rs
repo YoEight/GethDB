@@ -1,3 +1,4 @@
+use directories::UserDirs;
 use std::{fs::File, path::PathBuf};
 
 use geth_client::Client;
@@ -8,8 +9,9 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let options = glyph::Options::default();
-    let mut inputs = glyph::in_memory_inputs(options)?;
+    let user_dirs = directories::UserDirs::new().expect("to be defined");
+    let history_path = PathBuf::from(user_dirs.home_dir()).join(".geth-repl");
+    let mut inputs = glyph::file_backed_inputs(Default::default(), history_path)?;
     let mut client = None;
     let mut state = ReplState {
         mikoshi_backend: Mikoshi::in_memory(),
@@ -60,8 +62,15 @@ async fn main() -> eyre::Result<()> {
 
                         Cmd::Mikoshi(cmd) => match cmd {
                             MikoshiCmd::Root(args) => {
-                                // println!();
-                                mikoshi_root(&mut state, args)?;
+                                mikoshi_root(&user_dirs, &mut state, args)?;
+                            }
+
+                            MikoshiCmd::AppendStream(args) => {
+                                mikoshi_append_stream(&mut state, args)?;
+                            }
+
+                            MikoshiCmd::ReadStream(args) => {
+                                mikoshi_read_stream(&mut state, args).await?;
                             }
                         },
                     },
@@ -115,12 +124,18 @@ struct AppendStream {
 enum MikoshiCmd {
     #[structopt(name = "root", about = "database root folder")]
     Root(MikoshiRoot),
+
+    #[structopt(name = "append", about = "Append a stream")]
+    AppendStream(AppendStream),
+
+    #[structopt(name = "read", about = "Read a stream")]
+    ReadStream(ReadStream),
 }
 
 #[derive(StructOpt, Debug)]
 struct MikoshiRoot {
     #[structopt(long, short)]
-    directory: Option<PathBuf>,
+    directory: Option<String>,
 }
 
 async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()> {
@@ -167,17 +182,76 @@ async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Resul
     Ok(())
 }
 
-fn mikoshi_root(state: &mut ReplState, args: MikoshiRoot) -> eyre::Result<()> {
+fn mikoshi_root(
+    user_dirs: &UserDirs,
+    state: &mut ReplState,
+    args: MikoshiRoot,
+) -> eyre::Result<()> {
     match args.directory {
         None => {
             println!(">> {}", state.mikoshi_backend.root());
         }
+
         Some(dir) => {
-            let new_backend = Mikoshi::esdb(dir)?;
+            let mut path_buf = PathBuf::new();
+            for (idx, part) in dir.split(std::path::MAIN_SEPARATOR).enumerate() {
+                if idx == 0 && part == "~" {
+                    path_buf.push(user_dirs.home_dir());
+                } else {
+                    path_buf.push(part);
+                }
+            }
+
+            let new_backend = Mikoshi::esdb(path_buf)?;
             state.mikoshi_backend = new_backend;
 
             println!(">> Mikoshi backend root directory was updated successfully");
         }
+    }
+
+    Ok(())
+}
+
+fn mikoshi_append_stream(state: &mut ReplState, args: AppendStream) -> eyre::Result<()> {
+    let file = File::open(args.json_file)?;
+    let events = serde_json::from_reader::<_, Vec<serde_json::Value>>(file)?;
+    let mut proposes = Vec::new();
+
+    for event in events {
+        proposes.push(Propose {
+            id: Uuid::new_v4(),
+            r#type: "<repl-type>".to_string(),
+            data: serde_json::to_vec(&event)?.into(),
+        });
+    }
+
+    let result = state
+        .mikoshi_backend
+        .append(args.stream_name, ExpectedRevision::Any, proposes);
+
+    println!(">> {:?}", result);
+
+    Ok(())
+}
+
+async fn mikoshi_read_stream(state: &mut ReplState, args: ReadStream) -> eyre::Result<()> {
+    let mut stream =
+        state
+            .mikoshi_backend
+            .read(args.stream_name, Revision::Start, Direction::Forward);
+
+    while let Some(record) = stream.next().await? {
+        println!(">> {:?}", record);
+        let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+        let record = serde_json::json!({
+            "stream_name": record.stream_name,
+            "id": record.id,
+            "revision": record.revision,
+            "position": record.position.raw(),
+            "data": data,
+        });
+
+        println!("{}", serde_json::to_string_pretty(&record)?);
     }
 
     Ok(())
