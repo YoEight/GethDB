@@ -434,7 +434,7 @@ impl Chunk {
     }
 
     pub fn end_position(&self) -> u64 {
-        self.header.chunk_end_number as u64 * CHUNK_SIZE as u64
+        (self.header.chunk_end_number as u64 + 1) * CHUNK_SIZE as u64
     }
 
     pub fn logical_position(&self, physical_pos: u64) -> u64 {
