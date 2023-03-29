@@ -6,6 +6,7 @@ use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
+use geth_common::Record;
 use nom::bytes::complete::{tag, take_till1};
 use nom::IResult;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -340,6 +341,7 @@ impl ChunkInfo {
 
 // #[derive(Debug, Copy, Clone)]
 pub struct Chunk {
+    pub path: PathBuf,
     pub file: File,
     pub header: ChunkHeader,
     pub footer: Option<ChunkFooter>,
@@ -347,13 +349,13 @@ pub struct Chunk {
 
 impl Chunk {
     pub fn new(mut dir: PathBuf, chunk_num: usize) -> io::Result<Self> {
-        dir.push(chunk_filename_from(chunk_num, 0));
+        let path = dir.join(chunk_filename_from(chunk_num, 0));
 
         let mut file = OpenOptions::new()
             .create_new(true)
             .read(true)
             .write(true)
-            .open(dir.as_path())?;
+            .open(path.as_path())?;
 
         let header = ChunkHeader {
             file_type: FileType::ChunkFile,
@@ -370,6 +372,7 @@ impl Chunk {
         file.flush()?;
 
         Ok(Self {
+            path,
             file,
             header,
             footer: None,
@@ -377,15 +380,17 @@ impl Chunk {
     }
 
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
+        let path = PathBuf::from(path.as_ref());
         let mut file = OpenOptions::new()
             .read(true)
             .write(true)
-            .open(path)?;
+            .open(path.as_path())?;
 
         let header = ChunkHeader::read(&mut file)?;
         let footer = ChunkFooter::read(&mut file)?;
 
         Ok(Self {
+            path,
             file,
             header,
             footer,
@@ -401,6 +406,31 @@ impl Chunk {
         let local_log_position = raw_position - CHUNK_HEADER_SIZE as u64;
 
         Ok(self.logical_position(local_log_position) as i64)
+    }
+
+    pub fn set_cursor_at(&mut self, log_position: u64) -> io::Result<()> {
+        let physical_position =
+            log_position as u64 - self.start_position() + CHUNK_HEADER_SIZE as u64;
+
+        self.file.seek(SeekFrom::Start(physical_position))?;
+
+        Ok(())
+    }
+
+    pub fn read_record(&mut self, buffer: &mut BytesMut) -> io::Result<(RecordHeader, Bytes)> {
+        let pre_size = self.file.read_i32::<LittleEndian>()?;
+        Read::take(&self.file, pre_size as u64).read_exact(buffer.as_mut())?;
+        let mut content = buffer.split().freeze();
+        let post_size = self.file.read_i32::<LittleEndian>()?;
+
+        if pre_size != post_size {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidData,
+                format!("Corrupt chunk file {:?}", self.path.as_path()),
+            ));
+        }
+
+        Ok((RecordHeader::new(pre_size as usize, &mut content)?, content))
     }
 
     pub fn read(&mut self, log_position: i64) -> io::Result<PrepareLog> {
@@ -569,6 +599,40 @@ impl PrepareLog {
         buffer.extend_from_slice(self.data.as_ref());
         buffer.put_i32_le(self.metadata.len() as i32);
         buffer.extend_from_slice(self.metadata.as_ref());
+    }
+}
+
+#[derive(Debug, Copy, Clone)]
+pub struct RecordHeader {
+    pub size: usize,
+    pub r#type: RecordType,
+    pub version: u8,
+    pub log_position: u64,
+}
+
+impl RecordHeader {
+    pub fn new(size: usize, bytes: &mut Bytes) -> io::Result<Self> {
+        let r#type = match bytes.get_u8() {
+            0x00 => RecordType::Prepare,
+            0x01 => RecordType::Commit,
+            0x02 => RecordType::System,
+            x => {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!("Unknown record type {}", x),
+                ))
+            }
+        };
+
+        let version = bytes.get_u8();
+        let log_position = bytes.get_u64_le();
+
+        Ok(RecordHeader {
+            size,
+            r#type,
+            version,
+            log_position,
+        })
     }
 }
 

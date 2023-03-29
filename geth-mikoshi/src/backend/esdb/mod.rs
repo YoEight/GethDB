@@ -1,5 +1,5 @@
 use crate::backend::esdb::index::StreamIndex;
-use crate::backend::esdb::manager::ChunkManager;
+use crate::backend::esdb::manager::{ChunkManager, FullScan};
 use crate::backend::esdb::types::{
     Checkpoint, Chunk, ChunkFooter, ChunkHeader, FooterFlags, PrepareFlags, PrepareLog,
     ProposedEvent, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
@@ -125,40 +125,31 @@ impl Backend for EsdbBackend {
             return Ok(MikoshiStream::empty());
         }
 
-        if let Some(events) = self.stream_index.stream_events(&stream_name) {
-            let mut entries = Vec::new();
-            for (rev, log_position) in events.iter().copied().enumerate() {
-                if starting.is_greater_than(rev as u64) {
-                    continue;
-                }
+        let mut entries = Vec::new();
+        let end_log_position = self.manager.writer_checkpoint()? as u64;
 
-                let chunk = self.manager.chunk_from_logical_position(log_position);
+        let chunks = self
+            .manager
+            .chunks()
+            .iter()
+            .map(|c| c.path.file_name().unwrap().to_string_lossy().to_string())
+            .collect();
 
-                if chunk.is_none() {
-                    error!(
-                        "Log position is pointing to a chunk that doesn't exit: log_pos={}",
-                        log_position
-                    );
-                    panic!();
-                }
+        let mut full_scan = FullScan::new(
+            self.buffer.clone(),
+            self.manager.root(),
+            chunks,
+            end_log_position,
+        );
 
-                let chunk = chunk.unwrap();
-                let record = chunk.read(log_position)?;
-
-                entries.push(Entry {
-                    id: record.event_id,
-                    stream_name: stream_name.clone(),
-                    revision: rev as u64,
-                    data: record.data,
-                    position: Position(log_position as u64),
-                    created: Default::default(),
-                });
+        while let Some(entry) = full_scan.next()? {
+            if entry.stream_name != stream_name || starting.is_greater_than(entry.revision) {
+                continue;
             }
 
-            return Ok(MikoshiStream::from_vec(entries));
+            entries.push(entry);
         }
 
-        // In this case it means the stream probably doesn't exist so we return an empty stream.
-        Ok(MikoshiStream::empty())
+        return Ok(MikoshiStream::from_vec(entries));
     }
 }

@@ -1,12 +1,15 @@
 use crate::backend::esdb::types::{
-    Checkpoint, Chunk, ChunkFooter, ChunkInfo, EpochRecord, FooterFlags, PrepareLog, SystemLog,
-    SystemRecordFormat, SystemRecordType, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE,
-    CHUNK_SIZE,
+    Checkpoint, Chunk, ChunkFooter, ChunkInfo, EpochRecord, FooterFlags, PrepareLog, RecordType,
+    SystemLog, SystemRecordFormat, SystemRecordType, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE,
+    CHUNK_HEADER_SIZE, CHUNK_SIZE,
 };
 use crate::backend::esdb::utils::md5_hash_chunk_file;
+use crate::Entry;
 use bytes::{BufMut, BytesMut};
+use chrono::{DateTime, TimeZone, Utc};
+use geth_common::Position;
 use std::collections::HashMap;
-use std::fs::{read_dir, OpenOptions};
+use std::fs::{read_dir, File, OpenOptions};
 use std::io;
 use std::io::{Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
@@ -49,7 +52,7 @@ impl ChunkManager {
 
                 chunk_count = chunk.header.chunk_end_number as usize + 1;
 
-                // Means that we are dealling with the ongoing chunk.
+                // Means that we are dealing with the ongoing chunk.
                 if chunk.contains_log_position(log_position as u64) {
                     // TODO - handle the case where it's a complete chunk.
                     // TODO - handle the case where it's full ongoing chunk.
@@ -76,6 +79,18 @@ impl ChunkManager {
             chunk_count,
             buffer: BytesMut::new(),
         })
+    }
+
+    pub fn root(&self) -> PathBuf {
+        self.root_fs.clone()
+    }
+
+    pub fn chunks(&self) -> &Vec<Chunk> {
+        &self.chunks
+    }
+
+    pub fn writer_checkpoint(&mut self) -> io::Result<i64> {
+        self.writer.read()
     }
 
     pub fn chunk_from_logical_position(&mut self, log_position: i64) -> Option<&mut Chunk> {
@@ -229,4 +244,77 @@ fn list_chunk_files(root: impl AsRef<Path>) -> io::Result<Vec<String>> {
     files.sort();
 
     Ok(files)
+}
+
+pub struct FullScan {
+    buffer: BytesMut,
+    end_log_position: u64,
+    log_position: u64,
+    root: PathBuf,
+    chunks: Vec<String>,
+    chunk: Option<Chunk>,
+}
+
+impl FullScan {
+    pub fn new(
+        buffer: BytesMut,
+        root: PathBuf,
+        chunks: Vec<String>,
+        end_log_position: u64,
+    ) -> Self {
+        Self {
+            buffer,
+            end_log_position,
+            log_position: 0,
+            root,
+            chunks,
+            chunk: None,
+        }
+    }
+
+    pub fn next(&mut self) -> io::Result<Option<Entry>> {
+        loop {
+            if self.log_position == self.end_log_position {
+                return Ok(None);
+            }
+
+            // We check that the data we are looking for is still in the current chunk. Otherwise,
+            // we move to the next one.
+            if let Some(mut chunk) = self.chunk.take() {
+                if self.log_position < chunk.end_position() {
+                    self.chunk = Some(chunk);
+                }
+            }
+
+            // If no current chunk is allocated, we create a new one.
+            if self.chunk.is_none() {
+                let filename = self.chunks.remove(0);
+                let mut chunk = Chunk::load(self.root.join(filename))?;
+
+                chunk.set_cursor_at(self.log_position)?;
+                self.chunk = Some(chunk);
+            }
+
+            let chunk = self.chunk.as_mut().unwrap();
+            let (header, record) = chunk.read_record(&mut self.buffer)?;
+            let next_record_log_position = header.log_position + header.size as u64 + 8;
+
+            self.log_position = next_record_log_position;
+
+            if header.r#type != RecordType::Prepare {
+                continue;
+            }
+
+            let prepare = PrepareLog::read(1u8, record)?;
+
+            return Ok(Some(Entry {
+                id: prepare.event_id,
+                stream_name: prepare.event_stream_id,
+                revision: prepare.expected_version as u64,
+                data: prepare.data,
+                position: Position(header.log_position),
+                created: Utc.timestamp_millis_opt(prepare.timestamp).unwrap(),
+            }));
+        }
+    }
 }
