@@ -398,9 +398,10 @@ impl Chunk {
     }
 
     pub fn write(&mut self, content: Bytes) -> io::Result<i64> {
-        self.file.write_i32::<LittleEndian>(content.len() as i32)?;
+        let length = content.len();
+        self.file.write_i32::<LittleEndian>(length as i32)?;
         self.file.write_all(content.as_ref())?;
-        self.file.write_i32::<LittleEndian>(content.len() as i32)?;
+        self.file.write_i32::<LittleEndian>(length as i32)?;
 
         let raw_position = self.file.stream_position()?;
         let local_log_position = raw_position - CHUNK_HEADER_SIZE as u64;
@@ -426,7 +427,13 @@ impl Chunk {
         if pre_size != post_size {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
-                format!("Corrupt chunk file {:?}", self.path.as_path()),
+                format!(
+                    "Corrupt chunk {} != {} ({}): file {:?}",
+                    pre_size,
+                    post_size,
+                    content.len(),
+                    self.path.as_path()
+                ),
             ));
         }
 
@@ -576,10 +583,7 @@ impl PrepareLog {
         })
     }
 
-    pub fn write(self, version: u8, log_position: i64, buffer: &mut bytes::BytesMut) {
-        buffer.put_u8(0); // prepare log record type.
-        buffer.put_u8(version); // record version.
-        buffer.put_u64_le(log_position as u64);
+    pub fn write(self, version: u8, buffer: &mut bytes::BytesMut) {
         buffer.put_u16_le(self.flags.bits());
         buffer.put_i64_le(self.transaction_position);
         buffer.put_i32_le(self.transaction_offset);

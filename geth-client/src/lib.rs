@@ -134,6 +134,7 @@ impl ReadStream {
                     id: item
                         .id
                         .map_or_else(Uuid::nil, |x| x.try_into().unwrap_or_default()),
+                    r#type: "<todo>".to_string(),
                     stream_name: item.stream_identifier.unwrap().try_into()?,
                     position: Position(item.prepare_position),
                     revision: item.stream_revision,

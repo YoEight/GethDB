@@ -15,6 +15,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub id: Uuid,
+    pub r#type: String,
     pub stream_name: String,
     pub revision: u64,
     pub data: Bytes,
@@ -98,6 +99,7 @@ impl MikoshiStream {
                 position: entry.position,
                 revision: entry.revision,
                 data: entry.data,
+                r#type: entry.r#type,
             }));
         }
 

@@ -178,7 +178,11 @@ impl ChunkManager {
 
     pub fn write_prepare_record(&mut self, prepare: PrepareLog) -> io::Result<i64> {
         let log_position = self.writer.read()?;
-        prepare.write(1u8, log_position, &mut self.buffer);
+        self.buffer.put_u8(0);
+        self.buffer.put_u8(1);
+        self.buffer.put_i64_le(log_position);
+
+        prepare.write(1u8, &mut self.buffer);
         let content = self.buffer.split().freeze();
 
         self.prepare_write(log_position, content.len())?;
@@ -280,7 +284,7 @@ impl FullScan {
 
             // We check that the data we are looking for is still in the current chunk. Otherwise,
             // we move to the next one.
-            if let Some(mut chunk) = self.chunk.take() {
+            if let Some(chunk) = self.chunk.take() {
                 if self.log_position < chunk.end_position() {
                     self.chunk = Some(chunk);
                 }
@@ -309,6 +313,7 @@ impl FullScan {
 
             return Ok(Some(Entry {
                 id: prepare.event_id,
+                r#type: prepare.event_type,
                 stream_name: prepare.event_stream_id,
                 revision: prepare.expected_version as u64,
                 data: prepare.data,

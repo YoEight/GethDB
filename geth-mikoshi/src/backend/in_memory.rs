@@ -27,6 +27,7 @@ impl Backend for InMemoryBackend {
         for event in events {
             self.log.push(Entry {
                 id: event.id,
+                r#type: event.r#type,
                 stream_name: stream_name.clone(),
                 revision: *rev,
                 data: event.data,

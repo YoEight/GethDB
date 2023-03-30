@@ -159,7 +159,7 @@ impl From<Direction> for i32 {
 
 pub struct WrongDirectionError;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Propose {
     pub id: Uuid,
     pub r#type: String,
@@ -169,6 +169,7 @@ pub struct Propose {
 #[derive(Debug)]
 pub struct Record {
     pub id: Uuid,
+    pub r#type: String,
     pub stream_name: String,
     pub position: Position,
     pub revision: u64,

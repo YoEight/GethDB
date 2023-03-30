@@ -3,8 +3,9 @@ use std::io;
 
 #[cfg(test)]
 mod tests {
-    use crate::parsing::{read_string, write_string};
     use std::io::{self, Cursor, Read, Write};
+
+    use crate::backend::esdb::parsing::{read_string, write_string};
 
     #[test]
     fn string_iso_ser_de() -> io::Result<()> {
