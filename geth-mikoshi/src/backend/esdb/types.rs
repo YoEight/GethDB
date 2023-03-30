@@ -4,7 +4,7 @@ use crate::backend::esdb::utils::{
 };
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{buf, Buf, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use geth_common::Record;
 use nom::bytes::complete::{tag, take_till1};
@@ -420,8 +420,9 @@ impl Chunk {
 
     pub fn read_record(&mut self, buffer: &mut BytesMut) -> io::Result<(RecordHeader, Bytes)> {
         let pre_size = self.file.read_i32::<LittleEndian>()?;
-        Read::take(&self.file, pre_size as u64).read_exact(buffer.as_mut())?;
-        let mut content = buffer.split().freeze();
+        let mut local = vec![0u8; pre_size as usize];
+        self.file.read_exact(local.as_mut())?;
+        let mut content = Bytes::from(local);
         let post_size = self.file.read_i32::<LittleEndian>()?;
 
         if pre_size != post_size {
