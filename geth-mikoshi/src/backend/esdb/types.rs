@@ -8,8 +8,9 @@ use bytes::{buf, Buf, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 use geth_common::Record;
 use nom::bytes::complete::{tag, take_till1};
-use nom::IResult;
+use nom::{IResult, Or};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
@@ -158,6 +159,42 @@ impl ChunkHeader {
         Ok(())
     }
 
+    pub fn read_bis<R>(mut buf: R) -> eyre::Result<Self>
+    where
+        R: Buf,
+    {
+        let file_type = match buf.get_u8() {
+            1 => FileType::PTableFile,
+            2 => FileType::ChunkFile,
+            x => eyre::bail!("Unknown chunk file type '{}'", x),
+        };
+
+        let version = buf.get_u8();
+        let chunk_size = buf.get_i32_le();
+        let chunk_start_number = buf.get_i32_le();
+        let chunk_end_number = buf.get_i32_le();
+        let is_scavenged = buf.get_i32_le() > 0;
+
+        let mut chunk_id = [0u8; 16];
+        buf.copy_to_slice(&mut chunk_id);
+        // FIXME - I probably need to parse it as a windows UUID (namely GUID) instead of
+        // a regular, standard UUID format.
+        let chunk_id = match Uuid::from_slice(&chunk_id) {
+            Ok(id) => id,
+            Err(e) => eyre::bail!("Invalid chunk id format: {}", e),
+        };
+
+        Ok(Self {
+            file_type,
+            version,
+            chunk_size,
+            chunk_start_number,
+            chunk_end_number,
+            is_scavenged,
+            chunk_id,
+        })
+    }
+
     pub fn read<R>(buf: &mut R) -> io::Result<Self>
     where
         R: Read + Seek,
@@ -236,6 +273,47 @@ pub struct ChunkFooter {
 }
 
 impl ChunkFooter {
+    pub fn read_bis<R>(mut buf: R) -> eyre::Result<Option<Self>>
+    where
+        R: Buf,
+    {
+        let flags = FooterFlags::from_bits(buf.get_u8()).expect("valid footer flags");
+        let is_completed = flags.contains(FooterFlags::IS_COMPLETED);
+
+        if !is_completed {
+            return Ok(None);
+        }
+
+        let is_map_12bytes = flags.contains(FooterFlags::IS_MAP_12_BYTES);
+        let physical_data_size = buf.get_i32_le();
+        let logical_data_size = if is_map_12bytes {
+            buf.get_i64_le()
+        } else {
+            buf.get_i32_le() as i64
+        };
+
+        let map_size = buf.get_i32_le();
+
+        if is_map_12bytes {
+            buf.advance(92);
+        } else {
+            buf.advance(95);
+        }
+
+        let mut hash = [0u8; 16];
+        buf.copy_to_slice(&mut hash);
+
+        Ok(Some(ChunkFooter {
+            flags,
+            is_completed,
+            is_map_12bytes,
+            physical_data_size,
+            logical_data_size,
+            map_size,
+            hash,
+        }))
+    }
+
     pub fn read<R>(buf: &mut R) -> io::Result<Option<Self>>
     where
         R: Read + Seek,
@@ -305,6 +383,26 @@ pub struct ChunkInfo {
     pub version: usize,
 }
 
+impl PartialEq<Self> for ChunkInfo {
+    fn eq(&self, other: &Self) -> bool {
+        self.seq_num.eq(&other.seq_num)
+    }
+}
+
+impl PartialOrd<Self> for ChunkInfo {
+    fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
+        self.seq_num.partial_cmp(&other.seq_num)
+    }
+}
+
+impl Eq for ChunkInfo {}
+
+impl Ord for ChunkInfo {
+    fn cmp(&self, other: &Self) -> Ordering {
+        self.seq_num.cmp(&other.seq_num)
+    }
+}
+
 impl ChunkInfo {
     pub fn parse(input: &str) -> IResult<&str, Self> {
         let (input, _) = tag("chunk-")(input)?;
@@ -337,6 +435,70 @@ impl ChunkInfo {
 
         Ok((input, info))
     }
+}
+
+#[derive(Clone, Copy, Debug)]
+pub struct ChunkBis {
+    pub num: usize,
+    pub version: usize,
+    pub header: ChunkHeader,
+    pub footer: Option<ChunkFooter>,
+}
+
+impl ChunkBis {
+    pub fn new(num: usize) -> Self {
+        Self {
+            num,
+            version: 0,
+            header: ChunkHeader {
+                file_type: FileType::ChunkFile,
+                version: 3,
+                chunk_size: CHUNK_SIZE as i32,
+                chunk_start_number: num as i32,
+                chunk_end_number: num as i32,
+                is_scavenged: false,
+                chunk_id: Uuid::new_v4(),
+            },
+            footer: None,
+        }
+    }
+
+    pub fn from_info(info: ChunkInfo, header: ChunkHeader, footer: Option<ChunkFooter>) -> Self {
+        Self {
+            num: info.seq_num,
+            version: info.version,
+            header,
+            footer,
+        }
+    }
+
+    pub fn filename(&self) -> String {
+        chunk_filename_from(self.num, self.version)
+    }
+
+    pub fn local_physical_position(&self, log_position: u64) -> u64 {
+        self.header.local_physical_position(log_position)
+    }
+
+    pub fn raw_position(&self, log_position: u64) -> u64 {
+        self.header.raw_position(log_position)
+    }
+
+    pub fn start_position(&self) -> u64 {
+        self.header.start_position()
+    }
+
+    pub fn end_position(&self) -> u64 {
+        (self.header.chunk_end_number as u64 + 1) * CHUNK_SIZE as u64
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ChunkManagerBis {
+    pub count: usize,
+    pub chunks: Vec<ChunkBis>,
+    pub writer: u64,
+    pub epoch: u64,
 }
 
 // #[derive(Debug, Copy, Clone)]
@@ -420,9 +582,12 @@ impl Chunk {
 
     pub fn read_record(&mut self, buffer: &mut BytesMut) -> io::Result<(RecordHeader, Bytes)> {
         let pre_size = self.file.read_i32::<LittleEndian>()?;
-        let mut local = vec![0u8; pre_size as usize];
-        self.file.read_exact(local.as_mut())?;
-        let mut content = Bytes::from(local);
+
+        let mut local = buffer.clone().limit(pre_size as usize).writer();
+
+        self.file
+            .read_exact(&mut buffer.as_mut()[..pre_size as usize])?;
+        let mut content = buffer.split().freeze();
         let post_size = self.file.read_i32::<LittleEndian>()?;
 
         if pre_size != post_size {
