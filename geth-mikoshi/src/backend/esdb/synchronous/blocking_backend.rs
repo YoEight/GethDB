@@ -216,28 +216,16 @@ fn append_events(
             } else {
                 let new_chunk = ChunkBis::new(ongoing_chunk.num + 1);
                 let new_file = create_new_chunk_file(root, &new_chunk)?;
-                let physical_data_size =
-                    ongoing_chunk.raw_position(record_position) as i32 - CHUNK_HEADER_SIZE as i32;
-                let mut footer = ChunkFooter {
-                    flags: FooterFlags::IS_COMPLETED | FooterFlags::IS_MAP_12_BYTES,
-                    is_completed: true,
-                    is_map_12bytes: true,
-                    physical_data_size,
-                    logical_data_size: physical_data_size as i64,
-                    map_size: 0,
-                    hash: [0u8; 16],
-                };
-
-                footer.write(buffer);
+                let footer = ongoing_chunk.complete(buffer, record_position);
                 let content = buffer.split().freeze();
+
                 ongoing_chunk_file.seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
                 ongoing_chunk_file.write_all(content.as_ref())?;
 
                 debug!("Start computing MD5 hash of '{:?}'...", ongoing_chunk_file);
-                footer.hash = md5_hash_chunk_file(&mut ongoing_chunk_file, footer)?;
+                ongoing_chunk.update_hash(md5_hash_chunk_file(&mut ongoing_chunk_file, footer)?);
                 debug!("Complete");
 
-                ongoing_chunk.footer = Some(footer);
                 manager.update_chunk(ongoing_chunk);
                 manager.chunks.push(new_chunk);
                 ongoing_chunk = new_chunk;

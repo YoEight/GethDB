@@ -495,6 +495,31 @@ impl ChunkBis {
     pub fn contains_log_position(&self, log_position: u64) -> bool {
         log_position >= self.start_position() && log_position < self.end_position()
     }
+
+    pub fn complete(&mut self, buffer: &mut BytesMut, log_position: u64) -> ChunkFooter {
+        let physical_data_size = self.raw_position(log_position) as i32 - CHUNK_HEADER_SIZE as i32;
+
+        let mut footer = ChunkFooter {
+            flags: FooterFlags::IS_COMPLETED | FooterFlags::IS_MAP_12_BYTES,
+            is_completed: true,
+            is_map_12bytes: true,
+            physical_data_size,
+            logical_data_size: physical_data_size as i64,
+            map_size: 0,
+            hash: [0u8; 16],
+        };
+
+        footer.write(buffer);
+        self.footer = Some(footer);
+
+        footer
+    }
+
+    pub fn update_hash(&mut self, hash: [u8; 16]) {
+        if let Some(footer) = self.footer.as_mut() {
+            footer.hash = hash;
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
