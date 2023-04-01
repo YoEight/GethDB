@@ -548,6 +548,15 @@ impl ChunkManagerBis {
             }
         }
     }
+
+    pub fn new_chunk(&mut self) -> ChunkBis {
+        let new = ChunkBis::new(self.count);
+
+        self.chunks.push(new);
+        self.count += 1;
+
+        new
+    }
 }
 
 // #[derive(Debug, Copy, Clone)]

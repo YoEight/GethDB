@@ -3,10 +3,10 @@ use crate::backend::esdb::types::{
     FooterFlags, PrepareFlags, PrepareLog, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE,
     CHUNK_SIZE,
 };
-use crate::backend::esdb::utils::{chunk_filename_from, list_chunk_files, md5_hash_chunk_file};
+use crate::backend::esdb::utils::{chunk_filename_from, md5_hash_chunk_file};
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
-use geth_common::{ExpectedRevision, Propose, WriteResult};
+use geth_common::{ExpectedRevision, Position, Propose, WriteResult};
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io;
@@ -38,7 +38,7 @@ impl BlockingBackend {
         // epoch checkpoint.
         let mut epoch = Checkpoint::new(root.join("epoch.chk"))?;
 
-        let chunk_info = list_chunks(root.as_path())?;
+        let chunk_info = list_chunk_files(root.as_path())?;
         let mut chunks = Vec::new();
 
         if chunk_info.is_empty() {
@@ -69,9 +69,105 @@ impl BlockingBackend {
             buffer,
         })
     }
+
+    pub fn append_events(
+        &mut self,
+        stream_name: String,
+        expected: ExpectedRevision,
+        events: Vec<Propose>,
+    ) -> eyre::Result<WriteResult> {
+        let mut ongoing_chunk = self.manager.ongoing_chunk();
+        let mut ongoing_chunk_file =
+            open_chunk_file(&self.root, &ongoing_chunk, self.manager.writer)?;
+        let transaction_position = self.manager.writer as i64;
+
+        // TODO - Implement proper stream revision tracking;
+        // TODO - Implement optimistic concurrency check with the expected version parameter.
+        let mut revision = 0u64;
+
+        for (offset, propose) in events.into_iter().enumerate() {
+            let correlation_id = Uuid::new_v4();
+            let record_position = self.manager.writer;
+
+            // TODO - See how flags are set in implicit transactions.
+            let mut flags: PrepareFlags = PrepareFlags::HAS_DATA
+                | PrepareFlags::TRANSACTION_START
+                | PrepareFlags::TRANSACTION_END
+                | PrepareFlags::IS_COMMITTED
+                | PrepareFlags::IS_JSON;
+
+            // TODO - Implement proper weird Windows EPOCH time. I already done the work on Rust TCP client of old.
+            // I know the transaction log doesn't support UNIX EPOCH time but that weird
+            // Windows epoch that nobody uses besides windows.
+            let timestamp = Utc::now().timestamp();
+            let prepare = PrepareLog {
+                flags,
+                transaction_position,
+                transaction_offset: offset as i32,
+                expected_version: revision as i64,
+                event_stream_id: stream_name.clone(),
+                event_id: propose.id,
+                correlation_id,
+                timestamp,
+                event_type: propose.r#type,
+                data: propose.data,
+                metadata: bytes::Bytes::from(Vec::<u8>::default()),
+            };
+
+            // Record Header stuff
+            self.buffer.put_u8(0);
+            self.buffer.put_u8(1);
+            self.buffer.put_u64_le(record_position);
+            prepare.write(1u8, &mut self.buffer);
+
+            let record = self.buffer.split().freeze();
+            let size = record.len();
+
+            self.buffer.put_i32_le(size as i32);
+            self.buffer.put(record);
+            self.buffer.put_i32_le(size as i32);
+
+            let record = self.buffer.split().freeze();
+
+            self.manager.writer += record.len() as u64;
+
+            loop {
+                if ongoing_chunk.contains_log_position(self.manager.writer) {
+                    ongoing_chunk_file.write_all(record.as_ref())?;
+                    break;
+                } else {
+                    let new_chunk = self.manager.new_chunk();
+                    let new_file = create_new_chunk_file(&self.root, &new_chunk)?;
+                    let footer = ongoing_chunk.complete(&mut self.buffer, record_position);
+                    let content = self.buffer.split().freeze();
+
+                    ongoing_chunk_file.seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
+                    ongoing_chunk_file.write_all(content.as_ref())?;
+
+                    debug!("Start computing MD5 hash of '{:?}'...", ongoing_chunk_file);
+                    ongoing_chunk
+                        .update_hash(md5_hash_chunk_file(&mut ongoing_chunk_file, footer)?);
+                    debug!("Complete");
+
+                    self.manager.update_chunk(ongoing_chunk);
+                    ongoing_chunk = new_chunk;
+                    ongoing_chunk_file = new_file;
+                }
+            }
+
+            revision += 1;
+        }
+
+        self.writer.write(self.manager.writer as i64)?;
+
+        Ok(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(revision),
+            position: Position(self.manager.writer),
+        })
+    }
 }
 
-fn list_chunks(root: impl AsRef<Path>) -> io::Result<Vec<ChunkInfo>> {
+fn list_chunk_files(root: impl AsRef<Path>) -> io::Result<Vec<ChunkInfo>> {
     let mut entries = read_dir(root)?;
     let mut latest_versions = HashMap::<usize, ChunkInfo>::new();
 
@@ -145,113 +241,4 @@ fn open_chunk_file(root: &PathBuf, chunk: &ChunkBis, log_position: u64) -> io::R
     file.seek(SeekFrom::Start(chunk.raw_position(log_position)))?;
 
     Ok(file)
-}
-
-fn append_events(
-    root: &PathBuf,
-    buffer: &mut BytesMut,
-    manager: &mut ChunkManagerBis,
-    stream_name: String,
-    expected: ExpectedRevision,
-    events: Vec<Propose>,
-) -> eyre::Result<WriteResult> {
-    let mut ongoing_chunk = manager.ongoing_chunk();
-    let mut ongoing_chunk_file = open_chunk_file(root, &ongoing_chunk, manager.writer)?;
-    let mut write_plan = WritePlan::new(manager.writer);
-    let transaction_position = manager.writer as i64;
-
-    // TODO - Implement proper stream revision tracking;
-    let mut revision = 0u64;
-
-    for (offset, propose) in events.into_iter().enumerate() {
-        let correlation_id = Uuid::new_v4();
-        let record_position = manager.writer;
-
-        // TODO - See how flags are set in implicit transactions.
-        let mut flags: PrepareFlags = PrepareFlags::HAS_DATA
-            | PrepareFlags::TRANSACTION_START
-            | PrepareFlags::TRANSACTION_END
-            | PrepareFlags::IS_COMMITTED
-            | PrepareFlags::IS_JSON;
-
-        // TODO - Implement proper weird Windows EPOCH time. I already done the work on Rust TCP client of old.
-        // I know the transaction log doesn't support UNIX EPOCH time but that weird
-        // Windows epoch that nobody uses besides windows.
-        let timestamp = Utc::now().timestamp();
-        let prepare = PrepareLog {
-            flags,
-            transaction_position,
-            transaction_offset: offset as i32,
-            expected_version: revision as i64,
-            event_stream_id: stream_name.clone(),
-            event_id: propose.id,
-            correlation_id,
-            timestamp,
-            event_type: propose.r#type,
-            data: bytes::Bytes::from(propose.data.to_vec()),
-            metadata: bytes::Bytes::from(Vec::<u8>::default()),
-        };
-
-        // Record Header stuff
-        buffer.put_u8(0);
-        buffer.put_u8(1);
-        buffer.put_u64_le(record_position);
-        prepare.write(1u8, buffer);
-
-        let record = buffer.split().freeze();
-        let size = record.len();
-
-        buffer.put_i32_le(size as i32);
-        buffer.put(record);
-        buffer.put_i32_le(size as i32);
-
-        let record = buffer.split().freeze();
-
-        manager.writer += record.len() as u64;
-
-        loop {
-            if ongoing_chunk.contains_log_position(manager.writer) {
-                ongoing_chunk_file.write_all(record.as_ref())?;
-                break;
-            } else {
-                let new_chunk = ChunkBis::new(ongoing_chunk.num + 1);
-                let new_file = create_new_chunk_file(root, &new_chunk)?;
-                let footer = ongoing_chunk.complete(buffer, record_position);
-                let content = buffer.split().freeze();
-
-                ongoing_chunk_file.seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
-                ongoing_chunk_file.write_all(content.as_ref())?;
-
-                debug!("Start computing MD5 hash of '{:?}'...", ongoing_chunk_file);
-                ongoing_chunk.update_hash(md5_hash_chunk_file(&mut ongoing_chunk_file, footer)?);
-                debug!("Complete");
-
-                manager.update_chunk(ongoing_chunk);
-                manager.chunks.push(new_chunk);
-                ongoing_chunk = new_chunk;
-                ongoing_chunk_file = new_file;
-            }
-        }
-
-        revision += 1;
-    }
-
-    // TODO - Persist the writer checkpoint;
-    todo!()
-}
-
-struct WritePlan {
-    transaction_position: u64,
-    ongoing_chunk: Vec<Bytes>,
-    new_chunks: Vec<Bytes>,
-}
-
-impl WritePlan {
-    fn new(transaction_position: u64) -> Self {
-        Self {
-            transaction_position,
-            ongoing_chunk: vec![],
-            new_chunks: vec![],
-        }
-    }
 }
