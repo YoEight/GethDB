@@ -1,12 +1,17 @@
+use crate::backend::esdb::synchronous::fs::{
+    create_new_chunk_file, list_chunk_files, load_chunk, open_chunk_file,
+};
+use crate::backend::esdb::synchronous::query::full_scan::FullScan;
 use crate::backend::esdb::types::{
     Checkpoint, ChunkBis, ChunkFooter, ChunkHeader, ChunkInfo, ChunkManagerBis, FileType,
     FooterFlags, PrepareFlags, PrepareLog, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE,
     CHUNK_SIZE,
 };
 use crate::backend::esdb::utils::{chunk_filename_from, md5_hash_chunk_file};
+use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
-use geth_common::{ExpectedRevision, Position, Propose, WriteResult};
+use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io;
@@ -16,7 +21,7 @@ use std::path::{Path, PathBuf};
 use tracing::debug;
 use uuid::Uuid;
 
-pub struct BlockingBackend {
+pub struct BlockingEsdbBackend {
     root: PathBuf,
     manager: ChunkManagerBis,
     writer: Checkpoint,
@@ -24,7 +29,7 @@ pub struct BlockingBackend {
     buffer: BytesMut,
 }
 
-impl BlockingBackend {
+impl BlockingEsdbBackend {
     pub fn new(path: impl AsRef<Path>) -> eyre::Result<Self> {
         let root = PathBuf::from(path.as_ref());
         let mut buffer = BytesMut::new();
@@ -70,7 +75,7 @@ impl BlockingBackend {
         })
     }
 
-    pub fn append_events(
+    pub fn append(
         &mut self,
         stream_name: String,
         expected: ExpectedRevision,
@@ -159,86 +164,59 @@ impl BlockingBackend {
         }
 
         self.writer.write(self.manager.writer as i64)?;
+        self.writer.flush()?;
 
         Ok(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
             position: Position(self.manager.writer),
         })
     }
-}
 
-fn list_chunk_files(root: impl AsRef<Path>) -> io::Result<Vec<ChunkInfo>> {
-    let mut entries = read_dir(root)?;
-    let mut latest_versions = HashMap::<usize, ChunkInfo>::new();
+    pub fn read(
+        &mut self,
+        stream_name: String,
+        starting: Revision<u64>,
+        direction: Direction,
+    ) -> eyre::Result<BoxedSyncMikoshiStream> {
+        // TODO - Implement backward read.
 
-    while let Some(entry) = entries.next().transpose()? {
-        if let Some(filename) = entry.file_name().to_str() {
-            if let Ok((_, info)) = ChunkInfo::parse(filename) {
-                if let Some(entry) = latest_versions.get_mut(&info.seq_num) {
-                    if entry.version < info.version {
-                        *entry = info;
-                    }
-                } else {
-                    latest_versions.insert(info.seq_num, info);
-                }
-            }
+        if direction == Direction::Backward {
+            return Ok(Box::new(EmptyMikoshiStream));
         }
+
+        let mut full_scan = FullScan::new(
+            self.buffer.clone(),
+            self.root.clone(),
+            self.manager.chunks.clone(),
+            self.manager.writer as u64,
+        );
+
+        return Ok(Box::new(ReadStream {
+            stream_name,
+            starting,
+            inner: full_scan,
+        }));
     }
-
-    let mut files = latest_versions.into_values().collect::<Vec<ChunkInfo>>();
-
-    files.sort();
-
-    Ok(files)
 }
 
-fn create_new_chunk_file(root: &PathBuf, chunk: &ChunkBis) -> io::Result<File> {
-    let path = root.join(chunk.filename());
-
-    let mut file = OpenOptions::new()
-        .create_new(true)
-        .read(true)
-        .write(true)
-        .open(path.as_path())?;
-
-    file.set_len(CHUNK_FILE_SIZE as u64)?;
-    chunk.header.write(&mut file)?;
-
-    file.flush()?;
-
-    Ok(file)
+struct ReadStream {
+    stream_name: String,
+    starting: Revision<u64>,
+    inner: FullScan,
 }
 
-fn load_chunk(buffer: &mut BytesMut, root: &PathBuf, info: ChunkInfo) -> eyre::Result<ChunkBis> {
-    buffer.reserve(CHUNK_HEADER_SIZE);
+impl SyncMikoshiStream for ReadStream {
+    fn next(&mut self) -> eyre::Result<Option<Entry>> {
+        while let Some(entry) = self.inner.next()? {
+            if entry.stream_name != self.stream_name
+                || self.starting.is_greater_than(entry.revision)
+            {
+                continue;
+            }
 
-    unsafe {
-        buffer.set_len(CHUNK_HEADER_SIZE);
+            return Ok(Some(entry));
+        }
+
+        Ok(None)
     }
-
-    let file = root.join(chunk_filename_from(info.seq_num, info.version));
-
-    let mut file = OpenOptions::new().read(true).open(file.as_path())?;
-
-    file.seek(SeekFrom::Start(0))?;
-    file.read_exact(&mut buffer[..CHUNK_HEADER_SIZE])?;
-
-    let header = ChunkHeader::read_bis(&buffer[..CHUNK_HEADER_SIZE])?;
-
-    file.seek(SeekFrom::End(-(CHUNK_FOOTER_SIZE as i64)))?;
-    file.read_exact(&mut buffer[..CHUNK_FOOTER_SIZE])?;
-
-    let footer = ChunkFooter::read_bis(&buffer[..CHUNK_FOOTER_SIZE])?;
-
-    Ok(ChunkBis::from_info(info, header, footer))
-}
-
-fn open_chunk_file(root: &PathBuf, chunk: &ChunkBis, log_position: u64) -> io::Result<File> {
-    let mut file = OpenOptions::new()
-        .write(true)
-        .open(root.join(chunk.filename()))?;
-
-    file.seek(SeekFrom::Start(chunk.raw_position(log_position)))?;
-
-    Ok(file)
 }

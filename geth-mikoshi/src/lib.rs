@@ -68,6 +68,20 @@ impl Mikoshi {
     }
 }
 
+pub type BoxedSyncMikoshiStream = Box<dyn SyncMikoshiStream + Sync + Send + 'static>;
+
+pub trait SyncMikoshiStream {
+    fn next(&mut self) -> eyre::Result<Option<Entry>>;
+}
+
+pub struct EmptyMikoshiStream;
+
+impl SyncMikoshiStream for EmptyMikoshiStream {
+    fn next(&mut self) -> eyre::Result<Option<Entry>> {
+        Ok(None)
+    }
+}
+
 pub struct MikoshiStream {
     inner: mpsc::Receiver<Entry>,
 }
