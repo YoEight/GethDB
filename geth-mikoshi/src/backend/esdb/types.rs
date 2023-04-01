@@ -491,6 +491,10 @@ impl ChunkBis {
     pub fn end_position(&self) -> u64 {
         (self.header.chunk_end_number as u64 + 1) * CHUNK_SIZE as u64
     }
+
+    pub fn contains_log_position(&self, log_position: u64) -> bool {
+        log_position >= self.start_position() && log_position < self.end_position()
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -499,6 +503,26 @@ pub struct ChunkManagerBis {
     pub chunks: Vec<ChunkBis>,
     pub writer: u64,
     pub epoch: u64,
+}
+
+impl ChunkManagerBis {
+    pub fn ongoing_chunk(&self) -> ChunkBis {
+        for chunk in &self.chunks {
+            if chunk.contains_log_position(self.writer) {
+                return *chunk;
+            }
+        }
+
+        panic!("We got a log position that doesn't belong to any chunk")
+    }
+
+    pub fn update_chunk(&mut self, changed: ChunkBis) {
+        for chunk in self.chunks.iter_mut() {
+            if chunk.num == changed.num {
+                *chunk = changed;
+            }
+        }
+    }
 }
 
 // #[derive(Debug, Copy, Clone)]
@@ -582,8 +606,11 @@ impl Chunk {
 
     pub fn read_record(&mut self, buffer: &mut BytesMut) -> io::Result<(RecordHeader, Bytes)> {
         let pre_size = self.file.read_i32::<LittleEndian>()?;
+        buffer.reserve(pre_size as usize);
 
-        let mut local = buffer.clone().limit(pre_size as usize).writer();
+        unsafe {
+            buffer.set_len(pre_size as usize);
+        }
 
         self.file
             .read_exact(&mut buffer.as_mut()[..pre_size as usize])?;
