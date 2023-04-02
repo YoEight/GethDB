@@ -36,7 +36,7 @@ impl Mikoshi {
         }
     }
 
-    pub fn esdb(path: impl AsRef<Path>) -> io::Result<Self> {
+    pub fn esdb(path: impl AsRef<Path>) -> eyre::Result<Self> {
         let root = path.as_ref().to_string_lossy().to_string();
         Ok(Self {
             backend: Box::new(backend::esdb_backend(path)?),
@@ -49,9 +49,8 @@ impl Mikoshi {
         stream_name: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> WriteResult {
-        // TODO - Implement better error handling.
-        self.backend.append(stream_name, expected, events).unwrap()
+    ) -> eyre::Result<WriteResult> {
+        self.backend.append(stream_name, expected, events)
     }
 
     pub fn read(
@@ -59,8 +58,8 @@ impl Mikoshi {
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> MikoshiStream {
-        self.backend.read(stream_name, starting, direction).unwrap()
+    ) -> eyre::Result<BoxedSyncMikoshiStream> {
+        self.backend.read(stream_name, starting, direction)
     }
 
     pub fn root(&self) -> &str {
@@ -90,6 +89,10 @@ impl MikoshiStream {
     pub fn empty() -> Self {
         let (_, inner) = mpsc::channel(0);
 
+        Self { inner }
+    }
+
+    pub fn new(inner: mpsc::Receiver<Entry>) -> Self {
         Self { inner }
     }
 

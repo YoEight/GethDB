@@ -81,9 +81,11 @@ pub fn load_chunk(
     Ok(ChunkBis::from_info(info, header, footer))
 }
 
+// TODO - Consider opening file in read or write only mode.
 pub fn open_chunk_file(root: &PathBuf, chunk: &ChunkBis, log_position: u64) -> io::Result<File> {
     let mut file = OpenOptions::new()
         .write(true)
+        .read(true)
         .open(root.join(chunk.filename()))?;
 
     file.seek(SeekFrom::Start(chunk.raw_position(log_position)))?;
@@ -121,3 +123,4 @@ pub fn read_chunk_record(
 
     Ok((RecordHeader::new(pre_size as usize, &mut content)?, content))
 }
+.join(chunk.filename())

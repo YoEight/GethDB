@@ -238,9 +238,9 @@ async fn mikoshi_read_stream(state: &mut ReplState, args: ReadStream) -> eyre::R
     let mut stream =
         state
             .mikoshi_backend
-            .read(args.stream_name, Revision::Start, Direction::Forward);
+            .read(args.stream_name, Revision::Start, Direction::Forward)?;
 
-    while let Some(record) = stream.next().await? {
+    while let Some(record) = stream.next()? {
         println!(">> {:?}", record);
         let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
         let record = serde_json::json!({

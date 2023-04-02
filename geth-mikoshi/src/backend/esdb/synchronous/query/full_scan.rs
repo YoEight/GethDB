@@ -56,8 +56,7 @@ impl FullScan {
             // If no current chunk is allocated, we create a new one.
             if self.work_item.is_none() {
                 let chunk = self.chunks.remove(0);
-                let file =
-                    open_chunk_file(&self.root.join(chunk.filename()), &chunk, self.log_position)?;
+                let file = open_chunk_file(&self.root, &chunk, self.log_position)?;
 
                 self.work_item = Some(WorkItem { chunk, file });
             }

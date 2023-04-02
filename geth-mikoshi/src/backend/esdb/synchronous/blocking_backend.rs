@@ -8,6 +8,7 @@ use crate::backend::esdb::types::{
     CHUNK_SIZE,
 };
 use crate::backend::esdb::utils::{chunk_filename_from, md5_hash_chunk_file};
+use crate::backend::Backend;
 use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
 use bytes::{BufMut, Bytes, BytesMut};
 use chrono::Utc;
@@ -74,8 +75,10 @@ impl BlockingEsdbBackend {
             buffer,
         })
     }
+}
 
-    pub fn append(
+impl Backend for BlockingEsdbBackend {
+    fn append(
         &mut self,
         stream_name: String,
         expected: ExpectedRevision,
@@ -172,7 +175,7 @@ impl BlockingEsdbBackend {
         })
     }
 
-    pub fn read(
+    fn read(
         &mut self,
         stream_name: String,
         starting: Revision<u64>,

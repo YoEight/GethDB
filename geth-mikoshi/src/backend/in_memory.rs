@@ -1,9 +1,12 @@
 use crate::backend::Backend;
-use crate::{Entry, MikoshiStream};
+use crate::{BoxedSyncMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
 use chrono::Utc;
+use eyre::bail;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
 use std::collections::HashMap;
 use std::io;
+use std::iter::Enumerate;
+use std::vec::IntoIter;
 use tokio::sync::mpsc;
 
 #[derive(Default)]
@@ -19,7 +22,7 @@ impl Backend for InMemoryBackend {
         stream_name: String,
         _expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> io::Result<WriteResult> {
+    ) -> eyre::Result<WriteResult> {
         let mut log_position = self.log.len();
         let rev = self.revisions.entry(stream_name.clone()).or_default();
         let indexes = self.indexes.entry(stream_name.clone()).or_default();
@@ -52,23 +55,44 @@ impl Backend for InMemoryBackend {
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> io::Result<MikoshiStream> {
-        let (sender, inner) = mpsc::channel(500);
-        let log = self.log.clone();
+    ) -> eyre::Result<BoxedSyncMikoshiStream> {
         let indexes = self
             .indexes
             .get(stream_name.as_str())
             .cloned()
-            .unwrap_or_default();
+            .unwrap_or_default()
+            .into_iter()
+            .enumerate();
 
-        tokio::spawn(async move {
-            match direction {
-                Direction::Backward => {}
-                Direction::Forward => read_forward(indexes, log, starting, sender).await,
+        Ok(Box::new(ReadStream {
+            indexes,
+            log: self.log.clone(),
+            starting,
+        }))
+    }
+}
+
+struct ReadStream {
+    indexes: Enumerate<IntoIter<usize>>,
+    log: Vec<Entry>,
+    starting: Revision<u64>,
+}
+
+impl SyncMikoshiStream for ReadStream {
+    fn next(&mut self) -> eyre::Result<Option<Entry>> {
+        while let Some((rev, idx)) = self.indexes.next() {
+            if self.starting.is_greater_than(rev as u64) {
+                continue;
             }
-        });
 
-        Ok(MikoshiStream { inner })
+            if let Some(entry) = self.log.get(idx).cloned() {
+                return Ok(Some(entry));
+            } else {
+                bail!("Index {} is invalid", idx);
+            }
+        }
+
+        Ok(None)
     }
 }
 

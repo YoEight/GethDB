@@ -2,7 +2,7 @@ mod esdb;
 mod in_memory;
 
 use crate::backend::in_memory::InMemoryBackend;
-use crate::MikoshiStream;
+use crate::{BoxedSyncMikoshiStream, MikoshiStream};
 use async_trait::async_trait;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 use std::io;
@@ -14,22 +14,22 @@ pub trait Backend {
         stream_name: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> io::Result<WriteResult>;
+    ) -> eyre::Result<WriteResult>;
 
     fn read(
         &mut self,
         stream_name: String,
         starting: Revision<u64>,
         direction: Direction,
-    ) -> io::Result<MikoshiStream>;
+    ) -> eyre::Result<BoxedSyncMikoshiStream>;
 }
 
 pub fn in_memory_backend() -> InMemoryBackend {
     InMemoryBackend::default()
 }
 
-pub fn esdb_backend(root: impl AsRef<Path>) -> io::Result<esdb::EsdbBackend> {
-    esdb::EsdbBackend::new(root)
+pub fn esdb_backend(root: impl AsRef<Path>) -> eyre::Result<esdb::BlockingEsdbBackend> {
+    esdb::BlockingEsdbBackend::new(root)
 }
 
 #[async_trait::async_trait]

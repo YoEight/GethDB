@@ -1,5 +1,5 @@
 use eyre::bail;
-use geth_mikoshi::Mikoshi;
+use geth_mikoshi::{Mikoshi, MikoshiStream};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
     oneshot,
@@ -55,15 +55,34 @@ async fn service(mut mailbox: UnboundedReceiver<Msg>) {
     while let Some(msg) = mailbox.recv().await {
         match msg {
             Msg::ReadStream(params, callback) => {
-                let reader = mikoshi.read(params.stream_name, params.starting, params.direction);
+                let (sender, inner) = mpsc::channel(500);
+                let mut stream = MikoshiStream::new(inner);
+                let mut reader = mikoshi
+                    .read(params.stream_name, params.starting, params.direction)
+                    .expect("to handle error properly");
+
+                // TODO - We will move to proper async I/O in the long run.
+                tokio::task::spawn_blocking(move || {
+                    while let Some(entry) = reader.next()? {
+                        if sender.blocking_send(entry).is_err() {
+                            break;
+                        }
+                    }
+
+                    Ok::<_, eyre::Report>(())
+                });
+
                 let _ = callback.send(ReadStreamCompleted {
                     correlation: params.correlation,
-                    reader,
+                    reader: stream,
                 });
             }
 
             Msg::AppendStream(params, callback) => {
-                let result = mikoshi.append(params.stream_name, params.expected, params.events);
+                let result = mikoshi
+                    .append(params.stream_name, params.expected, params.events)
+                    .expect("to handle error properly");
+
                 let _ = callback.send(AppendStreamCompleted {
                     correlation: params.correlation,
                     result,
