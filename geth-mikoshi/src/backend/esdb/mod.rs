@@ -1,5 +1,3 @@
-use crate::backend::esdb::index::StreamIndex;
-use crate::backend::esdb::manager::{ChunkManager, FullScan};
 use crate::backend::esdb::types::{
     Checkpoint, Chunk, ChunkFooter, ChunkHeader, FooterFlags, PrepareFlags, PrepareLog,
     ProposedEvent, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
@@ -19,10 +17,8 @@ use std::path::{Path, PathBuf};
 use tracing::{debug, error};
 use uuid::Uuid;
 
-mod index;
 // mod manager;
 mod asynchronous;
-mod manager;
 pub mod parsing;
 mod synchronous;
 pub mod types;

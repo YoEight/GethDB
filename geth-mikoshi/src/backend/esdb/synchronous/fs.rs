@@ -123,4 +123,3 @@ pub fn read_chunk_record(
 
     Ok((RecordHeader::new(pre_size as usize, &mut content)?, content))
 }
-.join(chunk.filename())
