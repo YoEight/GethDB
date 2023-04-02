@@ -1,8 +1,8 @@
 use crate::backend::esdb::types::{
-    Checkpoint, Chunk, ChunkFooter, ChunkHeader, FooterFlags, PrepareFlags, PrepareLog,
-    ProposedEvent, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
+    Checkpoint, ChunkFooter, ChunkHeader, FooterFlags, PrepareFlags, PrepareLog, ProposedEvent,
+    CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
 };
-use crate::backend::esdb::utils::{chunk_filename_from, list_chunk_files, md5_hash_chunk_file};
+use crate::backend::esdb::utils::chunk_filename_from;
 use crate::backend::Backend;
 use crate::{Entry, MikoshiStream};
 use byteorder::{LittleEndian, WriteBytesExt};

@@ -1,13 +1,12 @@
 use crate::backend::esdb::synchronous::fs::{
-    create_new_chunk_file, list_chunk_files, load_chunk, open_chunk_file,
+    create_new_chunk_file, list_chunk_files, load_chunk, md5_hash_chunk_file, open_chunk_file,
 };
 use crate::backend::esdb::synchronous::query::full_scan::FullScan;
 use crate::backend::esdb::types::{
-    Checkpoint, ChunkBis, ChunkFooter, ChunkHeader, ChunkInfo, ChunkManagerBis, FileType,
-    FooterFlags, PrepareFlags, PrepareLog, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE,
-    CHUNK_SIZE,
+    Checkpoint, Chunk, ChunkFooter, ChunkHeader, ChunkInfo, ChunkManager, FileType, FooterFlags,
+    PrepareFlags, PrepareLog, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
 };
-use crate::backend::esdb::utils::{chunk_filename_from, md5_hash_chunk_file};
+use crate::backend::esdb::utils::chunk_filename_from;
 use crate::backend::Backend;
 use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
 use bytes::{BufMut, Bytes, BytesMut};
@@ -24,7 +23,7 @@ use uuid::Uuid;
 
 pub struct BlockingEsdbBackend {
     root: PathBuf,
-    manager: ChunkManagerBis,
+    manager: ChunkManager,
     writer: Checkpoint,
     epoch: Checkpoint,
     buffer: BytesMut,
@@ -48,7 +47,7 @@ impl BlockingEsdbBackend {
         let mut chunks = Vec::new();
 
         if chunk_info.is_empty() {
-            let new_chunk = ChunkBis::new(0);
+            let new_chunk = Chunk::new(0);
             create_new_chunk_file(&root, &new_chunk)?;
             chunks.push(new_chunk);
         } else {
@@ -60,7 +59,7 @@ impl BlockingEsdbBackend {
             }
         }
 
-        let manager = ChunkManagerBis {
+        let manager = ChunkManager {
             count: chunk_count,
             chunks,
             writer: writer.read()? as u64,

@@ -1,5 +1,5 @@
 use crate::backend::esdb::synchronous::fs::{open_chunk_file, read_chunk_record};
-use crate::backend::esdb::types::{ChunkBis, PrepareLog, RecordType};
+use crate::backend::esdb::types::{Chunk, PrepareLog, RecordType};
 use crate::Entry;
 use bytes::BytesMut;
 use chrono::{TimeZone, Utc};
@@ -9,7 +9,7 @@ use std::io;
 use std::path::PathBuf;
 
 struct WorkItem {
-    chunk: ChunkBis,
+    chunk: Chunk,
     file: File,
 }
 
@@ -18,17 +18,12 @@ pub struct FullScan {
     end_log_position: u64,
     log_position: u64,
     root: PathBuf,
-    chunks: Vec<ChunkBis>,
+    chunks: Vec<Chunk>,
     work_item: Option<WorkItem>,
 }
 
 impl FullScan {
-    pub fn new(
-        buffer: BytesMut,
-        root: PathBuf,
-        chunks: Vec<ChunkBis>,
-        end_log_position: u64,
-    ) -> Self {
+    pub fn new(buffer: BytesMut, root: PathBuf, chunks: Vec<Chunk>, end_log_position: u64) -> Self {
         Self {
             buffer,
             end_log_position,

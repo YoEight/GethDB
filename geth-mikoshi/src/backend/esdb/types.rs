@@ -1,7 +1,5 @@
 use crate::backend::esdb::parsing::{read_string, read_uuid, write_string};
-use crate::backend::esdb::utils::{
-    chunk_filename_from, md5_hash_chunk_file, variable_string_length_bytes_size,
-};
+use crate::backend::esdb::utils::{chunk_filename_from, variable_string_length_bytes_size};
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
 use bytes::{buf, Buf, BufMut, Bytes, BytesMut};
@@ -438,14 +436,14 @@ impl ChunkInfo {
 }
 
 #[derive(Clone, Copy, Debug)]
-pub struct ChunkBis {
+pub struct Chunk {
     pub num: usize,
     pub version: usize,
     pub header: ChunkHeader,
     pub footer: Option<ChunkFooter>,
 }
 
-impl ChunkBis {
+impl Chunk {
     pub fn new(num: usize) -> Self {
         Self {
             num,
@@ -523,15 +521,15 @@ impl ChunkBis {
 }
 
 #[derive(Clone, Debug)]
-pub struct ChunkManagerBis {
+pub struct ChunkManager {
     pub count: usize,
-    pub chunks: Vec<ChunkBis>,
+    pub chunks: Vec<Chunk>,
     pub writer: u64,
     pub epoch: u64,
 }
 
-impl ChunkManagerBis {
-    pub fn ongoing_chunk(&self) -> ChunkBis {
+impl ChunkManager {
+    pub fn ongoing_chunk(&self) -> Chunk {
         for chunk in &self.chunks {
             if chunk.contains_log_position(self.writer) {
                 return *chunk;
@@ -541,7 +539,7 @@ impl ChunkManagerBis {
         panic!("We got a log position that doesn't belong to any chunk")
     }
 
-    pub fn update_chunk(&mut self, changed: ChunkBis) {
+    pub fn update_chunk(&mut self, changed: Chunk) {
         for chunk in self.chunks.iter_mut() {
             if chunk.num == changed.num {
                 *chunk = changed;
@@ -549,168 +547,13 @@ impl ChunkManagerBis {
         }
     }
 
-    pub fn new_chunk(&mut self) -> ChunkBis {
-        let new = ChunkBis::new(self.count);
+    pub fn new_chunk(&mut self) -> Chunk {
+        let new = Chunk::new(self.count);
 
         self.chunks.push(new);
         self.count += 1;
 
         new
-    }
-}
-
-// #[derive(Debug, Copy, Clone)]
-pub struct Chunk {
-    pub path: PathBuf,
-    pub file: File,
-    pub header: ChunkHeader,
-    pub footer: Option<ChunkFooter>,
-}
-
-impl Chunk {
-    pub fn new(mut dir: PathBuf, chunk_num: usize) -> io::Result<Self> {
-        let path = dir.join(chunk_filename_from(chunk_num, 0));
-
-        let mut file = OpenOptions::new()
-            .create_new(true)
-            .read(true)
-            .write(true)
-            .open(path.as_path())?;
-
-        let header = ChunkHeader {
-            file_type: FileType::ChunkFile,
-            version: 3,
-            chunk_size: CHUNK_SIZE as i32,
-            chunk_start_number: chunk_num as i32,
-            chunk_end_number: chunk_num as i32,
-            is_scavenged: false,
-            chunk_id: Uuid::new_v4(),
-        };
-
-        file.set_len(CHUNK_FILE_SIZE as u64)?;
-        header.write(&mut file)?;
-        file.flush()?;
-
-        Ok(Self {
-            path,
-            file,
-            header,
-            footer: None,
-        })
-    }
-
-    pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
-        let path = PathBuf::from(path.as_ref());
-        let mut file = OpenOptions::new()
-            .read(true)
-            .write(true)
-            .open(path.as_path())?;
-
-        let header = ChunkHeader::read(&mut file)?;
-        let footer = ChunkFooter::read(&mut file)?;
-
-        Ok(Self {
-            path,
-            file,
-            header,
-            footer,
-        })
-    }
-
-    pub fn write(&mut self, content: Bytes) -> io::Result<i64> {
-        let length = content.len();
-        self.file.write_i32::<LittleEndian>(length as i32)?;
-        self.file.write_all(content.as_ref())?;
-        self.file.write_i32::<LittleEndian>(length as i32)?;
-
-        let raw_position = self.file.stream_position()?;
-        let local_log_position = raw_position - CHUNK_HEADER_SIZE as u64;
-
-        Ok(self.logical_position(local_log_position) as i64)
-    }
-
-    pub fn set_cursor_at(&mut self, log_position: u64) -> io::Result<()> {
-        let physical_position =
-            log_position as u64 - self.start_position() + CHUNK_HEADER_SIZE as u64;
-
-        self.file.seek(SeekFrom::Start(physical_position))?;
-
-        Ok(())
-    }
-
-    pub fn read_record(&mut self, buffer: &mut BytesMut) -> io::Result<(RecordHeader, Bytes)> {
-        let pre_size = self.file.read_i32::<LittleEndian>()?;
-        buffer.reserve(pre_size as usize);
-
-        unsafe {
-            buffer.set_len(pre_size as usize);
-        }
-
-        self.file
-            .read_exact(&mut buffer.as_mut()[..pre_size as usize])?;
-        let mut content = buffer.split().freeze();
-        let post_size = self.file.read_i32::<LittleEndian>()?;
-
-        if pre_size != post_size {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                format!(
-                    "Corrupt chunk {} != {} ({}): file {:?}",
-                    pre_size,
-                    post_size,
-                    content.len(),
-                    self.path.as_path()
-                ),
-            ));
-        }
-
-        Ok((RecordHeader::new(pre_size as usize, &mut content)?, content))
-    }
-
-    pub fn read(&mut self, log_position: i64) -> io::Result<PrepareLog> {
-        let physical_position =
-            log_position as u64 - self.start_position() + CHUNK_HEADER_SIZE as u64;
-
-        self.file.seek(SeekFrom::Start(physical_position))?;
-        let header_size = self.file.read_i32::<LittleEndian>()?;
-        let mut buffer = vec![0u8; header_size as usize];
-        self.file.read_exact(buffer.as_mut_slice())?;
-        let record = PrepareLog::read(1u8, Bytes::from(buffer))?;
-        let footer_size = self.file.read_i32::<LittleEndian>()?;
-
-        if header_size != footer_size {
-            error!(
-                "Record header and footer size don't match! {} != {}",
-                header_size, footer_size
-            );
-
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidData,
-                "Record header and footer size don't match!",
-            ));
-        }
-
-        Ok(record)
-    }
-
-    pub fn start_position(&self) -> u64 {
-        self.header.chunk_start_number as u64 * CHUNK_SIZE as u64
-    }
-
-    pub fn end_position(&self) -> u64 {
-        (self.header.chunk_end_number as u64 + 1) * CHUNK_SIZE as u64
-    }
-
-    pub fn logical_position(&self, physical_pos: u64) -> u64 {
-        physical_pos + self.start_position()
-    }
-
-    pub fn md5_hash(&mut self) -> io::Result<[u8; 16]> {
-        md5_hash_chunk_file(&mut self.file, self.footer.expect("to be defined"))
-    }
-
-    pub fn contains_log_position(&self, log_position: u64) -> bool {
-        log_position >= self.start_position() && log_position < self.end_position()
     }
 }
 
