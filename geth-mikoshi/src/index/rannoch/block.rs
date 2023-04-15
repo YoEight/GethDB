@@ -52,6 +52,7 @@ pub struct Block {
 impl Block {
     pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
         Builder {
+            offset: 0,
             buffer,
             count: 0,
             block_size,
@@ -127,6 +128,7 @@ impl Block {
 }
 
 pub struct Builder<'a> {
+    offset: usize,
     buffer: &'a mut BytesMut,
     count: usize,
     block_size: usize,
@@ -134,7 +136,7 @@ pub struct Builder<'a> {
 
 impl<'a> Builder<'a> {
     pub fn add(&mut self, key: u64, revision: u64, position: u64) -> bool {
-        if self.buffer.len() + BLOCK_ENTRY_SIZE > self.block_size {
+        if self.size() + BLOCK_ENTRY_SIZE > self.block_size {
             return false;
         }
 
@@ -151,5 +153,28 @@ impl<'a> Builder<'a> {
             data: self.buffer.split().freeze(),
             count: self.count,
         }
+    }
+
+    pub fn new_block(&mut self) {
+        self.buffer.put_u16_le(self.count as u16);
+        self.count += 1;
+        self.offset = self.buffer.len();
+    }
+
+    pub fn offset(&self) -> usize {
+        self.buffer.len()
+    }
+
+    pub fn count(&self) -> usize {
+        self.count
+    }
+
+    pub fn complete(mut self) -> Bytes {
+        self.buffer.put_u16_le(self.count as u16);
+        self.buffer.split().freeze()
+    }
+
+    pub fn size(&self) -> usize {
+        self.buffer.len() - self.offset
     }
 }
