@@ -52,7 +52,7 @@ pub struct Block {
 impl Block {
     pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
         Builder {
-            offset: 0,
+            offset: buffer.len(),
             buffer,
             count: 0,
             block_size,
@@ -157,21 +157,21 @@ impl<'a> Builder<'a> {
 
     pub fn new_block(&mut self) {
         self.buffer.put_u16_le(self.count as u16);
-        self.count += 1;
+        self.count = 0;
         self.offset = self.buffer.len();
     }
 
     pub fn offset(&self) -> usize {
-        self.buffer.len()
+        self.offset
     }
 
     pub fn count(&self) -> usize {
         self.count
     }
 
-    pub fn complete(mut self) -> Bytes {
+    pub fn complete(mut self) -> &'a mut BytesMut {
         self.buffer.put_u16_le(self.count as u16);
-        self.buffer.split().freeze()
+        self.buffer
     }
 
     pub fn size(&self) -> usize {

@@ -163,6 +163,7 @@ impl<'a> Builder<'a> {
         loop {
             if self.block_builder.add(key, revision, position) {
                 if self.block_builder.count() == 1 {
+                    self.count += 1;
                     self.metas.put_u32_le(self.block_builder.offset() as u32);
                     self.metas.put_u64_le(key);
                     self.metas.put_u64_le(revision);
@@ -176,15 +177,17 @@ impl<'a> Builder<'a> {
             }
 
             self.block_builder.new_block();
-            self.count += 1;
             attempts += 1;
         }
     }
 
     pub fn build(self) -> SsTable {
-        let buffer = self.block_builder.complete();
+        let mut buffer = self.block_builder.complete();
+
+        buffer.put_u32_le(self.count as u32);
+
         SsTable {
-            data: buffer,
+            data: buffer.split().freeze(),
             metas: BlockMetas(self.metas.freeze()),
             count: self.count,
         }
