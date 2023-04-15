@@ -64,6 +64,18 @@ fn test_sst_build_two_block() {
 }
 
 #[test]
+fn test_sst_key_not_found() {
+    let mut buffer = BytesMut::new();
+    let mut builder = SsTable::builder(&mut buffer, BLOCK_MIN_SIZE);
+
+    builder.add(1, 2, 3);
+
+    let table = builder.build();
+
+    assert!(table.find_key(1, 3).is_none());
+}
+
+#[test]
 fn test_sst_encoding() {
     let table = generate_sst();
     let mut buffer = BytesMut::new();
@@ -95,4 +107,21 @@ fn test_sst_encoding() {
 #[test]
 fn test_sst_build_all() {
     generate_sst();
+}
+
+#[test]
+fn test_sst_find_key() {
+    let table = generate_sst();
+
+    for i in 0..NUM_OF_KEYS {
+        let key = key_of(i);
+        let revision = revision_of(i);
+        let position = position_of(i);
+
+        let entry = table.find_key(key, revision).expect("to be defined");
+
+        assert_eq!(key, entry.key);
+        assert_eq!(revision, entry.revision);
+        assert_eq!(position, entry.position);
+    }
 }
