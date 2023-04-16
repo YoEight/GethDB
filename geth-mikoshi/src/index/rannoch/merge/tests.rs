@@ -102,13 +102,4 @@ fn test_merge_mem_table_2() {
     ]);
 
     check_result(merge_iter, result.clone());
-    /*    check_result(merge_iter, vec![(1, 0, 1), (2, 0, 2), (3, 0, 3), (4, 0, 8)]);
-
-    let iters = vec![mem_3.into_iter(), mem_1.into_iter(), mem_2.into_iter()];
-    let mut merge_iter = Merge::new(iters);
-
-    check_result(
-        merge_iter,
-        vec![(1, 0, 1), (2, 0, 12), (3, 0, 18), (4, 0, 24)],
-    );*/
 }
