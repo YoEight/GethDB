@@ -126,6 +126,10 @@ impl Block {
 
         None
     }
+
+    pub fn len(&self) -> usize {
+        self.count
+    }
 }
 
 pub struct Builder<'a> {

@@ -1,6 +1,7 @@
 #[cfg(test)]
 mod tests;
 
+use crate::index::rannoch::ss_table::SsTable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds};
@@ -52,6 +53,20 @@ impl MemTable {
         let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
 
         Scan::new(buffer, range)
+    }
+
+    pub fn flush(self, buffer: &mut BytesMut, block_size: usize) -> SsTable {
+        let mut builder = SsTable::builder(buffer, block_size);
+
+        for (key, streams) in self.inner {
+            let scan = Scan::new(streams, ..);
+
+            for (revision, position) in scan.enumerate() {
+                builder.add(key, revision as u64, position);
+            }
+        }
+
+        builder.build()
     }
 }
 

@@ -44,6 +44,10 @@ impl BlockMetas {
             revision: bytes.get_u64_le(),
         }
     }
+
+    fn len(&self) -> usize {
+        self.0.len() / SSTABLE_META_ENTRY_SIZE
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -147,6 +151,19 @@ impl SsTable {
             count,
         }
     }
+
+    pub fn iter(&self) -> Iter {
+        Iter {
+            block_idx: 0,
+            entry_idx: 0,
+            block: None,
+            table: self.clone(),
+        }
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
+    }
 }
 
 pub struct Builder<'a> {
@@ -190,6 +207,44 @@ impl<'a> Builder<'a> {
             data: buffer.split().freeze(),
             metas: BlockMetas(self.metas.freeze()),
             count: self.count,
+        }
+    }
+}
+
+pub struct Iter {
+    block_idx: usize,
+    entry_idx: usize,
+    block: Option<Block>,
+    table: SsTable,
+}
+
+impl Iterator for Iter {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.block_idx >= self.table.len() {
+                return None;
+            }
+
+            if self.block.is_none() {
+                self.block = Some(self.table.read_block(self.block_idx)?);
+            }
+
+            let block = self.block.as_ref()?;
+
+            if self.entry_idx >= block.len() {
+                self.block = None;
+                self.entry_idx = 0;
+                self.block_idx += 1;
+
+                continue;
+            }
+
+            let entry = block.read_entry(self.entry_idx)?;
+            self.entry_idx += 1;
+
+            return Some(entry);
         }
     }
 }
