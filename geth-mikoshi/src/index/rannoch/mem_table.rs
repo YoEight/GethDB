@@ -1,14 +1,16 @@
 #[cfg(test)]
 mod tests;
 
+use crate::index::rannoch::block::BlockEntry;
 use crate::index::rannoch::ss_table::SsTable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::ops::{Bound, RangeBounds};
+use std::ops::{Bound, RangeBounds, RangeFull};
 
-pub const MEM_TABLE_ENTRY_SIZE: usize = 8;
+pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct MemTable {
     inner: BTreeMap<u64, BytesMut>,
 }
@@ -24,23 +26,26 @@ impl MemTable {
         if let Some(stream) = self.inner.get(&key) {
             let mut bytes = stream.clone();
 
-            if revision as usize >= bytes.len() / MEM_TABLE_ENTRY_SIZE {
-                return None;
+            while bytes.has_remaining() {
+                match revision.cmp(&bytes.get_u64_le()) {
+                    Ordering::Less => bytes.advance(8),
+                    Ordering::Equal => return Some(bytes.get_u64_le()),
+                    Ordering::Greater => return None,
+                }
             }
-
-            bytes.advance(revision as usize * MEM_TABLE_ENTRY_SIZE);
-            return Some(bytes.get_u64_le());
         }
 
         None
     }
 
-    pub fn put(&mut self, key: u64, position: u64) {
+    pub fn put(&mut self, key: u64, revision: u64, position: u64) {
         if let Some(stream) = self.inner.get_mut(&key) {
+            stream.put_u64_le(revision);
             stream.put_u64_le(position);
         } else {
             let mut stream = BytesMut::new();
 
+            stream.put_u64_le(0);
             stream.put_u64_le(position);
             self.inner.insert(key, stream);
         }
@@ -52,17 +57,17 @@ impl MemTable {
     {
         let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
 
-        Scan::new(buffer, range)
+        Scan::new(key, buffer, range)
     }
 
     pub fn flush(self, buffer: &mut BytesMut, block_size: usize) -> SsTable {
         let mut builder = SsTable::builder(buffer, block_size);
 
         for (key, streams) in self.inner {
-            let scan = Scan::new(streams, ..);
+            let scan = Scan::new(key, streams, ..);
 
-            for (revision, position) in scan.enumerate() {
-                builder.add(key, revision as u64, position);
+            for entry in scan {
+                builder.add(key, entry.revision, entry.position);
             }
         }
 
@@ -70,8 +75,20 @@ impl MemTable {
     }
 }
 
+impl IntoIterator for MemTable {
+    type Item = BlockEntry;
+    type IntoIter = IntoIter;
+
+    fn into_iter(self) -> Self::IntoIter {
+        IntoIter {
+            inner: self.inner.into_iter(),
+            current: None,
+        }
+    }
+}
+
 pub struct Scan<R> {
-    current: u64,
+    key: u64,
     buffer: BytesMut,
     range: R,
 }
@@ -80,7 +97,7 @@ impl<R> Scan<R>
 where
     R: RangeBounds<u64>,
 {
-    fn new(mut buffer: BytesMut, range: R) -> Self {
+    fn new(key: u64, mut buffer: BytesMut, range: R) -> Self {
         let current = match range.start_bound() {
             Bound::Included(x) => *x,
             Bound::Excluded(x) => *x + 1,
@@ -95,11 +112,7 @@ where
             buffer.advance(offset);
         }
 
-        Self {
-            current,
-            buffer,
-            range,
-        }
+        Self { key, buffer, range }
     }
 }
 
@@ -107,20 +120,49 @@ impl<R> Iterator for Scan<R>
 where
     R: RangeBounds<u64>,
 {
-    type Item = u64;
+    type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
         if !self.buffer.has_remaining() {
             return None;
         }
 
-        if !self.range.contains(&self.current) {
+        let revision = self.buffer.get_u64_le();
+
+        if !self.range.contains(&revision) {
             self.buffer.advance(self.buffer.remaining());
             return None;
         }
 
-        self.current += 1;
+        Some(BlockEntry {
+            key: self.key,
+            revision,
+            position: self.buffer.get_u64_le(),
+        })
+    }
+}
 
-        Some(self.buffer.get_u64_le())
+pub struct IntoIter {
+    inner: std::collections::btree_map::IntoIter<u64, BytesMut>,
+    current: Option<Scan<RangeFull>>,
+}
+
+impl Iterator for IntoIter {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.current.is_none() {
+                let (key, buffer) = self.inner.next()?;
+                self.current = Some(Scan::new(key, buffer, ..));
+            }
+
+            let mut scan = self.current.as_mut()?;
+            if let Some(entry) = scan.next() {
+                return Some(entry);
+            }
+
+            self.current = None;
+        }
     }
 }

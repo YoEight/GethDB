@@ -37,11 +37,23 @@ impl PartialOrd<KeyId> for BlockEntry {
     }
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
 pub struct BlockEntry {
     pub key: u64,
     pub revision: u64,
     pub position: u64,
+}
+
+impl BlockEntry {
+    pub fn cmp_key_id(&self, entry: &BlockEntry) -> Ordering {
+        let key_ord = self.key.cmp(&entry.key);
+
+        if key_ord.is_ne() {
+            return key_ord;
+        }
+
+        self.revision.cmp(&entry.revision)
+    }
 }
 
 #[derive(Debug, Clone)]
