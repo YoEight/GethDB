@@ -38,7 +38,7 @@ fn test_block_build_single_key() {
     assert!(builder.add(233, 2333, 23333));
 
     let block = builder.build();
-    assert_eq!(1, block.count);
+    assert_eq!(1, block.len());
 
     let entry = block.read_entry(0);
     assert!(entry.is_some());
@@ -58,7 +58,7 @@ fn test_block_build_full() {
     assert!(!builder.add(2, 2, 2));
 
     let block = builder.build();
-    assert_eq!(1, block.count);
+    assert_eq!(1, block.len());
 }
 
 #[test]

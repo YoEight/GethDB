@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use crate::index::rannoch::block::BlockEntry;
 use crate::index::rannoch::ss_table::SsTable;
 use bytes::{Buf, BufMut, Bytes, BytesMut};

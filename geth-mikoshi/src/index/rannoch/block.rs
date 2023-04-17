@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;

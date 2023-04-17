@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use crate::index::rannoch::block;
 use crate::index::rannoch::block::{Block, BlockEntry};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -196,6 +193,10 @@ impl<'a> Builder<'a> {
             self.block_builder.new_block();
             attempts += 1;
         }
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
     }
 
     pub fn build(self) -> SsTable {

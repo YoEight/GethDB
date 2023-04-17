@@ -49,7 +49,7 @@ fn test_sst_build_two_block() {
     builder.add(1, 2, 3);
     builder.add(2, 3, 4);
 
-    assert_eq!(2, builder.count);
+    assert_eq!(2, builder.len());
 
     let table = builder.build();
     let entry = table.find_key(1, 2).expect("to be defined");
@@ -83,7 +83,7 @@ fn test_sst_encoding() {
 
     let decoded_table = SsTable::decode(buffer.freeze());
 
-    assert_eq!(table.count, decoded_table.count);
+    assert_eq!(table.len(), decoded_table.len());
 
     for i in 0..NUM_OF_KEYS {
         let key = key_of(i);

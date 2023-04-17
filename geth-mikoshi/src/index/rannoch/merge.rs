@@ -1,6 +1,3 @@
-#[cfg(test)]
-mod tests;
-
 use crate::index::rannoch::block::BlockEntry;
 use std::cmp::Ordering;
 
