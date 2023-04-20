@@ -10,12 +10,14 @@ pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 #[derive(Debug, Clone)]
 pub struct MemTable {
     inner: BTreeMap<u64, BytesMut>,
+    entries_count: usize,
 }
 
 impl MemTable {
     pub fn new() -> Self {
         Self {
             inner: BTreeMap::new(),
+            entries_count: 0,
         }
     }
 
@@ -46,6 +48,8 @@ impl MemTable {
             stream.put_u64_le(position);
             self.inner.insert(key, stream);
         }
+
+        self.entries_count += 1;
     }
 
     pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
@@ -69,6 +73,10 @@ impl MemTable {
         }
 
         builder.build()
+    }
+
+    pub fn size(&self) -> usize {
+        self.entries_count * MEM_TABLE_ENTRY_SIZE
     }
 }
 

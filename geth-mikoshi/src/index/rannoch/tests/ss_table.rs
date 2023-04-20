@@ -81,7 +81,7 @@ fn test_sst_encoding() {
     let mut buffer = BytesMut::new();
     table.encode(&mut buffer);
 
-    let decoded_table = SsTable::decode(buffer.freeze());
+    let decoded_table = SsTable::decode(table.id, buffer.freeze());
 
     assert_eq!(table.len(), decoded_table.len());
 

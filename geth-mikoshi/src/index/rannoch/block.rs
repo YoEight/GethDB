@@ -142,10 +142,10 @@ impl Block {
 }
 
 pub struct Builder<'a> {
-    offset: usize,
-    buffer: &'a mut BytesMut,
-    count: usize,
-    block_size: usize,
+    pub offset: usize,
+    pub buffer: &'a mut BytesMut,
+    pub count: usize,
+    pub block_size: usize,
 }
 
 impl<'a> Builder<'a> {
@@ -186,6 +186,10 @@ impl<'a> Builder<'a> {
     pub fn complete(mut self) -> &'a mut BytesMut {
         self.buffer.put_u16_le(self.count as u16);
         self.buffer
+    }
+
+    pub fn done(self) {
+        self.buffer.put_u16_le(self.count as u16);
     }
 
     pub fn size(&self) -> usize {

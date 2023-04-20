@@ -2,14 +2,15 @@ use crate::index::rannoch::block;
 use crate::index::rannoch::block::{Block, BlockEntry};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
+use uuid::Uuid;
 
 const SSTABLE_META_ENTRY_SIZE: usize = 4 + 8 + 8;
 
 #[derive(Debug, Clone, Copy)]
-struct BlockMeta {
-    offset: u32,
-    key: u64,
-    revision: u64,
+pub struct BlockMeta {
+    pub offset: u32,
+    pub key: u64,
+    pub revision: u64,
 }
 
 impl BlockMeta {
@@ -25,10 +26,10 @@ impl BlockMeta {
 }
 
 #[derive(Debug, Clone)]
-struct BlockMetas(Bytes);
+pub struct BlockMetas(Bytes);
 
 impl BlockMetas {
-    fn read(&self, idx: usize) -> BlockMeta {
+    pub fn read(&self, idx: usize) -> BlockMeta {
         let offset = idx * SSTABLE_META_ENTRY_SIZE;
         let mut bytes = self.0.clone();
 
@@ -42,22 +43,35 @@ impl BlockMetas {
         }
     }
 
-    fn len(&self) -> usize {
+    pub fn len(&self) -> usize {
         self.0.len() / SSTABLE_META_ENTRY_SIZE
+    }
+
+    pub fn last_block_first_key_offset(&self) -> Option<usize> {
+        if self.len() == 0 {
+            return None;
+        }
+
+        Some(self.read(self.len() - 1).offset as usize)
+    }
+
+    pub fn as_slice(&self) -> &[u8] {
+        self.0.as_ref()
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct SsTable {
+    pub id: Uuid,
     data: Bytes,
-    metas: BlockMetas,
-    count: usize,
+    pub metas: BlockMetas,
+    pub count: usize,
 }
 
 impl SsTable {
     pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
         let metas = buffer.split();
-        let block = block::Block::builder(buffer, block_size);
+        let block = Block::builder(buffer, block_size);
 
         Builder {
             metas,
@@ -88,7 +102,7 @@ impl SsTable {
         Some(Block::decode(block_bytes))
     }
 
-    fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
+    pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
         let mut closest_lowest = 0usize;
         let mut closest_highest = 0usize;
         let mut low = 0usize;
@@ -135,7 +149,7 @@ impl SsTable {
         buffer.put_u32_le(offset as u32);
     }
 
-    pub fn decode(mut bytes: Bytes) -> Self {
+    pub fn decode(id: Uuid, mut bytes: Bytes) -> Self {
         let mut metas_offset = &bytes[bytes.len() - 4..];
         let metas_offset = metas_offset.get_u32_le() as usize;
         let data = bytes.copy_to_bytes(metas_offset);
@@ -143,6 +157,7 @@ impl SsTable {
         let count = metas.len() / SSTABLE_META_ENTRY_SIZE;
 
         Self {
+            id,
             data,
             metas: BlockMetas(metas),
             count,
@@ -164,10 +179,10 @@ impl SsTable {
 }
 
 pub struct Builder<'a> {
-    count: usize,
-    block_size: usize,
-    block_builder: block::Builder<'a>,
-    metas: BytesMut,
+    pub count: usize,
+    pub block_size: usize,
+    pub block_builder: block::Builder<'a>,
+    pub metas: BytesMut,
 }
 
 impl<'a> Builder<'a> {
@@ -205,10 +220,15 @@ impl<'a> Builder<'a> {
         buffer.put_u32_le(self.count as u32);
 
         SsTable {
+            id: Uuid::new_v4(),
             data: buffer.split().freeze(),
             metas: BlockMetas(self.metas.freeze()),
             count: self.count,
         }
+    }
+
+    pub fn close(self) -> BlockMetas {
+        BlockMetas(self.metas.freeze())
     }
 }
 
