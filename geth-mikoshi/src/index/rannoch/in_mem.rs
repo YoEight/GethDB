@@ -12,6 +12,12 @@ pub struct InMemStorage {
     inner: HashMap<Uuid, Bytes>,
 }
 
+impl Default for InMemStorage {
+    fn default() -> Self {
+        InMemStorage::new(4_096)
+    }
+}
+
 impl InMemStorage {
     pub fn new(block_size: usize) -> Self {
         Self {
@@ -70,9 +76,9 @@ impl InMemStorage {
         })
     }
 
-    pub fn sst_put<Values>(&mut self, table: &mut SsTable, key: u64, mut values: Values)
+    pub fn sst_put<Values>(&mut self, table: &mut SsTable, mut values: Values)
     where
-        Values: IntoIterator<Item = (u64, u64)>,
+        Values: IntoIterator<Item = (u64, u64, u64)>,
     {
         let mut table_bytes = self.inner.get(&table.id).cloned().unwrap_or_default();
         let mut offset = 0usize;
@@ -89,7 +95,7 @@ impl InMemStorage {
         }
 
         let mut meta = BytesMut::from(table.metas.as_slice());
-        for (revision, position) in values {
+        for (key, revision, position) in values {
             if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
                 let remaining = self.block_size - block_current_size;
 

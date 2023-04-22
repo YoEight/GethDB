@@ -17,6 +17,11 @@ fn position_of(idx: usize) -> u64 {
     idx as u64
 }
 
+fn in_mem_generate_block(storage: &mut InMemStorage, table: &mut SsTable) {
+    let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
+    storage.sst_put(table, values);
+}
+
 fn generate_block() -> Block {
     let mut buffer = BytesMut::new();
     let mut builder = Block::builder(&mut buffer, 10_000);
@@ -37,7 +42,7 @@ fn test_in_mem_block_build_single_key() {
     let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
     let mut table = SsTable::new();
 
-    storage.sst_put(&mut table, 233, [(2333, 23333)]);
+    storage.sst_put(&mut table, [(1, 1, 1)]);
 
     assert_eq!(1, table.len());
 
@@ -45,9 +50,49 @@ fn test_in_mem_block_build_single_key() {
     block.dump();
     let entry = block.read_entry(0).unwrap();
 
-    assert_eq!(233, entry.key);
-    assert_eq!(2333, entry.revision);
-    assert_eq!(23333, entry.position);
+    assert_eq!(1, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(1, entry.position);
+}
+
+#[test]
+fn test_in_mem_block_build_full() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
+    let mut table = SsTable::new();
+
+    storage.sst_put(&mut table, [(1, 1, 10), (2, 2, 20)]);
+
+    assert_eq!(2, table.len());
+
+    for idx in 0..table.len() {
+        let entry = storage
+            .sst_read_block(&table, idx)
+            .unwrap()
+            .read_entry(0)
+            .unwrap();
+
+        assert_eq!((idx + 1) as u64, entry.key);
+        assert_eq!((idx + 1) as u64, entry.revision);
+        assert_eq!(((idx + 1) * 10) as u64, entry.position);
+    }
+}
+
+#[test]
+fn test_in_mem_block_build_all() {
+    let mut storage = InMemStorage::default();
+    let mut table = SsTable::new();
+
+    in_mem_generate_block(&mut storage, &mut table);
+
+    let block = storage.sst_read_block(&table, 0).unwrap();
+
+    for idx in 0..NUM_OF_KEYS {
+        let entry = block.read_entry(idx).unwrap();
+
+        assert_eq!(key_of(idx), entry.key);
+        assert_eq!(revision_of(idx), entry.revision);
+        assert_eq!(position_of(idx), entry.position);
+    }
 }
 
 #[test]
