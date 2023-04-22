@@ -56,7 +56,6 @@ impl BlockEntry {
 #[derive(Debug, Clone)]
 pub struct Block {
     data: Bytes,
-    count: usize,
 }
 
 impl Block {
@@ -69,9 +68,17 @@ impl Block {
         }
     }
 
+    pub fn new(data: Bytes) -> Self {
+        Self { data }
+    }
+
+    pub fn count(&self) -> usize {
+        self.data.len() / BLOCK_ENTRY_SIZE
+    }
+
     pub fn encode(&self, buffer: &mut BytesMut) -> Bytes {
         buffer.put(self.data.clone());
-        buffer.put_u16_le(self.count as u16);
+        buffer.put_u16_le(self.count() as u16);
 
         buffer.split().freeze()
     }
@@ -82,18 +89,17 @@ impl Block {
 
         Self {
             data: src.copy_to_bytes(count as usize * BLOCK_ENTRY_SIZE),
-            count: count as usize,
         }
     }
 
     pub fn dump(&self) {
-        if self.count == 0 {
+        if self.count() == 0 {
             println!("<empty_block>");
         }
 
         let mut temp = self.data.clone();
 
-        for _ in 0..self.count {
+        for _ in 0..self.count() {
             println!(
                 "key = {}, revision = {}, position = {}",
                 temp.get_u64_le(),
@@ -104,7 +110,7 @@ impl Block {
     }
 
     pub fn read_entry(&self, idx: usize) -> Option<BlockEntry> {
-        if idx >= self.count {
+        if idx >= self.count() {
             return None;
         }
 
@@ -124,7 +130,7 @@ impl Block {
     pub fn find_entry(&self, key: u64, revision: u64) -> Option<BlockEntry> {
         let key_id = KeyId { key, revision };
         let mut low = 0usize;
-        let mut high = self.count - 1;
+        let mut high = self.count() - 1;
 
         while low <= high {
             let mid = (low + high) / 2;
@@ -141,7 +147,7 @@ impl Block {
     }
 
     pub fn len(&self) -> usize {
-        self.count
+        self.count()
     }
 }
 
@@ -231,7 +237,6 @@ impl<'a> Builder<'a> {
     pub fn build(self) -> Block {
         Block {
             data: self.buffer.split().freeze(),
-            count: self.count,
         }
     }
 

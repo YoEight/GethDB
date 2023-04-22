@@ -1,7 +1,8 @@
-use crate::index::rannoch::block::{Block, BlockEntry};
+use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::IndexedPosition;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use nom::character::complete::tab;
 use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
 
@@ -25,20 +26,21 @@ impl InMemStorage {
             return None;
         }
 
-        let meta = table.metas.read(block_idx);
+        let block_meta = table.metas.read(block_idx);
         let mut bytes = self.inner.get(&table.id)?.clone();
+        let mut meta_offset_bytes = &bytes[bytes.len() - 4..];
+        let meta_offset = meta_offset_bytes.get_u32_le() as usize;
         let len = bytes.len();
 
-        bytes.advance(meta.offset as usize);
+        bytes.advance(block_meta.offset as usize);
 
         let size = if block_idx + 1 >= table.len() {
-            len - meta.offset as usize - 4
+            meta_offset - block_meta.offset as usize
         } else {
-            let next_meta = table.metas.read(block_idx + 1);
-            (next_meta.offset - meta.offset) as usize
+            self.block_size
         };
 
-        Some(Block::decode(bytes.copy_to_bytes(size)))
+        Some(Block::new(bytes.copy_to_bytes(size)))
     }
 
     pub fn sst_find_key(&self, table: &SsTable, key: u64, revision: u64) -> Option<BlockEntry> {
@@ -53,48 +55,68 @@ impl InMemStorage {
         None
     }
 
-    pub fn sst_put_single(&mut self, table: &mut SsTable, key: u64, revision: u64, position: u64) {
-        self.sst_put(table, key, [IndexedPosition { revision, position }])
+    pub fn sst_load(&self, id: Uuid) -> Option<SsTable> {
+        let mut bytes = self.inner.get(&id)?.clone();
+        let mut footer = &bytes[bytes.len() - 4..];
+        let meta_offset = footer.get_u32_le() as usize;
+
+        bytes.advance(meta_offset);
+        let metas = bytes.copy_to_bytes(bytes.len() - 4);
+
+        Some(SsTable {
+            id,
+            data: Default::default(),
+            metas: BlockMetas::new(metas),
+        })
     }
 
     pub fn sst_put<Values>(&mut self, table: &mut SsTable, key: u64, mut values: Values)
     where
-        Values: IntoIterator<Item = IndexedPosition>,
+        Values: IntoIterator<Item = (u64, u64)>,
     {
-        if let Some(bytes) = self.inner.get(&table.id) {
-            self.buffer.extend_from_slice(bytes.as_ref());
+        let mut table_bytes = self.inner.get(&table.id).cloned().unwrap_or_default();
+        let mut offset = 0usize;
+        let mut block_current_size = 0usize;
+
+        if !table_bytes.is_empty() {
+            let mut footer = &table_bytes[table_bytes.len() - 4..];
+            let meta_offset = footer.get_u32_le() as usize;
+
+            offset = meta_offset;
+            block_current_size = meta_offset - table.metas.last_block_first_key_offset().unwrap();
+
+            self.buffer.put(table_bytes.copy_to_bytes(meta_offset));
         }
 
-        let offset = table
-            .metas
-            .last_block_first_key_offset()
-            .unwrap_or_default();
+        let mut meta = BytesMut::from(table.metas.as_slice());
+        for (revision, position) in values {
+            if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
+                let remaining = self.block_size - block_current_size;
 
-        let mut builder = super::ss_table::Builder {
-            count: 0,
-            block_size: self.block_size,
-            block_builder: super::block::Builder {
-                offset,
-                buffer: &mut self.buffer,
-                count: table.len(),
-                block_size: self.block_size,
-            },
-            metas: BytesMut::from(table.metas.as_slice()),
-        };
+                self.buffer.put_bytes(0, remaining);
+                offset += remaining;
+                block_current_size = 0;
+            }
 
-        for value in values {
-            builder.add(key, value.revision, value.position);
+            self.buffer.put_u64_le(key);
+            self.buffer.put_u64_le(revision);
+            self.buffer.put_u64_le(position);
+
+            if block_current_size == 0 {
+                meta.put_u32_le(offset as u32);
+                meta.put_u64_le(key);
+                meta.put_u64_le(revision);
+            }
+
+            block_current_size += BLOCK_ENTRY_SIZE;
+            offset += BLOCK_ENTRY_SIZE;
         }
 
-        table.metas = builder.close();
+        let new_meta = meta.freeze();
+
+        self.buffer.put(new_meta.clone());
+        self.buffer.put_u32_le(offset as u32);
         self.inner.insert(table.id, self.buffer.split().freeze());
-    }
-
-    pub fn sst_complete(&mut self, table: &SsTable) {
-        if let Some(bytes) = self.inner.get_mut(&table.id) {
-            self.buffer.extend_from_slice(bytes.as_ref());
-            self.buffer.put_u32_le(table.len() as u32);
-            *bytes = self.buffer.split().freeze();
-        }
+        table.metas = BlockMetas::new(new_meta);
     }
 }

@@ -29,6 +29,10 @@ impl BlockMeta {
 pub struct BlockMetas(Bytes);
 
 impl BlockMetas {
+    pub fn new(bytes: Bytes) -> Self {
+        Self(bytes)
+    }
+
     pub fn read(&self, idx: usize) -> BlockMeta {
         let offset = idx * SSTABLE_META_ENTRY_SIZE;
         let mut bytes = self.0.clone();
@@ -63,7 +67,7 @@ impl BlockMetas {
 #[derive(Debug, Clone)]
 pub struct SsTable {
     pub id: Uuid,
-    data: Bytes,
+    pub data: Bytes,
     pub metas: BlockMetas,
 }
 
