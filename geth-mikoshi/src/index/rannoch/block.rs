@@ -87,6 +87,10 @@ impl Block {
     }
 
     pub fn dump(&self) {
+        if self.count == 0 {
+            println!("<empty_block>");
+        }
+
         let mut temp = self.data.clone();
 
         for _ in 0..self.count {
@@ -141,6 +145,49 @@ impl Block {
     }
 }
 
+pub struct AltBuilder<'a> {
+    pub buffer: &'a mut BytesMut,
+    pub block_size: usize,
+    pub count: usize,
+}
+
+impl<'a> AltBuilder<'a> {
+    pub fn new(buffer: &'a mut BytesMut, block_size: usize, offset: usize) -> Self {
+        let count = if buffer.is_empty() {
+            buffer.resize(block_size, 0);
+            0
+        } else {
+            let mut bytes = &buffer[block_size - 2..];
+            bytes.get_u16_le() as usize
+        };
+
+        buffer.advance(count * BLOCK_ENTRY_SIZE);
+
+        Self {
+            buffer,
+            block_size,
+            count,
+        }
+    }
+
+    pub fn add(&mut self, key: u64, revision: u64, position: u64) -> bool {
+        if self.buffer.len() + BLOCK_ENTRY_SIZE + 2 > self.block_size {
+            return false;
+        }
+
+        self.buffer.put_u64_le(key);
+        self.buffer.put_u64_le(revision);
+        self.buffer.put_u64_le(position);
+        self.count += 1;
+
+        true
+    }
+
+    pub fn len(&self) -> usize {
+        self.count
+    }
+}
+
 pub struct Builder<'a> {
     pub offset: usize,
     pub buffer: &'a mut BytesMut,
@@ -149,6 +196,25 @@ pub struct Builder<'a> {
 }
 
 impl<'a> Builder<'a> {
+    pub fn new(buffer: &'a mut BytesMut, offset: usize, count: usize, block_size: usize) -> Self {
+        let count = if buffer.is_empty() {
+            buffer.resize(block_size, 0);
+            0usize
+        } else {
+            let mut bytes = &buffer[block_size - 2..];
+            bytes.get_u16_le() as usize
+        };
+
+        buffer.advance(count * BLOCK_ENTRY_SIZE);
+
+        Self {
+            offset,
+            buffer,
+            count,
+            block_size,
+        }
+    }
+
     pub fn add(&mut self, key: u64, revision: u64, position: u64) -> bool {
         if self.size() + BLOCK_ENTRY_SIZE > self.block_size {
             return false;

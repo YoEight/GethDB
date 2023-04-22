@@ -1,4 +1,6 @@
 use crate::index::rannoch::block::{Block, Builder};
+use crate::index::rannoch::in_mem::InMemStorage;
+use crate::index::rannoch::ss_table::SsTable;
 use bytes::BytesMut;
 
 const NUM_OF_KEYS: usize = 100;
@@ -28,6 +30,25 @@ fn generate_block() -> Block {
     }
 
     builder.build()
+}
+
+#[test]
+fn test_in_mem_block_build_single_key() {
+    let mut storage = InMemStorage::new(26);
+    let mut table = SsTable::new();
+
+    storage.sst_put_single(&mut table, 233, 2333, 23333);
+    storage.sst_complete(&table);
+
+    assert_eq!(1, table.len());
+
+    let block = storage.sst_read_block(&table, 0).unwrap();
+    block.dump();
+    let entry = block.read_entry(0).unwrap();
+
+    assert_eq!(233, entry.key);
+    assert_eq!(2333, entry.revision);
+    assert_eq!(23333, entry.position);
 }
 
 #[test]

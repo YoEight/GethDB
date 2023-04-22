@@ -65,10 +65,17 @@ pub struct SsTable {
     pub id: Uuid,
     data: Bytes,
     pub metas: BlockMetas,
-    pub count: usize,
 }
 
 impl SsTable {
+    pub fn new() -> Self {
+        Self {
+            id: Uuid::new_v4(),
+            data: Default::default(),
+            metas: BlockMetas(Default::default()),
+        }
+    }
+
     pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
         let metas = buffer.split();
         let block = Block::builder(buffer, block_size);
@@ -82,7 +89,7 @@ impl SsTable {
     }
 
     pub fn read_block(&self, block_idx: usize) -> Option<Block> {
-        if block_idx >= self.count {
+        if block_idx >= self.len() {
             return None;
         }
 
@@ -90,7 +97,7 @@ impl SsTable {
         let mut bytes = self.data.clone();
         bytes.advance(meta.offset as usize);
 
-        let size = if block_idx + 1 >= self.count {
+        let size = if block_idx + 1 >= self.len() {
             self.data.len() - meta.offset as usize - 4
         } else {
             let next_meta = self.metas.read(block_idx + 1);
@@ -106,7 +113,7 @@ impl SsTable {
         let mut closest_lowest = 0usize;
         let mut closest_highest = 0usize;
         let mut low = 0usize;
-        let mut high = self.count - 1;
+        let mut high = self.len() - 1;
 
         while low <= high {
             let mid = (low + high) / 2;
@@ -160,7 +167,6 @@ impl SsTable {
             id,
             data,
             metas: BlockMetas(metas),
-            count,
         }
     }
 
@@ -174,7 +180,7 @@ impl SsTable {
     }
 
     pub fn len(&self) -> usize {
-        self.count
+        self.metas.len()
     }
 }
 
@@ -223,7 +229,6 @@ impl<'a> Builder<'a> {
             id: Uuid::new_v4(),
             data: buffer.split().freeze(),
             metas: BlockMetas(self.metas.freeze()),
-            count: self.count,
         }
     }
 

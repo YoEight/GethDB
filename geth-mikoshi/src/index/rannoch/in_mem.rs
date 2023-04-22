@@ -1,7 +1,7 @@
 use crate::index::rannoch::block::{Block, BlockEntry};
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::IndexedPosition;
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::{HashMap, VecDeque};
 use uuid::Uuid;
 
@@ -12,8 +12,16 @@ pub struct InMemStorage {
 }
 
 impl InMemStorage {
+    pub fn new(block_size: usize) -> Self {
+        Self {
+            block_size,
+            buffer: Default::default(),
+            inner: Default::default(),
+        }
+    }
+
     pub fn sst_read_block(&self, table: &SsTable, block_idx: usize) -> Option<Block> {
-        if block_idx >= table.count {
+        if block_idx >= table.len() {
             return None;
         }
 
@@ -23,7 +31,7 @@ impl InMemStorage {
 
         bytes.advance(meta.offset as usize);
 
-        let size = if block_idx + 1 >= table.count {
+        let size = if block_idx + 1 >= table.len() {
             len - meta.offset as usize - 4
         } else {
             let next_meta = table.metas.read(block_idx + 1);
@@ -45,9 +53,13 @@ impl InMemStorage {
         None
     }
 
+    pub fn sst_put_single(&mut self, table: &mut SsTable, key: u64, revision: u64, position: u64) {
+        self.sst_put(table, key, [IndexedPosition { revision, position }])
+    }
+
     pub fn sst_put<Values>(&mut self, table: &mut SsTable, key: u64, mut values: Values)
     where
-        Values: Iterator<Item = IndexedPosition>,
+        Values: IntoIterator<Item = IndexedPosition>,
     {
         if let Some(bytes) = self.inner.get(&table.id) {
             self.buffer.extend_from_slice(bytes.as_ref());
@@ -64,7 +76,7 @@ impl InMemStorage {
             block_builder: super::block::Builder {
                 offset,
                 buffer: &mut self.buffer,
-                count: table.count,
+                count: table.len(),
                 block_size: self.block_size,
             },
             metas: BytesMut::from(table.metas.as_slice()),
@@ -76,5 +88,13 @@ impl InMemStorage {
 
         table.metas = builder.close();
         self.inner.insert(table.id, self.buffer.split().freeze());
+    }
+
+    pub fn sst_complete(&mut self, table: &SsTable) {
+        if let Some(bytes) = self.inner.get_mut(&table.id) {
+            self.buffer.extend_from_slice(bytes.as_ref());
+            self.buffer.put_u32_le(table.len() as u32);
+            *bytes = self.buffer.split().freeze();
+        }
     }
 }
