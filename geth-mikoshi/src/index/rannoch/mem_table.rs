@@ -7,20 +7,13 @@ use std::ops::{Bound, RangeBounds, RangeFull};
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct MemTable {
     inner: BTreeMap<u64, BytesMut>,
     entries_count: usize,
 }
 
 impl MemTable {
-    pub fn new() -> Self {
-        Self {
-            inner: BTreeMap::new(),
-            entries_count: 0,
-        }
-    }
-
     pub fn get(&self, key: u64, revision: u64) -> Option<u64> {
         if let Some(stream) = self.inner.get(&key) {
             let mut bytes = stream.clone();
@@ -63,6 +56,11 @@ impl MemTable {
 
     pub fn size(&self) -> usize {
         self.entries_count * MEM_TABLE_ENTRY_SIZE
+    }
+
+    pub fn entries(self) -> impl Iterator<Item = (u64, u64, u64)> {
+        self.into_iter()
+            .map(|entry| (entry.key, entry.revision, entry.position))
     }
 }
 

@@ -6,7 +6,7 @@ use bytes::BytesMut;
 
 #[test]
 fn test_mem_table_get() {
-    let mut mem_table = MemTable::new();
+    let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 1);
     mem_table.put(2, 0, 2);
@@ -19,7 +19,7 @@ fn test_mem_table_get() {
 
 #[test]
 fn test_mem_table_iter() {
-    let mut mem_table = MemTable::new();
+    let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 0);
     mem_table.put(1, 1, 5);
@@ -110,7 +110,7 @@ fn test_mem_table_iter() {
 fn test_mem_table_flush() {
     let mut storage = InMemStorage::new(128);
     let mut table = test_ss_table();
-    let mut mem_table = MemTable::new();
+    let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 1);
     mem_table.put(2, 0, 2);

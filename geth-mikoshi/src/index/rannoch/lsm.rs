@@ -5,22 +5,23 @@ use std::collections::BTreeMap;
 use std::ops::RangeBounds;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
+pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
 
 pub struct LsmStorage {
-    mem_table_max_size: usize,
-    ss_table_max_count: usize,
-    active_table: MemTable,
-    buffer: BytesMut,
-    levels: BTreeMap<u8, Vec<SsTable>>,
+    pub mem_table_max_size: usize,
+    pub ss_table_max_count: usize,
+    pub active_table: MemTable,
+    pub immutable_tables: Vec<MemTable>,
+    pub levels: BTreeMap<u8, Vec<SsTable>>,
 }
 
 impl LsmStorage {
     pub fn empty_with_default() -> Self {
         Self {
-            buffer: BytesMut::new(),
             mem_table_max_size: LSM_DEFAULT_MEM_TABLE_SIZE,
             ss_table_max_count: 4,
-            active_table: MemTable::new(),
+            active_table: MemTable::default(),
+            immutable_tables: vec![],
             levels: Default::default(),
         }
     }
@@ -44,7 +45,5 @@ impl LsmStorage {
         todo!()
     }
 
-    fn bookkeeping(&mut self) {
-        let previous_table = std::mem::replace(&mut self.active_table, MemTable::new());
-    }
+    fn bookkeeping(&mut self) {}
 }

@@ -4,7 +4,7 @@ use crate::index::rannoch::merge::Merge;
 use std::ops::RangeFull;
 
 fn build_mem_table(inputs: Vec<(u64, u64, u64)>) -> MemTable {
-    let mut mem_table = MemTable::new();
+    let mut mem_table = MemTable::default();
 
     for (key, revision, position) in inputs {
         mem_table.put(key, revision, position);

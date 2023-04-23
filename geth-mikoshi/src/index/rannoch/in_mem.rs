@@ -1,4 +1,6 @@
 use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
+use crate::index::rannoch::lsm::{LsmStorage, LSM_BASE_SSTABLE_BLOCK_COUNT};
+use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::IndexedPosition;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -144,6 +146,57 @@ impl InMemStorage {
             table: table.clone(),
         }
     }
+
+    pub fn sst_iter_tuples(&self, table: &SsTable) -> impl Iterator<Item = (u64, u64, u64)> {
+        self.sst_iter(table)
+            .map(|t| (t.key, t.revision, t.position))
+    }
+
+    pub fn lsm_put(&mut self, lsm: &mut LsmStorage, key: u64, revision: u64, position: u64) {
+        lsm.active_table.put(key, revision, position);
+
+        if lsm.active_table.size() < lsm.mem_table_max_size {
+            return;
+        }
+
+        let mem_table = std::mem::take(&mut lsm.active_table);
+        let mut new_table = SsTable::new();
+
+        self.sst_put(&mut new_table, mem_table.entries());
+        let mut level = 0u8;
+
+        loop {
+            if let Some(tables) = lsm.levels.get_mut(&level) {
+                if tables.len() + 1 >= lsm.ss_table_max_count {
+                    let mut targets = vec![self.sst_iter(&new_table)];
+
+                    for table in tables.drain(..) {
+                        targets.push(self.sst_iter(&table));
+                    }
+
+                    let values = Merge::new(targets).map(|e| (e.key, e.revision, e.position));
+
+                    new_table = SsTable::new();
+                    self.sst_put(&mut new_table, values);
+
+                    if new_table.len() >= sst_table_block_count_limit(level) {
+                        level += 1;
+                        continue;
+                    }
+                }
+
+                tables.push(new_table);
+                break;
+            }
+
+            lsm.levels.insert(level, vec![new_table]);
+            break;
+        }
+    }
+}
+
+fn sst_table_block_count_limit(level: u8) -> usize {
+    2 ^ (level as usize) * LSM_BASE_SSTABLE_BLOCK_COUNT
 }
 
 pub struct SsTableIter {
