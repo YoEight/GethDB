@@ -71,7 +71,6 @@ impl InMemStorage {
 
         Some(SsTable {
             id,
-            data: Default::default(),
             metas: BlockMetas::new(metas),
         })
     }
@@ -124,5 +123,75 @@ impl InMemStorage {
         self.buffer.put_u32_le(offset as u32);
         self.inner.insert(table.id, self.buffer.split().freeze());
         table.metas = BlockMetas::new(new_meta);
+    }
+
+    pub fn sst_iter(&self, table: &SsTable) -> SsTableIter {
+        let block_bytes = if let Some(mut bytes) = self.inner.get(&table.id).cloned() {
+            let mut footer = &bytes[bytes.len() - 4..];
+            let meta_offset = footer.get_u32_le() as usize;
+
+            bytes.copy_to_bytes(meta_offset)
+        } else {
+            Default::default()
+        };
+
+        SsTableIter {
+            block_size: self.block_size,
+            block_idx: 0,
+            entry_idx: 0,
+            block: None,
+            block_bytes,
+            table: table.clone(),
+        }
+    }
+}
+
+pub struct SsTableIter {
+    block_size: usize,
+    block_idx: usize,
+    entry_idx: usize,
+    block: Option<Block>,
+    block_bytes: Bytes,
+    table: SsTable,
+}
+
+impl Iterator for SsTableIter {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.block_bytes.is_empty() && self.block.is_none() {
+                return None;
+            }
+
+            if self.block_idx >= self.table.len() {
+                return None;
+            }
+
+            if self.block.is_none() {
+                let bytes = if self.block_idx == self.table.len() - 1 {
+                    self.block_bytes.copy_to_bytes(self.block_bytes.len())
+                } else {
+                    self.block_bytes.copy_to_bytes(self.block_size)
+                };
+
+                self.block = Some(Block::new(bytes));
+            }
+
+            let block = self.block.as_ref()?;
+
+            if self.entry_idx >= block.len() {
+                self.block = None;
+                self.entry_idx = 0;
+                self.block_idx += 1;
+
+                continue;
+            }
+
+            let entry = block.read_entry(self.entry_idx)?;
+            self.entry_idx += 1;
+
+            return Some(entry);
+        }
     }
 }

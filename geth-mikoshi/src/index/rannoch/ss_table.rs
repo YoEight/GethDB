@@ -67,7 +67,6 @@ impl BlockMetas {
 #[derive(Debug, Clone)]
 pub struct SsTable {
     pub id: Uuid,
-    pub data: Bytes,
     pub metas: BlockMetas,
 }
 
@@ -75,7 +74,6 @@ impl SsTable {
     pub fn new() -> Self {
         Self {
             id: Uuid::new_v4(),
-            data: Default::default(),
             metas: BlockMetas(Default::default()),
         }
     }
@@ -90,27 +88,6 @@ impl SsTable {
             block_size,
             block_builder: block,
         }
-    }
-
-    pub fn read_block(&self, block_idx: usize) -> Option<Block> {
-        if block_idx >= self.len() {
-            return None;
-        }
-
-        let meta = self.metas.read(block_idx);
-        let mut bytes = self.data.clone();
-        bytes.advance(meta.offset as usize);
-
-        let size = if block_idx + 1 >= self.len() {
-            self.data.len() - meta.offset as usize - 4
-        } else {
-            let next_meta = self.metas.read(block_idx + 1);
-            (next_meta.offset - meta.offset) as usize
-        };
-
-        let block_bytes = bytes.copy_to_bytes(size);
-
-        Some(Block::decode(block_bytes))
     }
 
     pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
@@ -139,48 +116,6 @@ impl SsTable {
         }
 
         vec![closest_lowest, closest_highest]
-    }
-
-    pub fn find_key(&self, key: u64, revision: u64) -> Option<BlockEntry> {
-        for block_id in self.find_best_candidates(key, revision) {
-            let block = self.read_block(block_id)?;
-
-            if let Some(entry) = block.find_entry(key, revision) {
-                return Some(entry);
-            }
-        }
-
-        None
-    }
-
-    pub fn encode(&self, buffer: &mut BytesMut) {
-        buffer.put(self.data.clone());
-        let offset = buffer.len();
-        buffer.put(self.metas.0.clone());
-        buffer.put_u32_le(offset as u32);
-    }
-
-    pub fn decode(id: Uuid, mut bytes: Bytes) -> Self {
-        let mut metas_offset = &bytes[bytes.len() - 4..];
-        let metas_offset = metas_offset.get_u32_le() as usize;
-        let data = bytes.copy_to_bytes(metas_offset);
-        let metas = bytes.copy_to_bytes(bytes.len() - 4);
-        let count = metas.len() / SSTABLE_META_ENTRY_SIZE;
-
-        Self {
-            id,
-            data,
-            metas: BlockMetas(metas),
-        }
-    }
-
-    pub fn iter(&self) -> Iter {
-        Iter {
-            block_idx: 0,
-            entry_idx: 0,
-            block: None,
-            table: self.clone(),
-        }
     }
 
     pub fn len(&self) -> usize {
@@ -222,59 +157,5 @@ impl<'a> Builder<'a> {
 
     pub fn len(&self) -> usize {
         self.count
-    }
-
-    pub fn build(self) -> SsTable {
-        let mut buffer = self.block_builder.complete();
-
-        buffer.put_u32_le(self.count as u32);
-
-        SsTable {
-            id: Uuid::new_v4(),
-            data: buffer.split().freeze(),
-            metas: BlockMetas(self.metas.freeze()),
-        }
-    }
-
-    pub fn close(self) -> BlockMetas {
-        BlockMetas(self.metas.freeze())
-    }
-}
-
-pub struct Iter {
-    block_idx: usize,
-    entry_idx: usize,
-    block: Option<Block>,
-    table: SsTable,
-}
-
-impl Iterator for Iter {
-    type Item = BlockEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        loop {
-            if self.block_idx >= self.table.len() {
-                return None;
-            }
-
-            if self.block.is_none() {
-                self.block = Some(self.table.read_block(self.block_idx)?);
-            }
-
-            let block = self.block.as_ref()?;
-
-            if self.entry_idx >= block.len() {
-                self.block = None;
-                self.entry_idx = 0;
-                self.block_idx += 1;
-
-                continue;
-            }
-
-            let entry = block.read_entry(self.entry_idx)?;
-            self.entry_idx += 1;
-
-            return Some(entry);
-        }
     }
 }

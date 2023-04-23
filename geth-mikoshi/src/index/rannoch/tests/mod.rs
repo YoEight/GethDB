@@ -24,7 +24,6 @@ pub fn position_of(idx: usize) -> u64 {
 pub fn test_ss_table() -> SsTable {
     SsTable {
         id: Uuid::nil(),
-        data: Default::default(),
         metas: BlockMetas::new(Default::default()),
     }
 }

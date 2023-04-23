@@ -1,5 +1,7 @@
 use crate::index::rannoch::block::BlockEntry;
+use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::mem_table::MemTable;
+use crate::index::rannoch::tests::test_ss_table;
 use bytes::BytesMut;
 
 #[test]
@@ -106,15 +108,22 @@ fn test_mem_table_iter() {
 
 #[test]
 fn test_mem_table_flush() {
-    let mut buffer = BytesMut::new();
+    let mut storage = InMemStorage::new(128);
+    let mut table = test_ss_table();
     let mut mem_table = MemTable::new();
 
     mem_table.put(1, 0, 1);
     mem_table.put(2, 0, 2);
     mem_table.put(3, 0, 3);
 
-    let table = mem_table.flush(&mut buffer, 128);
-    let mut iter = table.iter();
+    let values = mem_table
+        .into_iter()
+        .map(|entry| (entry.key, entry.revision, entry.position));
+
+    storage.sst_put(&mut table, values);
+    let block = storage.sst_read_block(&table, 0).unwrap();
+    block.dump();
+    let mut iter = storage.sst_iter(&table);
 
     let entry = iter.next().unwrap();
     assert_eq!(1, entry.key);

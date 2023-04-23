@@ -7,17 +7,6 @@ use crate::index::rannoch::tests::{
 use bytes::BytesMut;
 use uuid::Uuid;
 
-fn generate_sst() -> SsTable {
-    let mut buffer = BytesMut::new();
-    let mut builder = SsTable::builder(&mut buffer, 128);
-
-    for idx in 0..NUM_OF_KEYS {
-        builder.add(key_of(idx), revision_of(idx), position_of(idx));
-    }
-
-    builder.build()
-}
-
 #[test]
 fn test_in_mem_sst_build_single_key() {
     let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);

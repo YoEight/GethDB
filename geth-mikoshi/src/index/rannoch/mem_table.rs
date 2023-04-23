@@ -61,20 +61,6 @@ impl MemTable {
         Scan::new(key, buffer, range)
     }
 
-    pub fn flush(self, buffer: &mut BytesMut, block_size: usize) -> SsTable {
-        let mut builder = SsTable::builder(buffer, block_size);
-
-        for (key, streams) in self.inner {
-            let scan = Scan::new(key, streams, ..);
-
-            for entry in scan {
-                builder.add(key, entry.revision, entry.position);
-            }
-        }
-
-        builder.build()
-    }
-
     pub fn size(&self) -> usize {
         self.entries_count * MEM_TABLE_ENTRY_SIZE
     }
