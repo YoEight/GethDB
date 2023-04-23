@@ -34,3 +34,10 @@ pub fn in_mem_generate_block(storage: &mut InMemStorage) {
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     storage.sst_put(&mut table, values);
 }
+
+pub fn in_mem_generate_sst() -> InMemStorage {
+    let mut storage = InMemStorage::new(128);
+    in_mem_generate_block(&mut storage);
+
+    storage
+}

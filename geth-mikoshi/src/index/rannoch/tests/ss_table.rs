@@ -1,20 +1,11 @@
-use crate::index::rannoch::block::BLOCK_MIN_SIZE;
+use crate::index::rannoch::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
+use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::ss_table::SsTable;
+use crate::index::rannoch::tests::{
+    in_mem_generate_sst, key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS,
+};
 use bytes::BytesMut;
-
-const NUM_OF_KEYS: usize = 100;
-
-fn key_of(idx: usize) -> u64 {
-    idx as u64 * 5
-}
-
-fn revision_of(idx: usize) -> u64 {
-    idx as u64 * 42
-}
-
-fn position_of(idx: usize) -> u64 {
-    idx as u64
-}
+use uuid::Uuid;
 
 fn generate_sst() -> SsTable {
     let mut buffer = BytesMut::new();
@@ -28,13 +19,13 @@ fn generate_sst() -> SsTable {
 }
 
 #[test]
-fn test_sst_build_single_key() {
-    let mut buffer = BytesMut::new();
-    let mut builder = SsTable::builder(&mut buffer, BLOCK_MIN_SIZE);
+fn test_in_mem_sst_build_single_key() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
+    let mut table = test_ss_table();
 
-    builder.add(1, 2, 3);
-    let table = builder.build();
-    let entry = table.find_key(1, 2).expect("to be defined");
+    storage.sst_put(&mut table, [(1, 2, 3)]);
+
+    let entry = storage.sst_find_key(&table, 1, 2).unwrap();
 
     assert_eq!(1, entry.key);
     assert_eq!(2, entry.revision);
@@ -42,83 +33,48 @@ fn test_sst_build_single_key() {
 }
 
 #[test]
-fn test_sst_build_two_block() {
-    let mut buffer = BytesMut::new();
-    let mut builder = SsTable::builder(&mut buffer, BLOCK_MIN_SIZE);
+fn test_in_mem_sst_build_two_blocks() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
+    let mut table = test_ss_table();
 
-    builder.add(1, 2, 3);
-    builder.add(2, 3, 4);
+    storage.sst_put(&mut table, [(1, 2, 3), (2, 3, 4)]);
 
-    assert_eq!(2, builder.len());
+    let entry = storage.sst_find_key(&table, 1, 2).unwrap();
 
-    let table = builder.build();
-    let entry = table.find_key(1, 2).expect("to be defined");
     assert_eq!(1, entry.key);
     assert_eq!(2, entry.revision);
     assert_eq!(3, entry.position);
 
-    let entry = table.find_key(2, 3).expect("to be defined");
+    let entry = storage.sst_find_key(&table, 2, 3).unwrap();
+
     assert_eq!(2, entry.key);
     assert_eq!(3, entry.revision);
     assert_eq!(4, entry.position);
 }
 
 #[test]
-fn test_sst_key_not_found() {
-    let mut buffer = BytesMut::new();
-    let mut builder = SsTable::builder(&mut buffer, BLOCK_MIN_SIZE);
+fn test_in_mem_sst_key_not_found() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
+    let mut table = test_ss_table();
 
-    builder.add(1, 2, 3);
+    storage.sst_put(&mut table, [(1, 2, 3)]);
 
-    let table = builder.build();
-
-    assert!(table.find_key(1, 3).is_none());
+    assert!(storage.sst_find_key(&table, 1, 3).is_none());
 }
 
 #[test]
-fn test_sst_encoding() {
-    let table = generate_sst();
-    let mut buffer = BytesMut::new();
-    table.encode(&mut buffer);
-
-    let decoded_table = SsTable::decode(table.id, buffer.freeze());
-
-    assert_eq!(table.len(), decoded_table.len());
+fn test_in_mem_sst_find_key() {
+    let storage = in_mem_generate_sst();
+    let table = storage.sst_load(Uuid::nil()).unwrap();
 
     for i in 0..NUM_OF_KEYS {
         let key = key_of(i);
         let revision = revision_of(i);
         let position = position_of(i);
 
-        let entry = table.find_key(key, revision).expect("to be defined");
-        let decoded_entry = decoded_table
-            .find_key(key, revision)
+        let entry = storage
+            .sst_find_key(&table, key, revision)
             .expect("to be defined");
-
-        assert_eq!(key, entry.key);
-        assert_eq!(revision, entry.revision);
-        assert_eq!(position, entry.position);
-        assert_eq!(entry.key, decoded_entry.key);
-        assert_eq!(entry.revision, decoded_entry.revision);
-        assert_eq!(entry.position, decoded_entry.position);
-    }
-}
-
-#[test]
-fn test_sst_build_all() {
-    generate_sst();
-}
-
-#[test]
-fn test_sst_find_key() {
-    let table = generate_sst();
-
-    for i in 0..NUM_OF_KEYS {
-        let key = key_of(i);
-        let revision = revision_of(i);
-        let position = position_of(i);
-
-        let entry = table.find_key(key, revision).expect("to be defined");
 
         assert_eq!(key, entry.key);
         assert_eq!(revision, entry.revision);
