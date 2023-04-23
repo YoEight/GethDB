@@ -78,18 +78,6 @@ impl SsTable {
         }
     }
 
-    pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
-        let metas = buffer.split();
-        let block = Block::builder(buffer, block_size);
-
-        Builder {
-            metas,
-            count: 0,
-            block_size,
-            block_builder: block,
-        }
-    }
-
     pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
         let mut closest_lowest = 0usize;
         let mut closest_highest = 0usize;
@@ -120,42 +108,5 @@ impl SsTable {
 
     pub fn len(&self) -> usize {
         self.metas.len()
-    }
-}
-
-pub struct Builder<'a> {
-    pub count: usize,
-    pub block_size: usize,
-    pub block_builder: block::Builder<'a>,
-    pub metas: BytesMut,
-}
-
-impl<'a> Builder<'a> {
-    pub fn add(&mut self, key: u64, revision: u64, position: u64) {
-        let mut attempts = 1;
-
-        loop {
-            if self.block_builder.add(key, revision, position) {
-                if self.block_builder.count() == 1 {
-                    self.count += 1;
-                    self.metas.put_u32_le(self.block_builder.offset() as u32);
-                    self.metas.put_u64_le(key);
-                    self.metas.put_u64_le(revision);
-                }
-
-                return;
-            }
-
-            if attempts >= 2 {
-                panic!("Failed to push new entry even after creating a new block. Block size must be too short");
-            }
-
-            self.block_builder.new_block();
-            attempts += 1;
-        }
-    }
-
-    pub fn len(&self) -> usize {
-        self.count
     }
 }

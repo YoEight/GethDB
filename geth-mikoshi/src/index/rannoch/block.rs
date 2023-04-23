@@ -59,15 +59,6 @@ pub struct Block {
 }
 
 impl Block {
-    pub fn builder(buffer: &mut BytesMut, block_size: usize) -> Builder {
-        Builder {
-            offset: buffer.len(),
-            buffer,
-            count: 0,
-            block_size,
-        }
-    }
-
     pub fn new(data: Bytes) -> Self {
         Self { data }
     }
@@ -148,79 +139,5 @@ impl Block {
 
     pub fn len(&self) -> usize {
         self.count()
-    }
-}
-
-pub struct Builder<'a> {
-    pub offset: usize,
-    pub buffer: &'a mut BytesMut,
-    pub count: usize,
-    pub block_size: usize,
-}
-
-impl<'a> Builder<'a> {
-    pub fn new(buffer: &'a mut BytesMut, offset: usize, count: usize, block_size: usize) -> Self {
-        let count = if buffer.is_empty() {
-            buffer.resize(block_size, 0);
-            0usize
-        } else {
-            let mut bytes = &buffer[block_size - 2..];
-            bytes.get_u16_le() as usize
-        };
-
-        buffer.advance(count * BLOCK_ENTRY_SIZE);
-
-        Self {
-            offset,
-            buffer,
-            count,
-            block_size,
-        }
-    }
-
-    pub fn add(&mut self, key: u64, revision: u64, position: u64) -> bool {
-        if self.size() + BLOCK_ENTRY_SIZE > self.block_size {
-            return false;
-        }
-
-        self.buffer.put_u64_le(key);
-        self.buffer.put_u64_le(revision);
-        self.buffer.put_u64_le(position);
-        self.count += 1;
-
-        true
-    }
-
-    pub fn build(self) -> Block {
-        Block {
-            data: self.buffer.split().freeze(),
-        }
-    }
-
-    pub fn new_block(&mut self) {
-        self.buffer.put_u16_le(self.count as u16);
-        self.count = 0;
-        self.offset = self.buffer.len();
-    }
-
-    pub fn offset(&self) -> usize {
-        self.offset
-    }
-
-    pub fn count(&self) -> usize {
-        self.count
-    }
-
-    pub fn complete(mut self) -> &'a mut BytesMut {
-        self.buffer.put_u16_le(self.count as u16);
-        self.buffer
-    }
-
-    pub fn done(self) {
-        self.buffer.put_u16_le(self.count as u16);
-    }
-
-    pub fn size(&self) -> usize {
-        self.buffer.len() - self.offset
     }
 }
