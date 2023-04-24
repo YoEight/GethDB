@@ -185,13 +185,44 @@ impl InMemStorage {
                     }
                 }
 
-                tables.push(new_table);
+                tables.push_front(new_table);
                 break;
             }
 
-            lsm.levels.insert(level, vec![new_table]);
+            let mut tables = VecDeque::new();
+            tables.push_front(new_table);
+
+            lsm.levels.insert(level, tables);
             break;
         }
+    }
+
+    pub fn lsm_get(&self, lsm: &LsmStorage, key: u64, revision: u64) -> Option<u64> {
+        let mut result = lsm.active_table.get(key, revision);
+
+        if result.is_some() {
+            return result;
+        }
+
+        for mem_table in lsm.immutable_tables.iter() {
+            result = mem_table.get(key, revision);
+
+            if result.is_some() {
+                return result;
+            }
+        }
+
+        for ss_tables in lsm.levels.values() {
+            for table in ss_tables {
+                result = self.sst_find_key(table, key, revision).map(|e| e.position);
+
+                if result.is_some() {
+                    return result;
+                }
+            }
+        }
+
+        None
     }
 }
 

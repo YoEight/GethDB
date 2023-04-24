@@ -1,7 +1,7 @@
 use crate::index::rannoch::mem_table::{MemTable, MEM_TABLE_ENTRY_SIZE};
 use crate::index::rannoch::ss_table::SsTable;
 use bytes::BytesMut;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::ops::RangeBounds;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
@@ -11,8 +11,8 @@ pub struct LsmStorage {
     pub mem_table_max_size: usize,
     pub ss_table_max_count: usize,
     pub active_table: MemTable,
-    pub immutable_tables: Vec<MemTable>,
-    pub levels: BTreeMap<u8, Vec<SsTable>>,
+    pub immutable_tables: VecDeque<MemTable>,
+    pub levels: BTreeMap<u8, VecDeque<SsTable>>,
 }
 
 impl LsmStorage {
@@ -21,7 +21,7 @@ impl LsmStorage {
             mem_table_max_size: LSM_DEFAULT_MEM_TABLE_SIZE,
             ss_table_max_count: 4,
             active_table: MemTable::default(),
-            immutable_tables: vec![],
+            immutable_tables: VecDeque::new(),
             levels: Default::default(),
         }
     }
