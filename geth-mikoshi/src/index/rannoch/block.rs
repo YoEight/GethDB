@@ -126,22 +126,7 @@ impl Block {
     }
 
     pub fn find_entry(&self, key: u64, revision: u64) -> Option<BlockEntry> {
-        let key_id = KeyId { key, revision };
-        let mut low = 0usize;
-        let mut high = self.count() - 1;
-
-        while low <= high {
-            let mid = (low + high) / 2;
-            let entry = self.read_entry(mid)?;
-
-            match entry.partial_cmp(&key_id)? {
-                Ordering::Less => low = mid + 1,
-                Ordering::Greater => high = mid - 1,
-                Ordering::Equal => return Some(entry),
-            }
-        }
-
-        None
+        find_block_entry(&self.data, key, revision).some()
     }
 
     pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
@@ -178,6 +163,15 @@ fn block_entry_len(bytes: &Bytes) -> usize {
 enum SearchResult {
     Found { offset: usize, entry: BlockEntry },
     NotFound { edge: usize },
+}
+
+impl SearchResult {
+    fn some(self) -> Option<BlockEntry> {
+        match self {
+            SearchResult::Found { entry, .. } => Some(entry),
+            SearchResult::NotFound { .. } => None,
+        }
+    }
 }
 
 fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
