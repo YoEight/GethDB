@@ -1,6 +1,9 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
+use std::collections::Bound;
+use std::fs::read;
+use std::ops::RangeBounds;
 
 struct Offsets(Bytes);
 
@@ -34,7 +37,7 @@ impl PartialOrd<KeyId> for BlockEntry {
     }
 }
 
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+#[derive(Debug, Copy, Clone, PartialEq, Eq, Default)]
 pub struct BlockEntry {
     pub key: u64,
     pub revision: u64,
@@ -43,13 +46,17 @@ pub struct BlockEntry {
 
 impl BlockEntry {
     pub fn cmp_key_id(&self, entry: &BlockEntry) -> Ordering {
-        let key_ord = self.key.cmp(&entry.key);
+        self.cmp_key_rev(entry.key, entry.revision)
+    }
+
+    pub fn cmp_key_rev(&self, key: u64, revision: u64) -> Ordering {
+        let key_ord = self.key.cmp(&key);
 
         if key_ord.is_ne() {
             return key_ord;
         }
 
-        self.revision.cmp(&entry.revision)
+        self.revision.cmp(&revision)
     }
 }
 
@@ -137,7 +144,134 @@ impl Block {
         None
     }
 
+    pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
+    where
+        R: RangeBounds<u64>,
+    {
+        Scan::new(key, self.data.clone(), range)
+    }
+
     pub fn len(&self) -> usize {
         self.count()
+    }
+}
+
+fn read_block_entry(bytes: &Bytes, idx: usize) -> Option<BlockEntry> {
+    if bytes.remaining() < BLOCK_ENTRY_SIZE {
+        return None;
+    }
+
+    let mut temp = bytes.clone();
+    temp.advance(idx * BLOCK_ENTRY_SIZE);
+
+    Some(BlockEntry {
+        key: temp.get_u64_le(),
+        revision: temp.get_u64_le(),
+        position: temp.get_u64_le(),
+    })
+}
+
+fn block_entry_len(bytes: &Bytes) -> usize {
+    bytes.len() / BLOCK_ENTRY_SIZE
+}
+
+enum SearchResult {
+    Found { offset: usize, entry: BlockEntry },
+    NotFound { edge: usize },
+}
+
+fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
+    let key_id = KeyId { key, revision };
+    let mut low = 0usize;
+    let mut high = block_entry_len(bytes) - 1;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        let entry = read_block_entry(bytes, mid).unwrap();
+
+        match entry.partial_cmp(&key_id).unwrap() {
+            Ordering::Less => low = mid + 1,
+            Ordering::Greater => high = mid - 1,
+            Ordering::Equal => return SearchResult::Found { offset: mid, entry },
+        }
+    }
+
+    SearchResult::NotFound { edge: low }
+}
+
+pub struct Scan<R> {
+    key: u64,
+    revision: u64,
+    buffer: Bytes,
+    range: R,
+}
+
+impl<R> Scan<R>
+where
+    R: RangeBounds<u64>,
+{
+    fn new(key: u64, mut buffer: Bytes, range: R) -> Self {
+        let current = match range.start_bound() {
+            Bound::Included(x) => *x,
+            Bound::Excluded(x) => *x + 1,
+            Bound::Unbounded => 0,
+        };
+
+        let count = buffer.len() / BLOCK_ENTRY_SIZE;
+        if count != 0 {
+            let first_entry = read_block_entry(&buffer, 0).unwrap();
+            let last_entry = read_block_entry(&buffer, buffer.len() - 1).unwrap();
+
+            if first_entry.key > key || last_entry.key < key {
+                buffer = Bytes::new();
+            }
+        } else {
+            buffer = Bytes::new();
+        }
+
+        Self {
+            key,
+            revision: current,
+            buffer,
+            range,
+        }
+    }
+}
+
+impl<R> Iterator for Scan<R>
+where
+    R: RangeBounds<u64>,
+{
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if !self.buffer.has_remaining() || self.buffer.len() / BLOCK_ENTRY_SIZE == 0 {
+                return None;
+            }
+
+            match find_block_entry(&self.buffer, self.key, self.revision) {
+                SearchResult::Found { offset, entry } => {
+                    // We move pass the entry we are about to return.
+                    self.buffer
+                        .advance(offset * BLOCK_ENTRY_SIZE + BLOCK_ENTRY_SIZE);
+
+                    return Some(entry);
+                }
+
+                SearchResult::NotFound { edge } => {
+                    self.buffer.advance(edge * BLOCK_ENTRY_SIZE);
+                    self.revision += 1;
+                }
+            }
+
+            match self.range.end_bound() {
+                Bound::Included(end) | Bound::Excluded(end) if self.revision > *end => {
+                    self.buffer = Bytes::new();
+                    return None;
+                }
+                _ => {}
+            }
+        }
     }
 }

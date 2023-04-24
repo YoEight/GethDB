@@ -6,6 +6,7 @@ use crate::index::rannoch::IndexedPosition;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nom::character::complete::tab;
 use std::collections::{HashMap, VecDeque};
+use std::ops::RangeBounds;
 use uuid::Uuid;
 
 pub struct InMemStorage {
@@ -223,6 +224,19 @@ impl InMemStorage {
         }
 
         None
+    }
+
+    pub fn lsm_scan<R>(&self, lsm: &LsmStorage, key: u64, range: R)
+    where
+        R: RangeBounds<u64> + Copy,
+    {
+        let mut mem_table_merge: Vec<Box<dyn Iterator<Item = BlockEntry>>> = Vec::new();
+
+        mem_table_merge.push(Box::new(lsm.active_table.scan(key, range)));
+
+        for mem_table in lsm.immutable_tables.iter() {
+            mem_table_merge.push(Box::new(mem_table.scan(key, range)));
+        }
     }
 }
 
