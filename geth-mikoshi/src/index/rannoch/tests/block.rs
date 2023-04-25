@@ -182,6 +182,29 @@ fn test_in_mem_block_scan() {
 }
 
 #[test]
+fn test_in_mem_block_scan_gap() {
+    let mut storage = InMemStorage::default();
+    let mut table = SsTable::new();
+
+    storage.sst_put(&mut table, [(2, 1, 5), (2, 2, 6)]);
+
+    let block = storage.sst_read_block(&table, 0).unwrap();
+    let mut iter = block.scan(2, ..);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(2, entry.revision);
+    assert_eq!(6, entry.position);
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
 fn test_in_mem_block_scan_not_found_easy_1() {
     let mut storage = InMemStorage::default();
     let mut table = SsTable::new();
