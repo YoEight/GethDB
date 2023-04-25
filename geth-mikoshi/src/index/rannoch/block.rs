@@ -156,6 +156,18 @@ fn read_block_entry(bytes: &Bytes, idx: usize) -> Option<BlockEntry> {
     })
 }
 
+fn read_block_entry_mut(bytes: &mut Bytes) -> Option<BlockEntry> {
+    if bytes.remaining() < BLOCK_ENTRY_SIZE {
+        return None;
+    }
+
+    Some(BlockEntry {
+        key: bytes.get_u64_le(),
+        revision: bytes.get_u64_le(),
+        position: bytes.get_u64_le(),
+    })
+}
+
 fn block_entry_len(bytes: &Bytes) -> usize {
     bytes.len() / BLOCK_ENTRY_SIZE
 }
@@ -176,21 +188,26 @@ impl SearchResult {
 
 fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
     let key_id = KeyId { key, revision };
-    let mut low = 0usize;
-    let mut high = block_entry_len(bytes) - 1;
+    let mut low = 0i64;
+    let mut high = (block_entry_len(bytes) - 1) as i64;
 
     while low <= high {
         let mid = (low + high) / 2;
-        let entry = read_block_entry(bytes, mid).unwrap();
+        let entry = read_block_entry(bytes, mid as usize).unwrap();
 
         match entry.partial_cmp(&key_id).unwrap() {
             Ordering::Less => low = mid + 1,
             Ordering::Greater => high = mid - 1,
-            Ordering::Equal => return SearchResult::Found { offset: mid, entry },
+            Ordering::Equal => {
+                return SearchResult::Found {
+                    offset: mid as usize,
+                    entry,
+                }
+            }
         }
     }
 
-    SearchResult::NotFound { edge: low }
+    SearchResult::NotFound { edge: low as usize }
 }
 
 pub struct Scan<R> {
@@ -198,6 +215,7 @@ pub struct Scan<R> {
     revision: u64,
     buffer: Bytes,
     range: R,
+    anchored: bool,
 }
 
 impl<R> Scan<R>
@@ -214,7 +232,7 @@ where
         let count = buffer.len() / BLOCK_ENTRY_SIZE;
         if count != 0 {
             let first_entry = read_block_entry(&buffer, 0).unwrap();
-            let last_entry = read_block_entry(&buffer, buffer.len() - 1).unwrap();
+            let last_entry = read_block_entry(&buffer, count - 1).unwrap();
 
             if first_entry.key > key || last_entry.key < key {
                 buffer = Bytes::new();
@@ -228,6 +246,7 @@ where
             revision: current,
             buffer,
             range,
+            anchored: false,
         }
     }
 }
@@ -244,27 +263,42 @@ where
                 return None;
             }
 
-            match find_block_entry(&self.buffer, self.key, self.revision) {
-                SearchResult::Found { offset, entry } => {
-                    // We move pass the entry we are about to return.
-                    self.buffer
-                        .advance(offset * BLOCK_ENTRY_SIZE + BLOCK_ENTRY_SIZE);
-
-                    return Some(entry);
-                }
-
-                SearchResult::NotFound { edge } => {
-                    self.buffer.advance(edge * BLOCK_ENTRY_SIZE);
-                    self.revision += 1;
-                }
-            }
-
             match self.range.end_bound() {
                 Bound::Included(end) | Bound::Excluded(end) if self.revision > *end => {
                     self.buffer = Bytes::new();
                     return None;
                 }
                 _ => {}
+            }
+
+            if !self.anchored {
+                self.anchored = true;
+                match find_block_entry(&self.buffer, self.key, self.revision) {
+                    SearchResult::Found { offset, entry } => {
+                        // We move pass the entry we are about to return.
+                        self.buffer
+                            .advance(offset * BLOCK_ENTRY_SIZE + BLOCK_ENTRY_SIZE);
+                        self.revision += 1;
+
+                        return Some(entry);
+                    }
+
+                    SearchResult::NotFound { edge } => {
+                        self.buffer.advance(edge * BLOCK_ENTRY_SIZE);
+
+                        continue;
+                    }
+                }
+            }
+
+            if let Some(entry) = read_block_entry_mut(&mut self.buffer) {
+                if entry.key != self.key {
+                    self.buffer = Bytes::new();
+                    return None;
+                }
+
+                self.revision = entry.revision + 1;
+                return Some(entry);
             }
         }
     }
