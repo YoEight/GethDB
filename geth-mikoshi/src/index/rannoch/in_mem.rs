@@ -35,21 +35,8 @@ impl InMemStorage {
             return None;
         }
 
-        let block_meta = table.metas.read(block_idx);
-        let mut bytes = self.inner.get(&table.id)?.clone();
-        let mut meta_offset_bytes = &bytes[bytes.len() - 4..];
-        let meta_offset = meta_offset_bytes.get_u32_le() as usize;
-        let len = bytes.len();
-
-        bytes.advance(block_meta.offset as usize);
-
-        let size = if block_idx + 1 >= table.len() {
-            meta_offset - block_meta.offset as usize
-        } else {
-            self.block_size
-        };
-
-        Some(Block::new(bytes.copy_to_bytes(size)))
+        let bytes = self.inner.get(&table.id)?;
+        sst_read_block(bytes, table, self.block_size, block_idx)
     }
 
     pub fn sst_find_key(&self, table: &SsTable, key: u64, revision: u64) -> Option<BlockEntry> {
@@ -146,6 +133,19 @@ impl InMemStorage {
             block_bytes,
             table: table.clone(),
         }
+    }
+
+    pub fn sst_scan<R>(&self, table: &SsTable, key: u64, range: R) -> SsTableScan<R>
+    where
+        R: RangeBounds<u64> + Copy,
+    {
+        SsTableScan::new(
+            table,
+            self.inner.get(&table.id).cloned().unwrap_or_default(),
+            self.block_size,
+            key,
+            range,
+        )
     }
 
     pub fn sst_iter_tuples(&self, table: &SsTable) -> impl Iterator<Item = (u64, u64, u64)> {
@@ -294,33 +294,103 @@ impl Iterator for SsTableIter {
     }
 }
 
+pub fn sst_read_block(
+    bytes: &Bytes,
+    table: &SsTable,
+    block_size: usize,
+    block_idx: usize,
+) -> Option<Block> {
+    if block_idx >= table.len() {
+        return None;
+    }
+
+    let block_meta = table.metas.read(block_idx);
+    let mut bytes = bytes.clone();
+    let mut meta_offset_bytes = &bytes[bytes.len() - 4..];
+    let meta_offset = meta_offset_bytes.get_u32_le() as usize;
+    let len = bytes.len();
+
+    bytes.advance(block_meta.offset as usize);
+
+    let size = if block_idx + 1 >= table.len() {
+        meta_offset - block_meta.offset as usize
+    } else {
+        block_size
+    };
+
+    Some(Block::new(bytes.copy_to_bytes(size)))
+}
+
 pub struct SsTableScan<R> {
     range: R,
+    key: u64,
     bytes: Bytes,
     block_idx: usize,
     block: Option<super::block::Scan<R>>,
     table: SsTable,
+    candidates: Vec<usize>,
+    block_size: usize,
 }
 
 impl<R> SsTableScan<R>
 where
     R: RangeBounds<u64> + Copy,
 {
-    pub fn new(table: &SsTable, key: u64, range: R) -> Self {
-        let start = range_start(range);
-        let candidate = table.find_best_candidates(key, start);
+    pub fn new(table: &SsTable, bytes: Bytes, block_size: usize, key: u64, range: R) -> Self {
+        let candidates = table.find_best_candidates(key, range_start(range));
 
-        todo!()
+        Self {
+            range,
+            key,
+            bytes,
+            block_idx: 0,
+            block: None,
+            table: table.clone(),
+            block_size,
+            candidates,
+        }
     }
 }
 
 impl<R> Iterator for SsTableScan<R>
 where
-    R: RangeBounds<u64>,
+    R: RangeBounds<u64> + Copy,
 {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        todo!()
+        // TODO - Track if a block scan immediately returns nothing. It basically means there is no
+        // point at trying further block as other blocks have 0 chances of hosting the values we
+        // are looking for.
+        loop {
+            if let Some(mut block) = self.block.take() {
+                if let Some(entry) = block.next() {
+                    self.block = Some(block);
+                    return Some(entry);
+                }
+
+                self.block_idx += 1;
+                continue;
+            }
+
+            if !self.candidates.is_empty() {
+                self.block_idx = self.candidates.remove(0);
+                let block =
+                    sst_read_block(&self.bytes, &self.table, self.block_size, self.block_idx)?;
+
+                self.block = Some(block.scan(self.key, self.range));
+                continue;
+            }
+
+            if self.block_idx <= self.table.len() - 1 {
+                let block =
+                    sst_read_block(&self.bytes, &self.table, self.block_size, self.block_idx)?;
+
+                self.block = Some(block.scan(self.key, self.range));
+                continue;
+            }
+
+            return None;
+        }
     }
 }

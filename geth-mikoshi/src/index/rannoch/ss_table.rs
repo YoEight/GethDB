@@ -103,6 +103,10 @@ impl SsTable {
             }
         }
 
+        if closest_lowest == closest_highest {
+            return vec![closest_lowest];
+        }
+
         vec![closest_lowest, closest_highest]
     }
 
