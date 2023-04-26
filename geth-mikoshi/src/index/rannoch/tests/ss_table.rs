@@ -110,3 +110,67 @@ fn test_in_mem_ss_table_scan() {
 
     assert!(iter.next().is_none());
 }
+
+#[test]
+fn test_in_mem_ss_table_scan_3_blocks() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE * 3);
+    let mut table = SsTable::new();
+
+    storage.sst_put(
+        &mut table,
+        [
+            (1, 0, 1),
+            (1, 1, 2),
+            (1, 2, 3),
+            (2, 0, 4),
+            (2, 1, 5),
+            (2, 2, 6),
+            (3, 0, 7),
+            (3, 1, 8),
+            (3, 2, 9),
+        ],
+    );
+
+    assert_eq!(3, table.len());
+
+    let mut iter = storage.sst_scan(&table, 2, ..);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(0, entry.revision);
+    assert_eq!(4, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(2, entry.revision);
+    assert_eq!(6, entry.position);
+
+    assert!(iter.next().is_none());
+}
+#[test]
+
+fn test_in_mem_ss_table_scan_not_found() {
+    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE * 3);
+    let mut table = SsTable::new();
+
+    storage.sst_put(
+        &mut table,
+        [
+            (1, 0, 1),
+            (1, 1, 2),
+            (1, 2, 3),
+            (3, 0, 7),
+            (3, 1, 8),
+            (3, 2, 9),
+        ],
+    );
+
+    let mut iter = storage.sst_scan(&table, 2, ..);
+
+    assert!(iter.next().is_none());
+}
