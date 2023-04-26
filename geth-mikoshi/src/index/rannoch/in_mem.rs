@@ -137,7 +137,7 @@ impl InMemStorage {
 
     pub fn sst_scan<R>(&self, table: &SsTable, key: u64, range: R) -> SsTableScan<R>
     where
-        R: RangeBounds<u64> + Copy,
+        R: RangeBounds<u64> + Clone,
     {
         SsTableScan::new(
             table,
@@ -233,19 +233,19 @@ impl InMemStorage {
         range: R,
     ) -> impl Iterator<Item = BlockEntry>
     where
-        R: RangeBounds<u64> + Copy + 'static,
+        R: RangeBounds<u64> + Clone + 'static,
     {
         let mut scans: Vec<Box<dyn Iterator<Item = BlockEntry>>> = Vec::new();
 
-        scans.push(Box::new(lsm.active_table.scan(key, range)));
+        scans.push(Box::new(lsm.active_table.scan(key, range.clone())));
 
         for mem_table in lsm.immutable_tables.iter() {
-            scans.push(Box::new(mem_table.scan(key, range)));
+            scans.push(Box::new(mem_table.scan(key, range.clone())));
         }
 
         for tables in lsm.levels.values() {
             for table in tables {
-                scans.push(Box::new(self.sst_scan(table, key, range)));
+                scans.push(Box::new(self.sst_scan(table, key, range.clone())));
             }
         }
 
@@ -347,10 +347,10 @@ pub struct SsTableScan<R> {
 
 impl<R> SsTableScan<R>
 where
-    R: RangeBounds<u64> + Copy,
+    R: RangeBounds<u64> + Clone,
 {
     pub fn new(table: &SsTable, bytes: Bytes, block_size: usize, key: u64, range: R) -> Self {
-        let candidates = table.find_best_candidates(key, range_start(range));
+        let candidates = table.find_best_candidates(key, range_start(range.clone()));
 
         Self {
             range,
@@ -367,7 +367,7 @@ where
 
 impl<R> Iterator for SsTableScan<R>
 where
-    R: RangeBounds<u64> + Copy,
+    R: RangeBounds<u64> + Clone,
 {
     type Item = BlockEntry;
 
@@ -391,7 +391,7 @@ where
                 let block =
                     sst_read_block(&self.bytes, &self.table, self.block_size, self.block_idx)?;
 
-                self.block = Some(block.scan(self.key, self.range));
+                self.block = Some(block.scan(self.key, self.range.clone()));
                 continue;
             }
 
@@ -399,7 +399,7 @@ where
                 let block =
                     sst_read_block(&self.bytes, &self.table, self.block_size, self.block_idx)?;
 
-                self.block = Some(block.scan(self.key, self.range));
+                self.block = Some(block.scan(self.key, self.range.clone()));
                 continue;
             }
 

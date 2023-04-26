@@ -46,4 +46,59 @@ fn test_in_mem_lsm_mem_table_scan() {
     assert_eq!(5, entry.position);
 
     assert!(iter.next().is_none());
+
+    let mut iter = storage.lsm_scan(&lsm, 2, 0..=2);
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(0, entry.revision);
+    assert_eq!(2, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    assert!(iter.next().is_none());
+
+    let mut iter = storage.lsm_scan(&lsm, 2, 0..2);
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(0, entry.revision);
+    assert_eq!(2, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    assert!(iter.next().is_none());
+
+    let mut iter = storage.lsm_scan(&lsm, 2, 0..=1);
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(0, entry.revision);
+    assert_eq!(2, entry.position);
+
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    assert!(iter.next().is_none());
+
+    let mut iter = storage.lsm_scan(&lsm, 2, 0..1);
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(0, entry.revision);
+    assert_eq!(2, entry.position);
+
+    assert!(iter.next().is_none());
+
+    let mut iter = storage.lsm_scan(&lsm, 2, 1..);
+    let entry = iter.next().unwrap();
+    assert_eq!(2, entry.key);
+    assert_eq!(1, entry.revision);
+    assert_eq!(5, entry.position);
+
+    assert!(iter.next().is_none());
 }

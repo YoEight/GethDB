@@ -34,7 +34,7 @@ where
     }
 }
 
-pub fn in_range<R>(range: R, value: u64) -> Range
+pub fn in_range<R>(range: &R, value: u64) -> Range
 where
     R: RangeBounds<u64>,
 {

@@ -132,7 +132,7 @@ impl Block {
 
     pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
     where
-        R: RangeBounds<u64> + Copy,
+        R: RangeBounds<u64> + Clone,
     {
         Scan::new(key, self.data.clone(), range)
     }
@@ -221,10 +221,10 @@ pub struct Scan<R> {
 
 impl<R> Scan<R>
 where
-    R: RangeBounds<u64> + Copy,
+    R: RangeBounds<u64> + Clone,
 {
     fn new(key: u64, mut buffer: Bytes, range: R) -> Self {
-        let current = range_start(range);
+        let current = range_start(range.clone());
         let count = buffer.len() / BLOCK_ENTRY_SIZE;
 
         if count != 0 {
@@ -250,7 +250,7 @@ where
 
 impl<R> Iterator for Scan<R>
 where
-    R: RangeBounds<u64> + Copy,
+    R: RangeBounds<u64> + Clone,
 {
     type Item = BlockEntry;
 
@@ -260,7 +260,7 @@ where
                 return None;
             }
 
-            if let Range::Outbound(r) = in_range(self.range, self.revision) {
+            if let Range::Outbound(r) = in_range(&self.range, self.revision) {
                 if r.is_gt() {
                     self.buffer = Bytes::new();
                     return None;
