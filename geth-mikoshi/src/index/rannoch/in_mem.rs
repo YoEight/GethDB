@@ -226,17 +226,30 @@ impl InMemStorage {
         None
     }
 
-    pub fn lsm_scan<R>(&self, lsm: &LsmStorage, key: u64, range: R)
+    pub fn lsm_scan<R>(
+        &self,
+        lsm: &LsmStorage,
+        key: u64,
+        range: R,
+    ) -> impl Iterator<Item = BlockEntry>
     where
-        R: RangeBounds<u64> + Copy,
+        R: RangeBounds<u64> + Copy + 'static,
     {
-        let mut mem_table_merge: Vec<Box<dyn Iterator<Item = BlockEntry>>> = Vec::new();
+        let mut scans: Vec<Box<dyn Iterator<Item = BlockEntry>>> = Vec::new();
 
-        mem_table_merge.push(Box::new(lsm.active_table.scan(key, range)));
+        scans.push(Box::new(lsm.active_table.scan(key, range)));
 
         for mem_table in lsm.immutable_tables.iter() {
-            mem_table_merge.push(Box::new(mem_table.scan(key, range)));
+            scans.push(Box::new(mem_table.scan(key, range)));
         }
+
+        for tables in lsm.levels.values() {
+            for table in tables {
+                scans.push(Box::new(self.sst_scan(table, key, range)));
+            }
+        }
+
+        Merge::new(scans)
     }
 }
 

@@ -3,6 +3,7 @@ use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use uuid::Uuid;
 
 mod block;
+mod lsm;
 mod mem_table;
 mod merge;
 mod ss_table;
