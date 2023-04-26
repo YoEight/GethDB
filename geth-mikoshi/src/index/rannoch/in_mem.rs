@@ -2,7 +2,7 @@ use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::lsm::{LsmStorage, LSM_BASE_SSTABLE_BLOCK_COUNT};
 use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
-use crate::index::rannoch::IndexedPosition;
+use crate::index::rannoch::{range_start, IndexedPosition};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use nom::character::complete::tab;
 use std::collections::{HashMap, VecDeque};
@@ -291,5 +291,36 @@ impl Iterator for SsTableIter {
 
             return Some(entry);
         }
+    }
+}
+
+pub struct SsTableScan<R> {
+    range: R,
+    bytes: Bytes,
+    block_idx: usize,
+    block: Option<super::block::Scan<R>>,
+    table: SsTable,
+}
+
+impl<R> SsTableScan<R>
+where
+    R: RangeBounds<u64> + Copy,
+{
+    pub fn new(table: &SsTable, key: u64, range: R) -> Self {
+        let start = range_start(range);
+        let candidate = table.find_best_candidates(key, start);
+
+        todo!()
+    }
+}
+
+impl<R> Iterator for SsTableScan<R>
+where
+    R: RangeBounds<u64>,
+{
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        todo!()
     }
 }

@@ -1,3 +1,4 @@
+use crate::index::rannoch::{in_range, range_start, Range};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::collections::btree_map::Entry;
@@ -131,7 +132,7 @@ impl Block {
 
     pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
     where
-        R: RangeBounds<u64>,
+        R: RangeBounds<u64> + Copy,
     {
         Scan::new(key, self.data.clone(), range)
     }
@@ -220,16 +221,12 @@ pub struct Scan<R> {
 
 impl<R> Scan<R>
 where
-    R: RangeBounds<u64>,
+    R: RangeBounds<u64> + Copy,
 {
     fn new(key: u64, mut buffer: Bytes, range: R) -> Self {
-        let current = match range.start_bound() {
-            Bound::Included(x) => *x,
-            Bound::Excluded(x) => *x + 1,
-            Bound::Unbounded => 0,
-        };
-
+        let current = range_start(range);
         let count = buffer.len() / BLOCK_ENTRY_SIZE;
+
         if count != 0 {
             let first_entry = read_block_entry(&buffer, 0).unwrap();
             let last_entry = read_block_entry(&buffer, count - 1).unwrap();
@@ -253,7 +250,7 @@ where
 
 impl<R> Iterator for Scan<R>
 where
-    R: RangeBounds<u64>,
+    R: RangeBounds<u64> + Copy,
 {
     type Item = BlockEntry;
 
@@ -263,12 +260,11 @@ where
                 return None;
             }
 
-            match self.range.end_bound() {
-                Bound::Included(end) | Bound::Excluded(end) if self.revision > *end => {
+            if let Range::Outbound(r) = in_range(self.range, self.revision) {
+                if r.is_gt() {
                     self.buffer = Bytes::new();
                     return None;
                 }
-                _ => {}
             }
 
             if !self.anchored {

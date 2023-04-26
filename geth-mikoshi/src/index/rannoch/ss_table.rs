@@ -81,25 +81,25 @@ impl SsTable {
     pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
         let mut closest_lowest = 0usize;
         let mut closest_highest = 0usize;
-        let mut low = 0usize;
-        let mut high = self.len() - 1;
+        let mut low = 0i64;
+        let mut high = (self.len() - 1) as i64;
 
         while low <= high {
             let mid = (low + high) / 2;
-            let meta = self.metas.read(mid);
+            let meta = self.metas.read(mid as usize);
 
             match meta.compare_key_id(key, revision) {
                 Ordering::Less => {
-                    closest_lowest = mid;
+                    closest_lowest = mid as usize;
                     low = mid + 1;
                 }
 
                 Ordering::Greater => {
-                    closest_highest = mid;
+                    closest_highest = mid as usize;
                     high = mid - 1;
                 }
 
-                Ordering::Equal => return vec![mid],
+                Ordering::Equal => return vec![mid as usize],
             }
         }
 
