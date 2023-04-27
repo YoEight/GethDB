@@ -31,17 +31,10 @@ impl MemTable {
     }
 
     pub fn put(&mut self, key: u64, revision: u64, position: u64) {
-        if let Some(stream) = self.inner.get_mut(&key) {
-            stream.put_u64_le(revision);
-            stream.put_u64_le(position);
-        } else {
-            let mut stream = BytesMut::new();
+        let mut stream = self.inner.entry(key).or_default();
 
-            stream.put_u64_le(0);
-            stream.put_u64_le(position);
-            self.inner.insert(key, stream);
-        }
-
+        stream.put_u64_le(revision);
+        stream.put_u64_le(position);
         self.entries_count += 1;
     }
 

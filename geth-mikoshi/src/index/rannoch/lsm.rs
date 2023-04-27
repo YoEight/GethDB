@@ -7,43 +7,45 @@ use std::ops::RangeBounds;
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
 
-pub struct LsmStorage {
+#[derive(Debug, Clone, Copy)]
+pub struct LsmSettings {
     pub mem_table_max_size: usize,
     pub ss_table_max_count: usize,
+}
+
+impl Default for LsmSettings {
+    fn default() -> Self {
+        Self {
+            mem_table_max_size: LSM_DEFAULT_MEM_TABLE_SIZE,
+            ss_table_max_count: LSM_BASE_SSTABLE_BLOCK_COUNT,
+        }
+    }
+}
+
+#[derive(Default)]
+pub struct Lsm {
+    pub settings: LsmSettings,
     pub active_table: MemTable,
     pub immutable_tables: VecDeque<MemTable>,
     pub levels: BTreeMap<u8, VecDeque<SsTable>>,
 }
 
-impl LsmStorage {
-    pub fn empty_with_default() -> Self {
+impl Lsm {
+    pub fn new(settings: LsmSettings) -> Self {
         Self {
-            mem_table_max_size: LSM_DEFAULT_MEM_TABLE_SIZE,
-            ss_table_max_count: 4,
-            active_table: MemTable::default(),
-            immutable_tables: VecDeque::new(),
+            settings,
+            active_table: Default::default(),
+            immutable_tables: Default::default(),
             levels: Default::default(),
         }
     }
 
-    pub fn put(&mut self, key: u64, revision: u64, position: u64) {
-        if self.active_table.size() + MEM_TABLE_ENTRY_SIZE > self.mem_table_max_size {
-            self.bookkeeping();
-        }
-
-        self.active_table.put(key, revision, position);
+    pub fn ss_table_count(&self) -> usize {
+        self.levels.values().map(|ts| ts.len()).sum()
     }
 
-    pub fn get(&self, key: u64, revision: u64) -> Option<u64> {
-        todo!()
+    pub fn ss_table_first(&self) -> Option<&SsTable> {
+        let ts = self.levels.get(&0)?;
+        ts.get(0)
     }
-
-    pub fn scan<R>(&self, key: u64, range: R)
-    where
-        R: RangeBounds<u64>,
-    {
-        todo!()
-    }
-
-    fn bookkeeping(&mut self) {}
 }

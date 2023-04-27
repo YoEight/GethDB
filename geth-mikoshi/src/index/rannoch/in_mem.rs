@@ -1,5 +1,5 @@
 use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::lsm::{LsmStorage, LSM_BASE_SSTABLE_BLOCK_COUNT};
+use crate::index::rannoch::lsm::{Lsm, LSM_BASE_SSTABLE_BLOCK_COUNT};
 use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::{range_start, IndexedPosition};
@@ -153,10 +153,10 @@ impl InMemStorage {
             .map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn lsm_put(&mut self, lsm: &mut LsmStorage, key: u64, revision: u64, position: u64) {
+    pub fn lsm_put(&mut self, lsm: &mut Lsm, key: u64, revision: u64, position: u64) {
         lsm.active_table.put(key, revision, position);
 
-        if lsm.active_table.size() < lsm.mem_table_max_size {
+        if lsm.active_table.size() < lsm.settings.mem_table_max_size {
             return;
         }
 
@@ -168,11 +168,13 @@ impl InMemStorage {
 
         loop {
             if let Some(tables) = lsm.levels.get_mut(&level) {
-                if tables.len() + 1 >= lsm.ss_table_max_count {
+                if tables.len() + 1 >= lsm.settings.ss_table_max_count {
                     let mut targets = vec![self.sst_iter(&new_table)];
+                    self.inner.remove(&new_table.id);
 
                     for table in tables.drain(..) {
                         targets.push(self.sst_iter(&table));
+                        self.inner.remove(&table.id);
                     }
 
                     let values = Merge::new(targets).map(|e| (e.key, e.revision, e.position));
@@ -198,7 +200,7 @@ impl InMemStorage {
         }
     }
 
-    pub fn lsm_get(&self, lsm: &LsmStorage, key: u64, revision: u64) -> Option<u64> {
+    pub fn lsm_get(&self, lsm: &Lsm, key: u64, revision: u64) -> Option<u64> {
         let mut result = lsm.active_table.get(key, revision);
 
         if result.is_some() {
@@ -226,12 +228,7 @@ impl InMemStorage {
         None
     }
 
-    pub fn lsm_scan<R>(
-        &self,
-        lsm: &LsmStorage,
-        key: u64,
-        range: R,
-    ) -> impl Iterator<Item = BlockEntry>
+    pub fn lsm_scan<R>(&self, lsm: &Lsm, key: u64, range: R) -> impl Iterator<Item = BlockEntry>
     where
         R: RangeBounds<u64> + Clone + 'static,
     {
