@@ -1,6 +1,6 @@
-use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::lsm::{Lsm, LsmSettings};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
+use crate::index::rannoch::storage::in_mem::InMemStorage;
 
 fn lsm_put_values<V>(storage: &mut InMemStorage, lsm: &mut Lsm, mut values: V)
 where

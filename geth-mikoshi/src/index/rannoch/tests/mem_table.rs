@@ -1,6 +1,6 @@
 use crate::index::rannoch::block::BlockEntry;
-use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::mem_table::MemTable;
+use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::test_ss_table;
 use bytes::BytesMut;
 

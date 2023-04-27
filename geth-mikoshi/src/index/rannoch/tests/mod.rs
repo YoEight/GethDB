@@ -1,5 +1,5 @@
-use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
+use crate::index::rannoch::storage::in_mem::InMemStorage;
 use uuid::Uuid;
 
 mod block;

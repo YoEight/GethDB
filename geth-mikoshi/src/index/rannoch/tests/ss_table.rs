@@ -1,6 +1,6 @@
 use crate::index::rannoch::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
-use crate::index::rannoch::in_mem::InMemStorage;
 use crate::index::rannoch::ss_table::SsTable;
+use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::{
     in_mem_generate_sst, key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS,
 };

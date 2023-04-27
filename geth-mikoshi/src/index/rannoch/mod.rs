@@ -3,11 +3,11 @@ use std::collections::Bound;
 use std::ops::RangeBounds;
 
 pub(crate) mod block;
-pub(crate) mod in_mem;
 mod lsm;
 mod mem_table;
 mod merge;
 mod ss_table;
+mod storage;
 #[cfg(test)]
 mod tests;
 

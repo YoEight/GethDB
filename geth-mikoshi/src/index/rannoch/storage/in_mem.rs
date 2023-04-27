@@ -1,4 +1,4 @@
-use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
+use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::lsm::{Lsm, LSM_BASE_SSTABLE_BLOCK_COUNT};
 use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
@@ -9,6 +9,7 @@ use std::collections::{HashMap, VecDeque};
 use std::ops::RangeBounds;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct InMemStorage {
     block_size: usize,
     buffer: BytesMut,
@@ -336,7 +337,7 @@ pub struct SsTableScan<R> {
     key: u64,
     bytes: Bytes,
     block_idx: usize,
-    block: Option<super::block::Scan<R>>,
+    block: Option<Scan<R>>,
     table: SsTable,
     candidates: Vec<usize>,
     block_size: usize,
