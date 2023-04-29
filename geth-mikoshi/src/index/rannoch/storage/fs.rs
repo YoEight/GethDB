@@ -146,6 +146,25 @@ impl FsStorage {
             table: table.clone(),
         }
     }
+
+    pub fn sst_iter_tuples(&self, table: &SsTable) -> impl IteratorIO<Item = (u64, u64, u64)> {
+        self.sst_iter(table)
+            .map(|t| (t.key, t.revision, t.position))
+    }
+
+    pub fn sst_scan<R>(self, table: &SsTable, key: u64, range: R) -> SsTableScan<R>
+    where
+        R: RangeBounds<u64> + Clone,
+    {
+        SsTableScan::new(
+            self.buffer.clone(),
+            table,
+            self.inner.get(&table.id).cloned(),
+            self.block_size,
+            key,
+            range,
+        )
+    }
 }
 
 /// TODO - This function is quite suitable for caching. For example, it possible a block might
@@ -233,6 +252,7 @@ impl IteratorIO for SsTableIter {
 }
 
 pub struct SsTableScan<R> {
+    buffer: BytesMut,
     range: R,
     key: u64,
     file: Option<Arc<File>>,
@@ -248,6 +268,7 @@ where
     R: RangeBounds<u64> + Clone,
 {
     pub fn new(
+        buffer: BytesMut,
         table: &SsTable,
         file: Option<Arc<File>>,
         block_size: usize,
@@ -257,6 +278,7 @@ where
         let candidates = table.find_best_candidates(key, range_start(range.clone()));
 
         Self {
+            buffer,
             range,
             key,
             file,
@@ -273,9 +295,55 @@ impl<R> IteratorIO for SsTableScan<R>
 where
     R: RangeBounds<u64> + Clone,
 {
-    type Item = ();
+    type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
-        todo!()
+        loop {
+            if self.file.is_none() {
+                return Ok(None);
+            }
+
+            if let Some(mut block) = self.block.take() {
+                if let Some(entry) = block.next() {
+                    self.block = Some(block);
+                    return Ok(Some(entry));
+                }
+
+                self.block_idx += 1;
+                continue;
+            }
+
+            if !self.candidates.is_empty() {
+                self.block_idx = self.candidates.remove(0);
+                let block = sst_read_block(
+                    self.buffer.clone(),
+                    self.file.as_ref().unwrap(),
+                    &self.table,
+                    self.block_size,
+                    self.block_idx,
+                )?;
+
+                if let Some(block) = block {
+                    self.block = Some(block.scan(self.key, self.range.clone()));
+                    continue;
+                }
+
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidData,
+                    format!(
+                        "Corrupted SStable '{:?}', block {} does not exist",
+                        self.file.as_ref().unwrap(),
+                        self.block_idx
+                    ),
+                ));
+            }
+
+            if self.block_idx <= self.table.len() - 1 {
+                self.candidates.push(self.block_idx);
+                continue;
+            }
+
+            return Ok(None);
+        }
     }
 }

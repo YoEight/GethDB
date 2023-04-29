@@ -394,10 +394,7 @@ where
             }
 
             if self.block_idx <= self.table.len() - 1 {
-                let block =
-                    sst_read_block(&self.bytes, &self.table, self.block_size, self.block_idx)?;
-
-                self.block = Some(block.scan(self.key, self.range.clone()));
+                self.candidates.push(self.block_idx);
                 continue;
             }
 
