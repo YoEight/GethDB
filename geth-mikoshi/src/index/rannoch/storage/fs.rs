@@ -1,10 +1,13 @@
-use crate::index::rannoch::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
+use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
+use crate::index::rannoch::range_start;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
+use crate::index::IteratorIO;
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::ops::RangeBounds;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -130,6 +133,19 @@ impl FsStorage {
 
         Ok(())
     }
+
+    pub fn sst_iter(&self, table: &SsTable) -> SsTableIter {
+        let file = self.inner.get(&table.id).cloned();
+        SsTableIter {
+            buffer: self.buffer.clone(),
+            block_size: self.block_size,
+            block_idx: 0,
+            entry_idx: 0,
+            block: None,
+            file,
+            table: table.clone(),
+        }
+    }
 }
 
 /// TODO - This function is quite suitable for caching. For example, it possible a block might
@@ -162,4 +178,104 @@ fn sst_read_block(
     file.read_exact_at(&mut buffer[..], block_meta.offset as u64)?;
 
     Ok(Some(Block::new(buffer.freeze())))
+}
+
+pub struct SsTableIter {
+    buffer: BytesMut,
+    block_size: usize,
+    block_idx: usize,
+    entry_idx: usize,
+    block: Option<Block>,
+    file: Option<Arc<File>>,
+    table: SsTable,
+}
+
+impl IteratorIO for SsTableIter {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        loop {
+            if self.file.is_none() || self.block_idx >= self.table.len() {
+                return Ok(None);
+            }
+
+            if self.block.is_none() {
+                let file = self.file.as_ref().unwrap();
+
+                self.block = sst_read_block(
+                    self.buffer.split(),
+                    file,
+                    &self.table,
+                    self.block_size,
+                    self.block_idx,
+                )?;
+            }
+
+            if let Some(block) = self.block.as_ref() {
+                if self.entry_idx >= block.len() {
+                    self.block = None;
+                    self.entry_idx = 0;
+                    self.block_idx += 1;
+
+                    continue;
+                }
+
+                if let Some(entry) = block.read_entry(self.entry_idx) {
+                    self.entry_idx += 1;
+
+                    return Ok(Some(entry));
+                }
+            }
+
+            return Ok(None);
+        }
+    }
+}
+
+pub struct SsTableScan<R> {
+    range: R,
+    key: u64,
+    file: Option<Arc<File>>,
+    block_idx: usize,
+    block_size: usize,
+    block: Option<Scan<R>>,
+    table: SsTable,
+    candidates: Vec<usize>,
+}
+
+impl<R> SsTableScan<R>
+where
+    R: RangeBounds<u64> + Clone,
+{
+    pub fn new(
+        table: &SsTable,
+        file: Option<Arc<File>>,
+        block_size: usize,
+        key: u64,
+        range: R,
+    ) -> Self {
+        let candidates = table.find_best_candidates(key, range_start(range.clone()));
+
+        Self {
+            range,
+            key,
+            file,
+            block_idx: 0,
+            block_size,
+            block: None,
+            table: table.clone(),
+            candidates,
+        }
+    }
+}
+
+impl<R> IteratorIO for SsTableScan<R>
+where
+    R: RangeBounds<u64> + Clone,
+{
+    type Item = ();
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        todo!()
+    }
 }
