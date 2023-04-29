@@ -1,5 +1,5 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::lsm::{Lsm, LSM_BASE_SSTABLE_BLOCK_COUNT};
+use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm, LSM_BASE_SSTABLE_BLOCK_COUNT};
 use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::{range_start, IndexedPosition};
@@ -249,10 +249,6 @@ impl InMemStorage {
 
         Merge::new(scans)
     }
-}
-
-fn sst_table_block_count_limit(level: u8) -> usize {
-    2 ^ (level as usize) * LSM_BASE_SSTABLE_BLOCK_COUNT
 }
 
 pub struct SsTableIter {

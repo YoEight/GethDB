@@ -1,10 +1,11 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
+use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
 use crate::index::rannoch::range_start;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
-use crate::index::IteratorIO;
+use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
 use bytes::{Buf, BufMut, BytesMut};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::ops::RangeBounds;
@@ -85,7 +86,7 @@ impl FsStorage {
 
     pub fn sst_put<Values>(&mut self, table: &mut SsTable, mut values: Values) -> io::Result<()>
     where
-        Values: IntoIterator<Item = (u64, u64, u64)>,
+        Values: IteratorIO<Item = (u64, u64, u64)>,
     {
         let file = if let Some(file) = self.inner.get(&table.id) {
             file.clone()
@@ -100,7 +101,7 @@ impl FsStorage {
 
         let mut block_current_size = 0usize;
         let mut metas = self.buffer.clone();
-        for (key, rev, pos) in values {
+        while let Some((key, rev, pos)) = values.next()? {
             if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
                 let remaining = self.block_size - block_current_size;
 
@@ -164,6 +165,89 @@ impl FsStorage {
             key,
             range,
         )
+    }
+
+    pub fn lsm_put(
+        &mut self,
+        lsm: &mut Lsm,
+        key: u64,
+        revision: u64,
+        position: u64,
+    ) -> io::Result<()> {
+        lsm.active_table.put(key, revision, position);
+
+        if lsm.active_table.size() < lsm.settings.mem_table_max_size {
+            return Ok(());
+        }
+
+        let mem_table = std::mem::take(&mut lsm.active_table);
+        let mut new_table = SsTable::new();
+
+        self.sst_put(&mut new_table, mem_table.entries().lift())?;
+        let mut level = 0u8;
+
+        loop {
+            if let Some(tables) = lsm.levels.get_mut(&level) {
+                if tables.len() + 1 >= lsm.settings.ss_table_max_count {
+                    let mut targets = vec![self.sst_iter(&new_table)];
+                    self.inner.remove(&new_table.id);
+
+                    for table in tables.drain(..) {
+                        targets.push(self.sst_iter(&table));
+                        self.inner.remove(&table.id);
+                    }
+
+                    let values = MergeIO::new(targets).map(|e| (e.key, e.revision, e.position));
+
+                    new_table = SsTable::new();
+                    self.sst_put(&mut new_table, values)?;
+
+                    if new_table.len() >= sst_table_block_count_limit(level) {
+                        level += 1;
+                        continue;
+                    }
+                }
+
+                tables.push_front(new_table);
+                break;
+            }
+
+            let mut tables = VecDeque::new();
+            tables.push_front(new_table);
+
+            lsm.levels.insert(level, tables);
+            break;
+        }
+
+        Ok(())
+    }
+
+    pub fn lsm_get(&self, lsm: &Lsm, key: u64, revision: u64) -> io::Result<Option<u64>> {
+        let mut result = lsm.active_table.get(key, revision);
+
+        if result.is_some() {
+            return Ok(result);
+        }
+
+        for mem_table in lsm.immutable_tables.iter() {
+            result = mem_table.get(key, revision);
+
+            if result.is_some() {
+                return Ok(result);
+            }
+        }
+
+        for ss_tables in lsm.levels.values() {
+            for table in ss_tables {
+                result = self.sst_find_key(table, key, revision)?.map(|e| e.position);
+
+                if result.is_some() {
+                    return Ok(result);
+                }
+            }
+        }
+
+        Ok(None)
     }
 }
 

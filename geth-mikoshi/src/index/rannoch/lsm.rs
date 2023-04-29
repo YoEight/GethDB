@@ -7,6 +7,10 @@ use std::ops::RangeBounds;
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
 
+pub fn sst_table_block_count_limit(level: u8) -> usize {
+    2 ^ (level as usize) * LSM_BASE_SSTABLE_BLOCK_COUNT
+}
+
 #[derive(Debug, Clone, Copy)]
 pub struct LsmSettings {
     pub mem_table_max_size: usize,
