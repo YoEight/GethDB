@@ -153,7 +153,7 @@ impl FsStorage {
             .map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn sst_scan<R>(self, table: &SsTable, key: u64, range: R) -> SsTableScan<R>
+    pub fn sst_scan<R>(&self, table: &SsTable, key: u64, range: R) -> SsTableScan<R>
     where
         R: RangeBounds<u64> + Clone,
     {
@@ -248,6 +248,27 @@ impl FsStorage {
         }
 
         Ok(None)
+    }
+
+    pub fn lsm_scan<R>(&self, lsm: &Lsm, key: u64, range: R) -> impl IteratorIO<Item = BlockEntry>
+    where
+        R: RangeBounds<u64> + Clone + 'static,
+    {
+        let mut scans: Vec<Box<dyn IteratorIO<Item = BlockEntry>>> = Vec::new();
+
+        scans.push(Box::new(lsm.active_table.scan(key, range.clone()).lift()));
+
+        for mem_table in lsm.immutable_tables.iter() {
+            scans.push(Box::new(mem_table.scan(key, range.clone()).lift()));
+        }
+
+        for tables in lsm.levels.values() {
+            for table in tables {
+                scans.push(Box::new(self.sst_scan(table, key, range.clone())));
+            }
+        }
+
+        MergeIO::new(scans)
     }
 }
 

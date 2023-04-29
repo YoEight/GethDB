@@ -133,6 +133,17 @@ where
     }
 }
 
+impl<I> IteratorIO for Box<I>
+where
+    I: IteratorIO + ?Sized,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        self.next()
+    }
+}
+
 pub trait IteratorIOExt: Sized {
     fn lift(self) -> Lift<Self>;
 }
