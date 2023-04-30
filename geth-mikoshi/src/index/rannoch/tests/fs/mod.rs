@@ -1,5 +1,6 @@
 use crate::index::{IteratorIO, IteratorIOExt};
 
+mod merge_io;
 mod ss_table;
 
 pub struct TestValues {
