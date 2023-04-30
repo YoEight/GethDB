@@ -1,13 +1,14 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm};
+use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm, LsmSettings};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
 use crate::index::rannoch::range_start;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
-use bytes::{Buf, BufMut, BytesMut};
-use std::collections::{HashMap, VecDeque};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
 use std::io;
+use std::io::ErrorKind;
 use std::ops::RangeBounds;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;
@@ -63,22 +64,9 @@ impl FsStorage {
         Ok(None)
     }
 
-    pub fn sst_load(&self, id: Uuid) -> io::Result<Option<SsTable>> {
+    pub fn sst_load(&mut self, id: Uuid) -> io::Result<Option<SsTable>> {
         if let Some(file) = self.inner.get(&id) {
-            let len = file.metadata()?.len();
-            let mut buffer = self.buffer.clone();
-
-            buffer.resize(4, 0);
-            file.read_exact_at(&mut buffer, len - 4)?;
-            let meta_offset = buffer.get_u32_le() as u64;
-
-            buffer.resize((len - 4 - meta_offset) as usize, 0);
-            file.read_exact_at(&mut buffer, meta_offset)?;
-
-            return Ok(Some(SsTable {
-                id,
-                metas: BlockMetas::new(buffer.freeze()),
-            }));
+            return Ok(Some(sst_load(&mut self.buffer, &file, id)?));
         }
 
         Ok(None)
@@ -191,16 +179,19 @@ impl FsStorage {
 
         self.sst_put(&mut new_table, mem_table.entries().lift())?;
         let mut level = 0u8;
+        let mut cleanups = Vec::new();
 
         loop {
             if let Some(tables) = lsm.levels.get_mut(&level) {
                 if tables.len() + 1 >= lsm.settings.ss_table_max_count {
                     let mut targets = vec![self.sst_iter(&new_table)];
                     self.inner.remove(&new_table.id);
+                    cleanups.push(new_table.id);
 
                     for table in tables.drain(..) {
                         targets.push(self.sst_iter(&table));
                         self.inner.remove(&table.id);
+                        cleanups.push(table.id);
                     }
 
                     let values = MergeIO::new(targets).map(|e| (e.key, e.revision, e.position));
@@ -223,6 +214,16 @@ impl FsStorage {
 
             lsm.levels.insert(level, tables);
             break;
+        }
+
+        // We only update the logical position this late because if we went beyond the main loop,
+        // it means we actually flushed some data to disk. Anything prior is stored in mem-table.
+        lsm.logical_position = position;
+
+        self.write_index_file(lsm)?;
+
+        for id in cleanups {
+            std::fs::remove_file(self.root.join(id.to_string()))?;
         }
 
         Ok(())
@@ -276,6 +277,59 @@ impl FsStorage {
 
         MergeIO::new(scans)
     }
+
+    fn write_index_file(&mut self, lsm: &Lsm) -> io::Result<()> {
+        self.buffer.put_u64_le(lsm.logical_position);
+        self.buffer.put_u32_le(self.block_size as u32);
+
+        for (level, tables) in &lsm.levels {
+            for table in tables {
+                self.buffer.put_u8(*level);
+                self.buffer.put_u128_le(table.id.as_u128());
+            }
+        }
+
+        let bytes = self.buffer.split().freeze();
+        let filepath = self.root.join("indexmap");
+        let file = OpenOptions::new().write(true).create(true).open(filepath)?;
+
+        file.write_all_at(&bytes, 0)?;
+        file.sync_all()?;
+
+        Ok(())
+    }
+
+    pub fn lsm_load(&mut self, settings: LsmSettings) -> io::Result<Option<Lsm>> {
+        let filepath = self.root.join("indexmap");
+        let mut bytes = match std::fs::read(filepath) {
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(None),
+            Err(e) => return Err(e),
+            Ok(bytes) => Bytes::from(bytes),
+        };
+
+        let logical_position = bytes.get_u64_le();
+        let block_size = bytes.get_u32_le();
+        let mut levels = BTreeMap::<u8, VecDeque<SsTable>>::new();
+
+        // 17 stands for a level byte and an uuid encoded as a 128bits, which is 16bytes.
+        while bytes.remaining() > 17 {
+            let level = bytes.get_u8();
+            let id = Uuid::from_u128(bytes.get_u128_le());
+            let filepath = self.root.join(id.to_string());
+            let file = OpenOptions::new().read(true).open(filepath)?;
+            let table = sst_load(&mut self.buffer, &file, id)?;
+
+            levels.entry(level).or_default().push_back(table);
+        }
+
+        Ok(Some(Lsm {
+            settings,
+            active_table: Default::default(),
+            immutable_tables: Default::default(),
+            logical_position,
+            levels,
+        }))
+    }
 }
 
 /// TODO - This function is quite suitable for caching. For example, it possible a block might
@@ -308,6 +362,22 @@ fn sst_read_block(
     file.read_exact_at(&mut buffer[..], block_meta.offset as u64)?;
 
     Ok(Some(Block::new(buffer.freeze())))
+}
+
+fn sst_load(buffer: &mut BytesMut, file: &File, id: Uuid) -> io::Result<SsTable> {
+    let len = file.metadata()?.len();
+
+    buffer.resize(4, 0);
+    file.read_exact_at(buffer, len - 4)?;
+    let meta_offset = buffer.get_u32_le() as u64;
+
+    buffer.resize((len - 4 - meta_offset) as usize, 0);
+    file.read_exact_at(buffer, meta_offset)?;
+
+    return Ok(SsTable {
+        id,
+        metas: BlockMetas::new(buffer.split().freeze()),
+    });
 }
 
 pub struct SsTableIter {

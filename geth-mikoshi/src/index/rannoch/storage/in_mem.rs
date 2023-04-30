@@ -199,6 +199,8 @@ impl InMemStorage {
             lsm.levels.insert(level, tables);
             break;
         }
+
+        lsm.logical_position = position;
     }
 
     pub fn lsm_get(&self, lsm: &Lsm, key: u64, revision: u64) -> Option<u64> {

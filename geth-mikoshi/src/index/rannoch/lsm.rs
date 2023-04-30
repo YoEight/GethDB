@@ -30,6 +30,7 @@ impl Default for LsmSettings {
 pub struct Lsm {
     pub settings: LsmSettings,
     pub active_table: MemTable,
+    pub logical_position: u64,
     pub immutable_tables: VecDeque<MemTable>,
     pub levels: BTreeMap<u8, VecDeque<SsTable>>,
 }
@@ -38,6 +39,7 @@ impl Lsm {
     pub fn new(settings: LsmSettings) -> Self {
         Self {
             settings,
+            logical_position: 0,
             active_table: Default::default(),
             immutable_tables: Default::default(),
             levels: Default::default(),
