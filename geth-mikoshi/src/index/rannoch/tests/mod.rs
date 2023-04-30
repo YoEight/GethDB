@@ -1,5 +1,9 @@
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
+use crate::index::rannoch::storage::fs::FsStorage;
 use crate::index::rannoch::storage::in_mem::InMemStorage;
+use crate::index::IteratorIOExt;
+use std::io;
+use std::path::PathBuf;
 use uuid::Uuid;
 
 mod fs;
@@ -37,4 +41,12 @@ pub fn in_mem_generate_sst() -> InMemStorage {
     in_mem_generate_block(&mut storage);
 
     storage
+}
+
+pub fn fs_generate_stt(storage: &mut FsStorage) -> io::Result<SsTable> {
+    let mut table = test_ss_table();
+    let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
+    storage.sst_put(&mut table, values.lift())?;
+
+    Ok(table)
 }
