@@ -278,6 +278,11 @@ impl FsStorage {
         MergeIO::new(scans)
     }
 
+    #[cfg(test)]
+    pub fn test_lsm_serialize(&mut self, lsm: &Lsm) -> io::Result<()> {
+        self.write_index_file(lsm)
+    }
+
     fn write_index_file(&mut self, lsm: &Lsm) -> io::Result<()> {
         self.buffer.put_u64_le(lsm.logical_position);
         self.buffer.put_u32_le(self.block_size as u32);
@@ -312,7 +317,7 @@ impl FsStorage {
         let mut levels = BTreeMap::<u8, VecDeque<SsTable>>::new();
 
         // 17 stands for a level byte and an uuid encoded as a 128bits, which is 16bytes.
-        while bytes.remaining() > 17 {
+        while bytes.remaining() >= 17 {
             let level = bytes.get_u8();
             let id = Uuid::from_u128(bytes.get_u128_le());
             let filepath = self.root.join(id.to_string());

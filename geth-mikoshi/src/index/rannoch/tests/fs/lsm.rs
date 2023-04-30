@@ -1,7 +1,9 @@
 use crate::index::rannoch::lsm::{Lsm, LsmSettings};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
+use crate::index::rannoch::ss_table::SsTable;
 use crate::index::rannoch::storage::fs::FsStorage;
 use crate::index::rannoch::storage::in_mem::InMemStorage;
+use crate::index::rannoch::tests::fs::values;
 use crate::index::IteratorIO;
 use std::io;
 use std::path::PathBuf;
@@ -155,6 +157,47 @@ fn test_fs_lsm_sync() -> io::Result<()> {
     assert_eq!(5, entry.position);
 
     assert!(iter.next()?.is_none());
+
+    Ok(())
+}
+
+#[test]
+fn test_fs_lsm_serialization() -> io::Result<()> {
+    let setts = LsmSettings::default();
+
+    let mut lsm = Lsm::new(setts);
+    let temp = TempDir::default();
+    let root = PathBuf::from(temp.as_ref());
+    let mut storage = FsStorage::new_with_default(root);
+
+    let mut table1 = SsTable::new();
+    let mut table2 = SsTable::new();
+
+    storage.sst_put(&mut table1, values(&[(1, 2, 3)]))?;
+    storage.sst_put(&mut table2, values(&[(4, 5, 6)]))?;
+
+    lsm.logical_position = 1234;
+
+    {
+        lsm.levels.entry(0).or_default().push_back(table1.clone());
+    }
+
+    {
+        lsm.levels.entry(1).or_default().push_back(table2.clone());
+    }
+
+    storage.test_lsm_serialize(&lsm)?;
+    let actual = storage.lsm_load(setts)?.unwrap();
+
+    assert_eq!(lsm.logical_position, actual.logical_position);
+
+    let actual_table_1 = actual.levels.get(&0).unwrap().front().clone().unwrap();
+    let actual_table_2 = actual.levels.get(&1).unwrap().front().clone().unwrap();
+
+    assert_eq!(table1.id, actual_table_1.id);
+    assert_eq!(table1.metas, actual_table_1.metas);
+    assert_eq!(table2.id, actual_table_2.id);
+    assert_eq!(table2.metas, actual_table_2.metas);
 
     Ok(())
 }

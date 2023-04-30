@@ -26,7 +26,7 @@ impl Default for LsmSettings {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct Lsm {
     pub settings: LsmSettings,
     pub active_table: MemTable,

@@ -25,7 +25,7 @@ impl BlockMeta {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BlockMetas(Bytes);
 
 impl BlockMetas {
