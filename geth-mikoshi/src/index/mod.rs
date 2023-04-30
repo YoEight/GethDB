@@ -140,7 +140,7 @@ where
     type Item = I::Item;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
-        self.next()
+        self.as_mut().next()
     }
 }
 
