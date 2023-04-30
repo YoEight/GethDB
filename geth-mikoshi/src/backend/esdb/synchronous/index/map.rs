@@ -1,13 +1,13 @@
-use crate::backend::esdb::synchronous::index::mem_table::MemTable;
+
 use crate::backend::esdb::synchronous::index::{
     IndexMap, Key, Midpoint, PTable, PTableFooter, PTableHeader, ENTRY_SIZE, MD5_SIZE,
     PTABLE_FOOTER_SIZE, PTABLE_HEADER_SIZE,
 };
-use byteorder::{BigEndian, LittleEndian, ReadBytesExt};
-use bytes::{BufMut, Bytes, BytesMut};
+use byteorder::{LittleEndian, ReadBytesExt};
+use bytes::{BytesMut};
 use geth_common::Position;
 use std::fs::OpenOptions;
-use std::io;
+
 use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
 use std::path::PathBuf;
 use uuid::Uuid;
@@ -17,7 +17,7 @@ pub fn load_index_map(root: &PathBuf, buffer: &mut BytesMut) -> eyre::Result<Ind
         .read(true)
         .open(root.join("index").join("indexmap"))?;
 
-    let mut file = BufReader::new(file);
+    let file = BufReader::new(file);
     let mut version = 0i32;
     let mut position = Position(0);
     let mut auto_merge_level = u64::MAX;

@@ -1,10 +1,10 @@
 use crate::backend::Backend;
-use crate::{BoxedSyncMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
+use crate::{BoxedSyncMikoshiStream, Entry, SyncMikoshiStream};
 use chrono::Utc;
 use eyre::bail;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
 use std::collections::HashMap;
-use std::io;
+
 use std::iter::Enumerate;
 use std::vec::IntoIter;
 use tokio::sync::mpsc;
@@ -54,7 +54,7 @@ impl Backend for InMemoryBackend {
         &mut self,
         stream_name: String,
         starting: Revision<u64>,
-        direction: Direction,
+        _direction: Direction,
     ) -> eyre::Result<BoxedSyncMikoshiStream> {
         let indexes = self
             .indexes

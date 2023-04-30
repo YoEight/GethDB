@@ -40,7 +40,7 @@ where
             }
         }
 
-        if let Some((idx, value)) = lower {
+        if let Some((idx, _value)) = lower {
             return self.caches[idx].take();
         }
 

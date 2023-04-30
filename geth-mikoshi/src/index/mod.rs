@@ -1,5 +1,5 @@
 use crate::index::rannoch::block::BlockEntry;
-use md5::digest::typenum::Integer;
+
 use std::cmp::Ordering;
 use std::io;
 
@@ -79,7 +79,7 @@ where
             }
         }
 
-        if let Some((idx, value)) = lower {
+        if let Some((idx, _value)) = lower {
             return self.caches[idx].take();
         }
 

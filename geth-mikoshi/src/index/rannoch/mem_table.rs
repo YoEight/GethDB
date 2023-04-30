@@ -1,6 +1,6 @@
 use crate::index::rannoch::block::BlockEntry;
-use crate::index::rannoch::ss_table::SsTable;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+
+use bytes::{Buf, BufMut, BytesMut};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds, RangeFull};
@@ -31,7 +31,7 @@ impl MemTable {
     }
 
     pub fn put(&mut self, key: u64, revision: u64, position: u64) {
-        let mut stream = self.inner.entry(key).or_default();
+        let stream = self.inner.entry(key).or_default();
 
         stream.put_u64_le(revision);
         stream.put_u64_le(position);
@@ -139,7 +139,7 @@ impl Iterator for IntoIter {
                 self.current = Some(Scan::new(key, buffer, ..));
             }
 
-            let mut scan = self.current.as_mut()?;
+            let scan = self.current.as_mut()?;
             if let Some(entry) = scan.next() {
                 return Some(entry);
             }

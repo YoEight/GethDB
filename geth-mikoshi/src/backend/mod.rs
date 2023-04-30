@@ -3,7 +3,7 @@ mod in_memory;
 
 use crate::backend::in_memory::InMemoryBackend;
 use crate::{BoxedSyncMikoshiStream, MikoshiStream};
-use async_trait::async_trait;
+
 use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 use std::io;
 use std::path::Path;

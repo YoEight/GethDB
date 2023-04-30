@@ -2,18 +2,18 @@ use crate::backend::esdb::parsing::{read_string, read_uuid, write_string};
 use crate::backend::esdb::utils::{chunk_filename_from, variable_string_length_bytes_size};
 use bitflags::bitflags;
 use byteorder::{LittleEndian, ReadBytesExt, WriteBytesExt};
-use bytes::{buf, Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
-use geth_common::Record;
+
 use nom::bytes::complete::{tag, take_till1};
-use nom::{IResult, Or};
+use nom::{IResult};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path, PathBuf};
-use tracing::error;
+use std::path::{Path};
+
 use uuid::Uuid;
 
 pub const CHUNK_SIZE: usize = 256 * 1024 * 1024;
@@ -497,7 +497,7 @@ impl Chunk {
     pub fn complete(&mut self, buffer: &mut BytesMut, log_position: u64) -> ChunkFooter {
         let physical_data_size = self.raw_position(log_position) as i32 - CHUNK_HEADER_SIZE as i32;
 
-        let mut footer = ChunkFooter {
+        let footer = ChunkFooter {
             flags: FooterFlags::IS_COMPLETED | FooterFlags::IS_MAP_12_BYTES,
             is_completed: true,
             is_map_12bytes: true,

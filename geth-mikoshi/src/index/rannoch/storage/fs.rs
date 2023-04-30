@@ -1,6 +1,6 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm, LsmSettings};
-use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
+
 use crate::index::rannoch::range_start;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
@@ -313,7 +313,7 @@ impl FsStorage {
         };
 
         let logical_position = bytes.get_u64_le();
-        let block_size = bytes.get_u32_le();
+        let _block_size = bytes.get_u32_le();
         let mut levels = BTreeMap::<u8, VecDeque<SsTable>>::new();
 
         // 17 stands for a level byte and an uuid encoded as a 128bits, which is 16bytes.

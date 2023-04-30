@@ -1,14 +1,14 @@
 mod backend;
 mod index;
 
-use std::collections::HashMap;
-use std::io;
+
+
 use std::path::Path;
 
 use crate::backend::Backend;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use eyre::bail;
+
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
 use tokio::sync::mpsc;
 use uuid::Uuid;
@@ -98,7 +98,7 @@ impl MikoshiStream {
     }
 
     pub fn from_vec(entries: Vec<Entry>) -> Self {
-        let (mut sender, inner) = mpsc::channel(entries.len());
+        let (sender, inner) = mpsc::channel(entries.len());
 
         tokio::spawn(async move {
             for entry in entries {

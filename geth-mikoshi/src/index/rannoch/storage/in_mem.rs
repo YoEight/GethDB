@@ -1,10 +1,10 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm, LSM_BASE_SSTABLE_BLOCK_COUNT};
+use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm};
 use crate::index::rannoch::merge::Merge;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
-use crate::index::rannoch::{range_start, IndexedPosition};
+use crate::index::rannoch::{range_start};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use nom::character::complete::tab;
+
 use std::collections::{HashMap, VecDeque};
 use std::ops::RangeBounds;
 use uuid::Uuid;
@@ -66,7 +66,7 @@ impl InMemStorage {
         })
     }
 
-    pub fn sst_put<Values>(&mut self, table: &mut SsTable, mut values: Values)
+    pub fn sst_put<Values>(&mut self, table: &mut SsTable, values: Values)
     where
         Values: IntoIterator<Item = (u64, u64, u64)>,
     {
@@ -317,7 +317,7 @@ pub fn sst_read_block(
     let mut bytes = bytes.clone();
     let mut meta_offset_bytes = &bytes[bytes.len() - 4..];
     let meta_offset = meta_offset_bytes.get_u32_le() as usize;
-    let len = bytes.len();
+    let _len = bytes.len();
 
     bytes.advance(block_meta.offset as usize);
 

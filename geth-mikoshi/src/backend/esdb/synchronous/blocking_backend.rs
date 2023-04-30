@@ -3,20 +3,20 @@ use crate::backend::esdb::synchronous::fs::{
 };
 use crate::backend::esdb::synchronous::query::full_scan::FullScan;
 use crate::backend::esdb::types::{
-    Checkpoint, Chunk, ChunkFooter, ChunkHeader, ChunkInfo, ChunkManager, FileType, FooterFlags,
-    PrepareFlags, PrepareLog, CHUNK_FILE_SIZE, CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE,
+    Checkpoint, Chunk, ChunkManager,
+    PrepareFlags, PrepareLog, CHUNK_FOOTER_SIZE,
 };
-use crate::backend::esdb::utils::chunk_filename_from;
+
 use crate::backend::Backend;
-use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, MikoshiStream, SyncMikoshiStream};
-use bytes::{BufMut, Bytes, BytesMut};
+use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, SyncMikoshiStream};
+use bytes::{BufMut, BytesMut};
 use chrono::Utc;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
-use std::collections::HashMap;
-use std::fs::{read_dir, File, OpenOptions};
-use std::io;
+
+
+
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::ops::Index;
+
 use std::path::{Path, PathBuf};
 use tracing::debug;
 use uuid::Uuid;
@@ -80,7 +80,7 @@ impl Backend for BlockingEsdbBackend {
     fn append(
         &mut self,
         stream_name: String,
-        expected: ExpectedRevision,
+        _expected: ExpectedRevision,
         events: Vec<Propose>,
     ) -> eyre::Result<WriteResult> {
         let mut ongoing_chunk = self.manager.ongoing_chunk();
@@ -97,7 +97,7 @@ impl Backend for BlockingEsdbBackend {
             let record_position = self.manager.writer;
 
             // TODO - See how flags are set in implicit transactions.
-            let mut flags: PrepareFlags = PrepareFlags::HAS_DATA
+            let flags: PrepareFlags = PrepareFlags::HAS_DATA
                 | PrepareFlags::TRANSACTION_START
                 | PrepareFlags::TRANSACTION_END
                 | PrepareFlags::IS_COMMITTED
@@ -186,7 +186,7 @@ impl Backend for BlockingEsdbBackend {
             return Ok(Box::new(EmptyMikoshiStream));
         }
 
-        let mut full_scan = FullScan::new(
+        let full_scan = FullScan::new(
             self.buffer.clone(),
             self.root.clone(),
             self.manager.chunks.clone(),
