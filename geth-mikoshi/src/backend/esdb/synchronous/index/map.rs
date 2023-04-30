@@ -1,10 +1,9 @@
-
 use crate::backend::esdb::synchronous::index::{
     IndexMap, Key, Midpoint, PTable, PTableFooter, PTableHeader, ENTRY_SIZE, MD5_SIZE,
     PTABLE_FOOTER_SIZE, PTABLE_HEADER_SIZE,
 };
 use byteorder::{LittleEndian, ReadBytesExt};
-use bytes::{BytesMut};
+use bytes::BytesMut;
 use geth_common::Position;
 use std::fs::OpenOptions;
 

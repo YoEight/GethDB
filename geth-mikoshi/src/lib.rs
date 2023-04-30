@@ -1,8 +1,6 @@
 mod backend;
 mod index;
 
-
-
 use std::path::Path;
 
 use crate::backend::Backend;

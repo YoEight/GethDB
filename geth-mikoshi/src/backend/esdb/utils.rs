@@ -1,13 +1,3 @@
-
-
-
-
-
-
-
-
-
-
 pub fn chunk_filename_from(seq_number: usize, version: usize) -> String {
     format!("chunk-{:06}.{:06}", seq_number, version)
 }

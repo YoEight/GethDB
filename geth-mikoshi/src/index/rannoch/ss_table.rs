@@ -1,5 +1,3 @@
-
-
 use bytes::{Buf, Bytes};
 use std::cmp::Ordering;
 use uuid::Uuid;

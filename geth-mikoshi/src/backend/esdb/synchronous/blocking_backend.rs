@@ -3,8 +3,7 @@ use crate::backend::esdb::synchronous::fs::{
 };
 use crate::backend::esdb::synchronous::query::full_scan::FullScan;
 use crate::backend::esdb::types::{
-    Checkpoint, Chunk, ChunkManager,
-    PrepareFlags, PrepareLog, CHUNK_FOOTER_SIZE,
+    Checkpoint, Chunk, ChunkManager, PrepareFlags, PrepareLog, CHUNK_FOOTER_SIZE,
 };
 
 use crate::backend::Backend;
@@ -12,8 +11,6 @@ use crate::{BoxedSyncMikoshiStream, EmptyMikoshiStream, Entry, SyncMikoshiStream
 use bytes::{BufMut, BytesMut};
 use chrono::Utc;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Revision, WriteResult};
-
-
 
 use std::io::{Read, Seek, SeekFrom, Write};
 

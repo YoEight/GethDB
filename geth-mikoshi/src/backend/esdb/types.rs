@@ -6,13 +6,13 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::{DateTime, Utc};
 
 use nom::bytes::complete::{tag, take_till1};
-use nom::{IResult};
+use nom::IResult;
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::cmp::Ordering;
 use std::fs::{File, OpenOptions};
 use std::io;
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::{Path};
+use std::path::Path;
 
 use uuid::Uuid;
 
