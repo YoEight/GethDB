@@ -92,7 +92,12 @@ impl FsStorage {
             file.clone()
         } else {
             let filepath = self.root.join(table.id.to_string());
-            let file = OpenOptions::new().read(true).write(true).open(filepath)?;
+            let file = OpenOptions::new()
+                .read(true)
+                .write(true)
+                .create_new(true)
+                .open(filepath)?;
+
             let file = Arc::new(file);
 
             self.inner.insert(table.id, file.clone());
@@ -109,12 +114,13 @@ impl FsStorage {
                 block_current_size = 0;
             }
 
+            let offset = self.buffer.len() as u32;
             self.buffer.put_u64_le(key);
             self.buffer.put_u64_le(rev);
             self.buffer.put_u64_le(pos);
 
             if block_current_size == 0 {
-                metas.put_u32_le(self.buffer.len() as u32);
+                metas.put_u32_le(offset);
                 metas.put_u64_le(key);
                 metas.put_u64_le(rev);
             }

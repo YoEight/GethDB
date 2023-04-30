@@ -2,6 +2,7 @@ use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::rannoch::storage::in_mem::InMemStorage;
 use uuid::Uuid;
 
+mod fs;
 mod in_mem;
 
 pub const NUM_OF_KEYS: usize = 100;
