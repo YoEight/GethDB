@@ -1,14 +1,12 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::lsm::{sst_table_block_count_limit, Lsm, LsmSettings};
-
 use crate::index::rannoch::range_start;
 use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::{BTreeMap, HashMap, VecDeque};
 use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::ops::RangeBounds;
 use std::os::unix::fs::FileExt;
 use std::path::PathBuf;

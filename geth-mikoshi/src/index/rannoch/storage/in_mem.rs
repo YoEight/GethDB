@@ -70,21 +70,10 @@ impl InMemStorage {
     where
         Values: IntoIterator<Item = (u64, u64, u64)>,
     {
-        let mut table_bytes = self.inner.get(&table.id).cloned().unwrap_or_default();
         let mut offset = 0usize;
         let mut block_current_size = 0usize;
 
-        if !table_bytes.is_empty() {
-            let mut footer = &table_bytes[table_bytes.len() - 4..];
-            let meta_offset = footer.get_u32_le() as usize;
-
-            offset = meta_offset;
-            block_current_size = meta_offset - table.metas.last_block_first_key_offset().unwrap();
-
-            self.buffer.put(table_bytes.copy_to_bytes(meta_offset));
-        }
-
-        let mut meta = BytesMut::from(table.metas.as_slice());
+        let mut meta = Vec::new();
         for (key, revision, position) in values {
             if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
                 let remaining = self.block_size - block_current_size;
@@ -108,12 +97,11 @@ impl InMemStorage {
             offset += BLOCK_ENTRY_SIZE;
         }
 
-        let new_meta = meta.freeze();
-
-        self.buffer.put(new_meta.clone());
+        let meta = Bytes::from(meta);
+        self.buffer.put(meta.clone());
         self.buffer.put_u32_le(offset as u32);
         self.inner.insert(table.id, self.buffer.split().freeze());
-        table.metas = BlockMetas::new(new_meta);
+        table.metas = BlockMetas::new(meta);
     }
 
     pub fn sst_iter(&self, table: &SsTable) -> SsTableIter {
