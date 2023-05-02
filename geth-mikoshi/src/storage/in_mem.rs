@@ -1,4 +1,4 @@
-use crate::storage::{FileType, Storage};
+use crate::storage::{FileId, Storage};
 use bytes::{Buf, Bytes};
 use std::collections::HashMap;
 use std::io;
@@ -21,14 +21,14 @@ impl InMemoryStorage {
 }
 
 impl Storage for InMemoryStorage {
-    fn write_to(&self, r#type: FileType, bytes: Bytes) -> io::Result<()> {
-        match r#type {
-            FileType::SSTable(id) => {
+    fn write_to(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+        match id {
+            FileId::SSTable(id) => {
                 let mut inner = self.inner.lock().unwrap();
                 inner.insert(id, bytes);
             }
 
-            FileType::IndexMap => {
+            FileId::IndexMap => {
                 let mut indexmap = self.indexmap.lock().unwrap();
                 *indexmap = bytes;
             }
@@ -37,9 +37,9 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn read_from(&self, r#type: FileType, offset: u64, len: usize) -> io::Result<Bytes> {
-        let mut bytes = match r#type {
-            FileType::SSTable(id) => {
+    fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
+        let mut bytes = match id {
+            FileId::SSTable(id) => {
                 let mut inner = self.inner.lock().unwrap();
 
                 if let Some(bytes) = inner.get(&id) {
@@ -49,16 +49,16 @@ impl Storage for InMemoryStorage {
                 }
             }
 
-            FileType::IndexMap => self.indexmap.lock().unwrap().clone(),
+            FileId::IndexMap => self.indexmap.lock().unwrap().clone(),
         };
 
         bytes.advance(offset as usize);
         Ok(bytes.copy_to_bytes(len))
     }
 
-    fn read_all(&self, r#type: FileType) -> io::Result<Bytes> {
-        Ok(match r#type {
-            FileType::SSTable(id) => {
+    fn read_all(&self, id: FileId) -> io::Result<Bytes> {
+        Ok(match id {
+            FileId::SSTable(id) => {
                 let mut inner = self.inner.lock().unwrap();
 
                 if let Some(bytes) = inner.get(&id) {
@@ -68,32 +68,32 @@ impl Storage for InMemoryStorage {
                 }
             }
 
-            FileType::IndexMap => self.indexmap.lock().unwrap().clone(),
+            FileId::IndexMap => self.indexmap.lock().unwrap().clone(),
         })
     }
 
-    fn exists(&self, r#type: FileType) -> io::Result<bool> {
-        match r#type {
-            FileType::SSTable(id) => {
+    fn exists(&self, id: FileId) -> io::Result<bool> {
+        match id {
+            FileId::SSTable(id) => {
                 let inner = self.inner.lock().unwrap();
                 Ok(inner.contains_key(&id))
             }
 
-            FileType::IndexMap => {
+            FileId::IndexMap => {
                 let indexmap = self.indexmap.lock().unwrap();
                 Ok(!indexmap.is_empty())
             }
         }
     }
 
-    fn remove(&self, r#type: FileType) -> io::Result<()> {
-        match r#type {
-            FileType::SSTable(id) => {
+    fn remove(&self, id: FileId) -> io::Result<()> {
+        match id {
+            FileId::SSTable(id) => {
                 let mut inner = self.inner.lock().unwrap();
                 inner.remove(&id);
             }
 
-            FileType::IndexMap => {
+            FileId::IndexMap => {
                 let mut indexmap = self.indexmap.lock().unwrap();
                 *indexmap = Bytes::new();
             }
@@ -102,14 +102,14 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn len(&self, r#type: FileType) -> io::Result<usize> {
-        match r#type {
-            FileType::SSTable(id) => {
+    fn len(&self, id: FileId) -> io::Result<usize> {
+        match id {
+            FileId::SSTable(id) => {
                 let inner = self.inner.lock().unwrap();
                 Ok(inner.get(&id).map(|b| b.len()).unwrap_or_default())
             }
 
-            FileType::IndexMap => {
+            FileId::IndexMap => {
                 let indexmap = self.indexmap.lock().unwrap();
                 Ok(indexmap.len())
             }

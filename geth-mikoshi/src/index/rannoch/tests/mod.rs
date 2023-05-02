@@ -5,7 +5,7 @@ use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
 use crate::storage::fs::FileSystemStorage;
 use crate::storage::in_mem::InMemoryStorage;
-use crate::storage::FileType::SSTable;
+use crate::storage::FileId::SSTable;
 use bytes::BytesMut;
 use std::io;
 use std::path::PathBuf;

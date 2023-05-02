@@ -3,7 +3,7 @@ use crate::index::rannoch::ss_table::SsTable;
 
 use crate::index::rannoch::block::BlockEntry;
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
-use crate::storage::{FileType, Storage};
+use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
@@ -66,7 +66,7 @@ where
     }
 
     pub fn load(settings: LsmSettings, storage: S) -> io::Result<Self> {
-        let mut bytes = storage.read_all(FileType::IndexMap)?;
+        let mut bytes = storage.read_all(FileId::IndexMap)?;
 
         let logical_position = bytes.get_u64_le();
         let _block_size = bytes.get_u32_le();
@@ -168,7 +168,7 @@ where
         self.persist()?;
 
         for id in cleanups {
-            self.storage.remove(FileType::SSTable(id))?;
+            self.storage.remove(FileId::SSTable(id))?;
         }
 
         Ok(())
@@ -186,7 +186,7 @@ where
         }
 
         self.storage
-            .write_to(FileType::IndexMap, self.buffer.split().freeze())?;
+            .write_to(FileId::IndexMap, self.buffer.split().freeze())?;
 
         Ok(())
     }

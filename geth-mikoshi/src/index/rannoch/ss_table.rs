@@ -1,7 +1,7 @@
 use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::range_start;
 use crate::index::{IteratorIO, IteratorIOExt};
-use crate::storage::{FileType, Storage};
+use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::io;
@@ -99,7 +99,7 @@ where
     }
 
     pub fn load(storage: S, raw_id: Uuid) -> io::Result<Self> {
-        let id = FileType::SSTable(raw_id);
+        let id = FileId::SSTable(raw_id);
         let len = storage.len(id)?;
         let block_size = storage.read_from(id, 0, SSTABLE_HEADER_SIZE)?.get_u32_le() as usize;
         let meta_offset = storage.read_from(id, len as u64 - 4, 4)?.get_u32_le() as u64;
@@ -114,8 +114,8 @@ where
         })
     }
 
-    pub fn file_type(&self) -> FileType {
-        FileType::SSTable(self.id)
+    pub fn file_type(&self) -> FileId {
+        FileId::SSTable(self.id)
     }
 
     pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {

@@ -1,9 +1,8 @@
-use crate::storage::{FileType, Storage};
+use crate::storage::{FileId, Storage};
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::fs::{File, OpenOptions};
-use std::io;
-use std::io::ErrorKind;
+use std::io::{self, ErrorKind};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -49,19 +48,19 @@ impl FileSystemStorage {
         Ok(Arc::new(file))
     }
 
-    fn file_path(&self, id: FileType) -> PathBuf {
+    fn file_path(&self, id: FileId) -> PathBuf {
         match id {
-            FileType::SSTable(id) => self.root.join(id.to_string()),
-            FileType::IndexMap => self.root.join("indexmap"),
+            FileId::SSTable(id) => self.root.join(id.to_string()),
+            FileId::IndexMap => self.root.join("indexmap"),
         }
     }
 }
 
 impl Storage for FileSystemStorage {
-    fn write_to(&self, r#type: FileType, bytes: Bytes) -> std::io::Result<()> {
-        let file = match r#type {
-            FileType::SSTable(id) => self.load_or_create(id),
-            FileType::IndexMap => self.open_file("indexmap"),
+    fn write_to(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+        let file = match id {
+            FileId::SSTable(id) => self.load_or_create(id),
+            FileId::IndexMap => self.open_file("indexmap"),
         }?;
 
         file.write_all_at(&bytes, 0)?;
@@ -70,10 +69,10 @@ impl Storage for FileSystemStorage {
         Ok(())
     }
 
-    fn read_from(&self, r#type: FileType, offset: u64, len: usize) -> std::io::Result<Bytes> {
-        let file = match r#type {
-            FileType::SSTable(id) => self.load_or_create(id),
-            FileType::IndexMap => self.open_file("indexmap"),
+    fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
+        let file = match id {
+            FileId::SSTable(id) => self.load_or_create(id),
+            FileId::IndexMap => self.open_file("indexmap"),
         }?;
 
         let mut buffer = self.buffer.clone();
@@ -83,10 +82,10 @@ impl Storage for FileSystemStorage {
         Ok(buffer.freeze())
     }
 
-    fn read_all(&self, r#type: FileType) -> std::io::Result<Bytes> {
-        let file = match r#type {
-            FileType::SSTable(id) => self.load_or_create(id),
-            FileType::IndexMap => self.open_file("indexmap"),
+    fn read_all(&self, id: FileId) -> io::Result<Bytes> {
+        let file = match id {
+            FileId::SSTable(id) => self.load_or_create(id),
+            FileId::IndexMap => self.open_file("indexmap"),
         }?;
 
         let mut buffer = self.buffer.clone();
@@ -98,10 +97,10 @@ impl Storage for FileSystemStorage {
         Ok(buffer.freeze())
     }
 
-    fn exists(&self, r#type: FileType) -> std::io::Result<bool> {
-        let meta = match r#type {
-            FileType::SSTable(id) => std::fs::metadata(self.root.join(id.to_string())),
-            FileType::IndexMap => std::fs::metadata(self.root.join("indexmap")),
+    fn exists(&self, id: FileId) -> io::Result<bool> {
+        let meta = match id {
+            FileId::SSTable(id) => std::fs::metadata(self.root.join(id.to_string())),
+            FileId::IndexMap => std::fs::metadata(self.root.join("indexmap")),
         };
 
         match meta {
@@ -111,11 +110,11 @@ impl Storage for FileSystemStorage {
         }
     }
 
-    fn remove(&self, r#type: FileType) -> std::io::Result<()> {
-        std::fs::remove_file(self.file_path(r#type))
+    fn remove(&self, id: FileId) -> io::Result<()> {
+        std::fs::remove_file(self.file_path(id))
     }
 
-    fn len(&self, r#type: FileType) -> std::io::Result<usize> {
-        Ok(std::fs::metadata(self.file_path(r#type))?.len() as usize)
+    fn len(&self, id: FileId) -> io::Result<usize> {
+        Ok(std::fs::metadata(self.file_path(id))?.len() as usize)
     }
 }
