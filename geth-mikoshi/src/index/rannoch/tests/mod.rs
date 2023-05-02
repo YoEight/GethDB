@@ -32,7 +32,7 @@ pub fn in_mem_generate_block() -> SsTable<InMemoryStorage> {
     let mut table = SsTable::new(InMemoryStorage::new(), 4_096);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     let mut buffer = BytesMut::new();
-    table.put(&mut buffer, values.lift()).unwrap();
+    table.put_iter(&mut buffer, values).unwrap();
 
     table
 }
@@ -41,7 +41,7 @@ pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
     let mut table = SsTable::new(InMemoryStorage::new(), 128);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     let mut buffer = BytesMut::new();
-    table.put(&mut buffer, values.lift()).unwrap();
+    table.put_iter(&mut buffer, values).unwrap();
 
     table
 }

@@ -218,6 +218,7 @@ where
         self.storage
             .write_to(self.file_type(), buffer.split().freeze())?;
         self.metas = BlockMetas::new(metas);
+        self.meta_offset = meta_offset as u64;
 
         Ok(())
     }
