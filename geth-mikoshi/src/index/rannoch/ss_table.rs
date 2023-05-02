@@ -11,6 +11,7 @@ use std::ops::RangeBounds;
 use uuid::Uuid;
 
 const SSTABLE_META_ENTRY_SIZE: usize = 4 + 8 + 8;
+const SSTABLE_HEADER_SIZE: usize = 4;
 
 #[derive(Debug, Clone, Copy)]
 pub struct BlockMeta {
@@ -100,6 +101,7 @@ where
     pub fn load(storage: S, raw_id: Uuid) -> io::Result<Self> {
         let id = FileType::SSTable(raw_id);
         let len = storage.len(id)?;
+        let block_size = storage.read_from(id, 0, SSTABLE_HEADER_SIZE)?.get_u32_le() as usize;
         let meta_offset = storage.read_from(id, len as u64 - 4, 4)?.get_u32_le() as u64;
         let metas = storage.read_from(id, meta_offset, len - 4usize - meta_offset as usize)?;
 
@@ -108,7 +110,7 @@ where
             storage,
             metas: BlockMetas::new(metas),
             meta_offset,
-            block_size: 0,
+            block_size,
         })
     }
 
@@ -188,6 +190,7 @@ where
         let mut block_current_size = 0usize;
         let mut metas = Vec::new();
 
+        buffer.put_u32_le(self.block_size as u32);
         while let Some((key, rev, pos)) = values.next()? {
             if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
                 let remaining = self.block_size - block_current_size;

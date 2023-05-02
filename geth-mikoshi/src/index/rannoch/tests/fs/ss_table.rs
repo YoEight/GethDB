@@ -212,3 +212,22 @@ fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_fs_ss_table_serialization() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let temp = TempDir::default();
+    let storage = FileSystemStorage::new(PathBuf::from(temp.as_ref()));
+    let mut table = SsTable::new(storage.clone(), 256);
+
+    table.put_iter(&mut buffer, [(1,2,3)])?;
+
+    let actual = SsTable::load(storage, table.id)?;
+
+    assert_eq!(256, table.block_size);
+    assert_eq!(table.block_size, actual.block_size);
+    assert_eq!(table.meta_offset, actual.meta_offset);
+    assert_eq!(table.metas, actual.metas);
+
+    Ok(())
+}

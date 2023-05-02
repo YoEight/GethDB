@@ -1,5 +1,5 @@
 use crate::storage::{FileType, Storage};
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -7,7 +7,6 @@ use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct InMemoryStorage {
-    buffer: BytesMut,
     inner: Arc<Mutex<HashMap<Uuid, Bytes>>>,
     indexmap: Arc<Mutex<Bytes>>,
 }
@@ -15,7 +14,6 @@ pub struct InMemoryStorage {
 impl InMemoryStorage {
     pub fn new() -> Self {
         Self {
-            buffer: Default::default(),
             inner: Arc::new(Mutex::new(Default::default())),
             indexmap: Arc::new(Default::default()),
         }
