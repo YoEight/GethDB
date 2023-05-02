@@ -1,62 +1,58 @@
 use crate::index::rannoch::block::{Block, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::ss_table::SsTable;
 use crate::index::rannoch::storage::in_mem::InMemStorage;
-use crate::index::rannoch::tests::{key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS};
+use crate::index::rannoch::tests::fs::values;
+use crate::index::rannoch::tests::{
+    in_mem_generate_block, key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS,
+};
+use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
-
-fn in_mem_generate_block(storage: &mut InMemStorage, table: &mut SsTable) {
-    let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
-    storage.sst_put(table, values);
-}
+use std::io;
 
 #[test]
-fn test_in_mem_block_build_single_key() {
-    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
-    let mut table = SsTable::new();
+fn test_in_mem_block_build_single_key() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(InMemoryStorage::new(), BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(&mut table, [(1, 1, 1)]);
+    table.put_iter(&mut buffer, [(1, 1, 1)])?;
 
     assert_eq!(1, table.len());
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     block.dump();
     let entry = block.read_entry(0).unwrap();
 
     assert_eq!(1, entry.key);
     assert_eq!(1, entry.revision);
     assert_eq!(1, entry.position);
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_build_full() {
-    let mut storage = InMemStorage::new(BLOCK_ENTRY_SIZE);
-    let mut table = SsTable::new();
+fn test_in_mem_block_build_full() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(InMemoryStorage::new(), BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(&mut table, [(1, 1, 10), (2, 2, 20)]);
+    table.put_iter(&mut buffer, [(1, 1, 10), (2, 2, 20)])?;
 
     assert_eq!(2, table.len());
 
     for idx in 0..table.len() {
-        let entry = storage
-            .sst_read_block(&table, idx)
-            .unwrap()
-            .read_entry(0)
-            .unwrap();
+        let entry = table.read_block(idx)?.read_entry(0).unwrap();
 
         assert_eq!((idx + 1) as u64, entry.key);
         assert_eq!((idx + 1) as u64, entry.revision);
         assert_eq!(((idx + 1) * 10) as u64, entry.position);
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_build_all() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
-
-    in_mem_generate_block(&mut storage, &mut table);
-
-    let block = storage.sst_read_block(&table, 0).unwrap();
+fn test_in_mem_block_build_all() -> io::Result<()> {
+    let mut table = in_mem_generate_block();
+    let block = table.read_block(0)?;
 
     for idx in 0..NUM_OF_KEYS {
         let entry = block.read_entry(idx).unwrap();
@@ -65,16 +61,14 @@ fn test_in_mem_block_build_all() {
         assert_eq!(revision_of(idx), entry.revision);
         assert_eq!(position_of(idx), entry.position);
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_find_key() {
-    let mut storage = InMemStorage::default();
-    let mut table = test_ss_table();
-
-    in_mem_generate_block(&mut storage, &mut table);
-
-    let block = storage.sst_read_block(&table, 0).unwrap();
+fn test_in_mem_block_find_key() -> io::Result<()> {
+    let mut table = in_mem_generate_block();
+    let block = table.read_block(0)?;
 
     for i in 0..NUM_OF_KEYS {
         let entry = block
@@ -103,15 +97,17 @@ fn test_in_mem_block_find_key() {
             entry.position,
         );
     }
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan_skipped() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan_skipped() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(
-        &mut table,
+    table.put_iter(
+        &mut buffer,
         [
             (1, 0, 1),
             (1, 1, 2),
@@ -122,9 +118,9 @@ fn test_in_mem_block_scan_skipped() {
             (3, 1, 8),
             (3, 2, 9),
         ],
-    );
+    )?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     let entry = iter.next().unwrap();
@@ -138,15 +134,17 @@ fn test_in_mem_block_scan_skipped() {
     assert_eq!(6, entry.position);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(
-        &mut table,
+    table.put_iter(
+        &mut buffer,
         [
             (1, 0, 1),
             (1, 1, 2),
@@ -158,9 +156,9 @@ fn test_in_mem_block_scan() {
             (3, 1, 8),
             (3, 2, 9),
         ],
-    );
+    )?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     let entry = iter.next().unwrap();
@@ -179,16 +177,18 @@ fn test_in_mem_block_scan() {
     assert_eq!(6, entry.position);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan_gap() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan_gap() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(&mut table, [(2, 1, 5), (2, 2, 6)]);
+    table.put_iter(&mut buffer, [(2, 1, 5), (2, 2, 6)])?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     let entry = iter.next().unwrap();
@@ -202,41 +202,47 @@ fn test_in_mem_block_scan_gap() {
     assert_eq!(6, entry.position);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan_not_found_easy_1() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(&mut table, [(3, 0, 7), (3, 1, 8), (3, 2, 9)]);
+    table.put_iter(&mut buffer, [(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan_not_found_easy_2() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(&mut table, [(1, 0, 1), (1, 1, 2), (1, 2, 3)]);
+    table.put_iter(&mut buffer, [(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }
 
 #[test]
-fn test_in_mem_block_scan_not_found_hard() {
-    let mut storage = InMemStorage::default();
-    let mut table = SsTable::new();
+fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    storage.sst_put(
-        &mut table,
+    table.put(
+        &mut buffer,
         [
             (1, 0, 1),
             (1, 1, 2),
@@ -245,10 +251,12 @@ fn test_in_mem_block_scan_not_found_hard() {
             (3, 1, 8),
             (3, 2, 9),
         ],
-    );
+    )?;
 
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    let block = table.read_block(0)?;
     let mut iter = block.scan(2, ..);
 
     assert!(iter.next().is_none());
+
+    Ok(())
 }

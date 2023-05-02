@@ -8,6 +8,7 @@ use crate::index::rannoch::tests::{
     NUM_OF_KEYS,
 };
 use crate::index::{IteratorIO, IteratorIOExt};
+use crate::storage::fs::FileSystemStorage;
 use bytes::BytesMut;
 use std::io;
 use std::path::PathBuf;
@@ -18,12 +19,13 @@ use uuid::Uuid;
 fn test_fs_sst_build_single_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE);
-    let mut table = test_ss_table();
+    let storage = FileSystemStorage::new(root);
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(&mut table, values(&[(1, 2, 3)]))?;
+    table.put_iter(&mut buffer, [(1, 2, 3)])?;
 
-    let entry = storage.sst_find_key(&table, 1, 2)?.unwrap();
+    let entry = table.find_key(1, 2)?.unwrap();
 
     assert_eq!(1, entry.key);
     assert_eq!(2, entry.revision);
@@ -36,18 +38,19 @@ fn test_fs_sst_build_single_key() -> io::Result<()> {
 fn test_fs_sst_build_two_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE);
-    let mut table = test_ss_table();
+    let storage = FileSystemStorage::new(root);
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(&mut table, values(&[(1, 2, 3), (2, 3, 4)]))?;
+    table.put_iter(&mut buffer, [(1, 2, 3), (2, 3, 4)])?;
 
-    let entry = storage.sst_find_key(&table, 1, 2)?.unwrap();
+    let entry = table.find_key(1, 2)?.unwrap();
 
     assert_eq!(1, entry.key);
     assert_eq!(2, entry.revision);
     assert_eq!(3, entry.position);
 
-    let entry = storage.sst_find_key(&table, 2, 3)?.unwrap();
+    let entry = table.find_key(2, 3)?.unwrap();
 
     assert_eq!(2, entry.key);
     assert_eq!(3, entry.revision);
@@ -60,12 +63,13 @@ fn test_fs_sst_build_two_blocks() -> io::Result<()> {
 fn test_fs_sst_key_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE);
-    let mut table = test_ss_table();
+    let storage = FileSystemStorage::new(root);
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(&mut table, values(&[(1, 2, 3)]))?;
+    table.put_iter(&mut buffer, [(1, 2, 3)])?;
 
-    assert!(storage.sst_find_key(&table, 1, 3)?.is_none());
+    assert!(table.find_key(1, 3)?.is_none());
 
     Ok(())
 }
