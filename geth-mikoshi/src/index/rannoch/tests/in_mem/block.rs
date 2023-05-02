@@ -1,9 +1,8 @@
 use crate::index::rannoch::block::{Block, BLOCK_ENTRY_SIZE};
 use crate::index::rannoch::ss_table::SsTable;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::fs::values;
 use crate::index::rannoch::tests::{
-    in_mem_generate_block, key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS,
+    in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS,
 };
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
@@ -241,7 +240,7 @@ fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
     let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put(
+    table.put_iter(
         &mut buffer,
         [
             (1, 0, 1),

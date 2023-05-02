@@ -1,8 +1,7 @@
 use crate::index::rannoch::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
 use crate::index::rannoch::ss_table::SsTable;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::{
-    in_mem_generate_sst, key_of, position_of, revision_of, test_ss_table, NUM_OF_KEYS,
+    in_mem_generate_sst, key_of, position_of, revision_of, NUM_OF_KEYS,
 };
 use crate::index::IteratorIO;
 use crate::storage::in_mem::InMemoryStorage;
@@ -39,7 +38,7 @@ fn test_in_mem_sst_build_two_blocks() -> io::Result<()> {
     assert_eq!(2, entry.revision);
     assert_eq!(3, entry.position);
 
-    let entry = table.find_key(2, 3)?;
+    let entry = table.find_key(2, 3)?.unwrap();
 
     assert_eq!(2, entry.key);
     assert_eq!(3, entry.revision);
@@ -53,7 +52,7 @@ fn test_in_mem_sst_key_not_found() -> io::Result<()> {
     let mut buffer = BytesMut::new();
     let mut table = SsTable::new(InMemoryStorage::new(), BLOCK_ENTRY_SIZE);
 
-    table.sst_put(&mut buffer, [(1, 2, 3)])?;
+    table.put_iter(&mut buffer, [(1, 2, 3)])?;
 
     assert!(table.find_key(1, 3)?.is_none());
 

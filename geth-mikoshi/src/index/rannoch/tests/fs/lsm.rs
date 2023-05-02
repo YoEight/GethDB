@@ -1,55 +1,38 @@
 use crate::index::rannoch::lsm::{Lsm, LsmSettings};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
 use crate::index::rannoch::ss_table::SsTable;
-use crate::index::rannoch::storage::fs::FsStorage;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::fs::values;
 use crate::index::IteratorIO;
+use crate::storage::fs::FileSystemStorage;
+use bytes::BytesMut;
 use std::io;
 use std::path::PathBuf;
 use temp_testdir::TempDir;
 
-fn lsm_put_values<V>(storage: &mut FsStorage, lsm: &mut Lsm, mut values: V) -> io::Result<()>
-where
-    V: IntoIterator<Item = (u64, u64, u64)>,
-{
-    for (key, rev, pos) in values {
-        storage.lsm_put(lsm, key, rev, pos)?;
-    }
-
-    Ok(())
-}
-
 #[test]
 fn test_fs_lsm_get() -> io::Result<()> {
-    let mut lsm = Lsm::default();
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new_with_default(root);
+    let mut lsm = Lsm::with_default(FileSystemStorage::new(root));
 
-    lsm_put_values(&mut storage, &mut lsm, [(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
+    lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
-    assert_eq!(1, storage.lsm_get(&lsm, 1, 0)?.unwrap());
-    assert_eq!(2, storage.lsm_get(&lsm, 2, 0)?.unwrap());
-    assert_eq!(3, storage.lsm_get(&lsm, 3, 0)?.unwrap());
+    assert_eq!(1, lsm.get(1, 0)?.unwrap());
+    assert_eq!(2, lsm.get(2, 0)?.unwrap());
+    assert_eq!(3, lsm.get(3, 0)?.unwrap());
 
     Ok(())
 }
 
 #[test]
 fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
-    let mut lsm = Lsm::default();
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new_with_default(root);
+    let mut lsm = Lsm::with_default(FileSystemStorage::new(root));
 
-    lsm_put_values(
-        &mut storage,
-        &mut lsm,
-        [(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)],
-    )?;
+    lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
-    let mut iter = storage.lsm_scan(&lsm, 2, ..);
+    let mut iter = lsm.scan(2, ..);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -63,7 +46,7 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = storage.lsm_scan(&lsm, 2, 0..=2);
+    let mut iter = lsm.scan(2, 0..=2);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -76,7 +59,7 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = storage.lsm_scan(&lsm, 2, 0..2);
+    let mut iter = lsm.scan(2, 0..2);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -89,7 +72,7 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = storage.lsm_scan(&lsm, 2, 0..=1);
+    let mut iter = lsm.scan(2, 0..=1);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -102,7 +85,7 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = storage.lsm_scan(&lsm, 2, 0..1);
+    let mut iter = lsm.scan(2, 0..1);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -110,7 +93,7 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = storage.lsm_scan(&lsm, 2, 1..);
+    let mut iter = lsm.scan(2, 1..);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(1, entry.revision);
@@ -128,23 +111,19 @@ fn test_fs_lsm_sync() -> io::Result<()> {
     let mut setts = LsmSettings::default();
     setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
 
-    let mut lsm = Lsm::new(setts);
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new_with_default(root);
+    let storage = FileSystemStorage::new(root);
+    let mut lsm = Lsm::new(setts, storage);
 
-    lsm_put_values(
-        &mut storage,
-        &mut lsm,
-        [(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)],
-    )?;
+    lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
     assert_eq!(1, lsm.ss_table_count());
     let table = lsm.ss_table_first().unwrap();
-    let block = storage.sst_read_block(table, 0)?.unwrap();
+    let block = table.read_block(0)?;
     block.dump();
 
-    let mut iter = storage.lsm_scan(&lsm, 2, ..);
+    let mut iter = lsm.scan(2, ..);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -163,18 +142,17 @@ fn test_fs_lsm_sync() -> io::Result<()> {
 
 #[test]
 fn test_fs_lsm_serialization() -> io::Result<()> {
-    let setts = LsmSettings::default();
-
-    let mut lsm = Lsm::new(setts);
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new_with_default(root);
+    let storage = FileSystemStorage::new(root);
+    let mut buffer = BytesMut::new();
+    let mut lsm = Lsm::with_default(storage.clone());
 
-    let mut table1 = SsTable::new();
-    let mut table2 = SsTable::new();
+    let mut table1 = SsTable::with_default(storage.clone());
+    let mut table2 = SsTable::with_default(storage.clone());
 
-    storage.sst_put(&mut table1, values(&[(1, 2, 3)]))?;
-    storage.sst_put(&mut table2, values(&[(4, 5, 6)]))?;
+    table1.put_iter(&mut buffer, [(1, 2, 3)])?;
+    table2.put_iter(&mut buffer, [(4, 5, 6)])?;
 
     lsm.logical_position = 1234;
 
@@ -186,8 +164,8 @@ fn test_fs_lsm_serialization() -> io::Result<()> {
         lsm.levels.entry(1).or_default().push_back(table2.clone());
     }
 
-    storage.test_lsm_serialize(&lsm)?;
-    let actual = storage.lsm_load(setts)?.unwrap();
+    lsm.persist()?;
+    let actual = Lsm::load(LsmSettings::default(), storage)?;
 
     assert_eq!(lsm.logical_position, actual.logical_position);
 

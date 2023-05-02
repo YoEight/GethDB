@@ -47,9 +47,17 @@ pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
 }
 
 pub fn fs_generate_stt(storage: FileSystemStorage) -> io::Result<SsTable<FileSystemStorage>> {
-    let mut table = SsTable::new(storage, 4_096);
+    fs_generate_stt_with_size(storage, 4_096)
+}
+
+pub fn fs_generate_stt_with_size(
+    storage: FileSystemStorage,
+    block_size: usize,
+) -> io::Result<SsTable<FileSystemStorage>> {
+    let mut buffer = BytesMut::new();
+    let mut table = SsTable::new(storage, block_size);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
-    storage.sst_put(&mut table, values.lift())?;
+    table.put_iter(&mut buffer, values)?;
 
     Ok(table)
 }

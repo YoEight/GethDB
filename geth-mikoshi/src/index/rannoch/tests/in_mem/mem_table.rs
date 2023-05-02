@@ -1,8 +1,10 @@
 use crate::index::rannoch::block::BlockEntry;
 use crate::index::rannoch::mem_table::MemTable;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
-use crate::index::rannoch::tests::test_ss_table;
+use crate::index::rannoch::ss_table::SsTable;
+use crate::index::IteratorIO;
+use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
+use std::io;
 
 #[test]
 fn test_mem_table_get() {
@@ -107,9 +109,10 @@ fn test_mem_table_iter() {
 }
 
 #[test]
-fn test_mem_table_flush() {
-    let mut storage = InMemStorage::new(128);
-    let mut table = test_ss_table();
+fn test_mem_table_flush() -> io::Result<()> {
+    let mut storage = InMemoryStorage::new();
+    let mut table = SsTable::new(storage, 128);
+    let mut buffer = BytesMut::new();
     let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 1);
@@ -120,25 +123,27 @@ fn test_mem_table_flush() {
         .into_iter()
         .map(|entry| (entry.key, entry.revision, entry.position));
 
-    storage.sst_put(&mut table, values);
-    let block = storage.sst_read_block(&table, 0).unwrap();
+    table.put_iter(&mut buffer, values)?;
+    let block = table.read_block(0)?;
     block.dump();
-    let mut iter = storage.sst_iter(&table);
+    let mut iter = table.iter();
 
-    let entry = iter.next().unwrap();
+    let entry = iter.next()?.unwrap();
     assert_eq!(1, entry.key);
     assert_eq!(0, entry.revision);
     assert_eq!(1, entry.position);
 
-    let entry = iter.next().unwrap();
+    let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
     assert_eq!(2, entry.position);
 
-    let entry = iter.next().unwrap();
+    let entry = iter.next()?.unwrap();
     assert_eq!(3, entry.key);
     assert_eq!(0, entry.revision);
     assert_eq!(3, entry.position);
 
-    assert!(iter.next().is_none());
+    assert!(iter.next()?.is_none());
+
+    Ok(())
 }

@@ -13,7 +13,7 @@ use uuid::Uuid;
 pub struct FileSystemStorage {
     root: PathBuf,
     buffer: BytesMut,
-    inner: Mutex<HashMap<Uuid, Arc<File>>>,
+    inner: Arc<Mutex<HashMap<Uuid, Arc<File>>>>,
 }
 
 impl FileSystemStorage {
@@ -21,13 +21,13 @@ impl FileSystemStorage {
         Self {
             root,
             buffer: BytesMut::default(),
-            inner: Mutex::new(Default::default()),
+            inner: Arc::new(Mutex::new(Default::default())),
         }
     }
 
     fn load_or_create(&self, id: Uuid) -> io::Result<Arc<File>> {
         let mut inner = self.inner.lock().unwrap();
-        let file = if let Some(file) = self.inner.get(&id) {
+        let file = if let Some(file) = inner.get(&id) {
             file.clone()
         } else {
             let file = self.open_file(id.to_string())?;
@@ -44,13 +44,13 @@ impl FileSystemStorage {
             .write(true)
             .read(true)
             .create(true)
-            .open(self.root.join(id.to_string()))?;
+            .open(self.root.join(path))?;
 
         Ok(Arc::new(file))
     }
 
     fn file_path(&self, id: FileType) -> PathBuf {
-        match r#type {
+        match id {
             FileType::SSTable(id) => self.root.join(id.to_string()),
             FileType::IndexMap => self.root.join("indexmap"),
         }

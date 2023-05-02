@@ -101,11 +101,11 @@ where
         let id = FileType::SSTable(raw_id);
         let len = storage.len(id)?;
         let meta_offset = storage.read_from(id, len as u64 - 4, 4)?.get_u32_le() as u64;
-        let metas = storage.read_from(id, meta_offset, len - 4 - meta_offset)?;
+        let metas = storage.read_from(id, meta_offset, len - 4usize - meta_offset as usize)?;
 
         Ok(SsTable {
             id: raw_id,
-            storage: (),
+            storage,
             metas: BlockMetas::new(metas),
             meta_offset,
             block_size: 0,
@@ -152,24 +152,22 @@ where
         self.metas.len()
     }
 
-    pub fn read_block(&self, block_id: usize) -> io::Result<Block> {
-        let meta = self.metas.read(self.block_idx);
-        let block_size = self.block_actual_size(self.block_idx);
+    pub fn read_block(&self, block_idx: usize) -> io::Result<Block> {
+        let meta = self.metas.read(block_idx);
+        let block_size = self.block_actual_size(block_idx);
         let block_bytes =
             self.storage
-                .read_from(self.table.file_type(), meta.offset as u64, block_size)?;
+                .read_from(self.file_type(), meta.offset as u64, block_size)?;
 
         Ok(Block::new(block_bytes))
     }
 
     pub fn find_key(&self, key: u64, revision: u64) -> io::Result<Option<BlockEntry>> {
-        for block_idx in table.find_best_candidates(key, revision) {
+        for block_idx in self.find_best_candidates(key, revision) {
             let block = self.read_block(block_idx)?;
 
-            if let Some(block) = block {
-                if let Some(entry) = block.find_entry(key, revision) {
-                    return Ok(Some(entry));
-                }
+            if let Some(entry) = block.find_entry(key, revision) {
+                return Ok(Some(entry));
             }
         }
 
@@ -180,7 +178,7 @@ where
     where
         Values: IntoIterator<Item = (u64, u64, u64)>,
     {
-        self.put(buffer, values.lift())
+        self.put(buffer, values.into_iter().lift())
     }
 
     pub fn put<Values>(&mut self, buffer: &mut BytesMut, mut values: Values) -> io::Result<()>

@@ -1,11 +1,9 @@
 use crate::index::rannoch::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
 use crate::index::rannoch::ss_table::SsTable;
-use crate::index::rannoch::storage::fs::FsStorage;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
 use crate::index::rannoch::tests::fs::values;
 use crate::index::rannoch::tests::{
-    fs_generate_stt, in_mem_generate_sst, key_of, position_of, revision_of, test_ss_table,
-    NUM_OF_KEYS,
+    fs_generate_stt, fs_generate_stt_with_size, in_mem_generate_sst, key_of, position_of,
+    revision_of, NUM_OF_KEYS,
 };
 use crate::index::{IteratorIO, IteratorIOExt};
 use crate::storage::fs::FileSystemStorage;
@@ -78,17 +76,15 @@ fn test_fs_sst_key_not_found() -> io::Result<()> {
 fn test_fs_sst_find_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE);
-    let table = fs_generate_stt(&mut storage)?;
+    let storage = FileSystemStorage::new(root);
+    let mut table = fs_generate_stt_with_size(storage, BLOCK_ENTRY_SIZE)?;
 
     for i in 0..NUM_OF_KEYS {
         let key = key_of(i);
         let revision = revision_of(i);
         let position = position_of(i);
 
-        let entry = storage
-            .sst_find_key(&table, key, revision)?
-            .expect("to be defined");
+        let entry = table.find_key(key, revision)?.expect("to be defined");
 
         assert_eq!(key, entry.key);
         assert_eq!(revision, entry.revision);
@@ -102,12 +98,13 @@ fn test_fs_sst_find_key() -> io::Result<()> {
 fn test_fs_ss_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE);
-    let mut table = SsTable::new();
+    let mut buffer = BytesMut::new();
+    let storage = FileSystemStorage::new(root);
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE);
 
-    storage.sst_put(
-        &mut table,
-        values(&[
+    table.put_iter(
+        &mut buffer,
+        [
             (1, 0, 1),
             (1, 1, 2),
             (1, 2, 3),
@@ -117,10 +114,10 @@ fn test_fs_ss_table_scan() -> io::Result<()> {
             (3, 0, 7),
             (3, 1, 8),
             (3, 2, 9),
-        ]),
+        ],
     )?;
 
-    let mut iter = storage.sst_scan(&table, 2, ..);
+    let mut iter = table.scan(2, ..);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -146,12 +143,13 @@ fn test_fs_ss_table_scan() -> io::Result<()> {
 fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE * 3);
-    let mut table = SsTable::new();
+    let mut buffer = BytesMut::new();
+    let storage = FileSystemStorage::new(root);
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE * 3);
 
-    storage.sst_put(
-        &mut table,
-        values(&[
+    table.put_iter(
+        &mut buffer,
+        [
             (1, 0, 1),
             (1, 1, 2),
             (1, 2, 3),
@@ -161,12 +159,12 @@ fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
             (3, 0, 7),
             (3, 1, 8),
             (3, 2, 9),
-        ]),
+        ],
     )?;
 
     assert_eq!(3, table.len());
 
-    let mut iter = storage.sst_scan(&table, 2, ..);
+    let mut iter = table.scan(2, ..);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -192,22 +190,23 @@ fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
 fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut storage = FsStorage::new(root, BLOCK_ENTRY_SIZE * 3);
-    let mut table = SsTable::new();
+    let mut buffer = BytesMut::new();
+    let storage = FileSystemStorage::new(root);
+    let mut table = SsTable::new(storage, BLOCK_ENTRY_SIZE * 3);
 
-    storage.sst_put(
-        &mut table,
-        values(&[
+    table.put_iter(
+        &mut buffer,
+        [
             (1, 0, 1),
             (1, 1, 2),
             (1, 2, 3),
             (3, 0, 7),
             (3, 1, 8),
             (3, 2, 9),
-        ]),
+        ],
     )?;
 
-    let mut iter = storage.sst_scan(&table, 2, ..);
+    let mut iter = table.scan(2, ..);
 
     assert!(iter.next()?.is_none());
 

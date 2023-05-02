@@ -1,6 +1,6 @@
 use crate::index::rannoch::lsm::{Lsm, LsmSettings};
 use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
-use crate::index::rannoch::storage::in_mem::InMemStorage;
+use crate::index::IteratorIO;
 use crate::storage::in_mem::InMemoryStorage;
 use std::io;
 

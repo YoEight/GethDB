@@ -47,7 +47,7 @@ pub struct Lsm<S> {
 
 impl<S> Lsm<S>
 where
-    S: Storage,
+    S: Storage + 'static,
 {
     pub fn new(settings: LsmSettings, storage: S) -> Self {
         Self {
@@ -132,18 +132,16 @@ where
             if let Some(tables) = self.levels.get_mut(&level) {
                 if tables.len() + 1 >= self.settings.ss_table_max_count {
                     let mut targets = vec![new_table.iter()];
-                    self.inner.remove(&new_table.id);
                     cleanups.push(new_table.id);
 
                     for table in tables.drain(..) {
                         targets.push(table.iter());
-                        self.inner.remove(&table.id);
                         cleanups.push(table.id);
                     }
 
                     let values = MergeIO::new(targets).map(|e| (e.key, e.revision, e.position));
 
-                    new_table = SsTable::new(self.settings.base_block_size, self.storage.clone());
+                    new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
                     new_table.put(&mut self.buffer, values)?;
 
                     if new_table.len() >= sst_table_block_count_limit(level) {
@@ -167,10 +165,10 @@ where
         // it means we actually flushed some data to disk. Anything prior is stored in mem-table.
         self.logical_position = position;
 
-        self.persist_index_file()?;
+        self.persist()?;
 
         for id in cleanups {
-            std::fs::remove_file(self.root.join(id.to_string()))?;
+            self.storage.remove(FileType::SSTable(id))?;
         }
 
         Ok(())
@@ -233,7 +231,7 @@ where
             scans.push(Box::new(mem_table.scan(key, range.clone()).lift()));
         }
 
-        for tables in lsm.levels.values() {
+        for tables in self.levels.values() {
             for table in tables {
                 scans.push(Box::new(table.scan(key, range.clone())));
             }
