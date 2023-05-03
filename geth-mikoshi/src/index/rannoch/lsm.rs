@@ -186,7 +186,7 @@ where
         }
 
         self.storage
-            .write_to(FileId::IndexMap, self.buffer.split().freeze())?;
+            .write_to(FileId::IndexMap, 0, self.buffer.split().freeze())?;
 
         Ok(())
     }

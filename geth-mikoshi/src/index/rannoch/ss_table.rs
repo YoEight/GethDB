@@ -219,7 +219,7 @@ where
         buffer.put_u32_le(meta_offset);
 
         self.storage
-            .write_to(self.file_type(), buffer.split().freeze())?;
+            .write_to(self.file_type(), 0, buffer.split().freeze())?;
         self.metas = BlockMetas::new(metas);
         self.meta_offset = meta_offset as u64;
 

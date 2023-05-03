@@ -1,7 +1,7 @@
-use crate::storage::{FileId, Storage};
+use crate::storage::{FileCategory, FileId, Storage};
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
-use std::fs::{File, OpenOptions};
+use std::fs::{read_dir, File, OpenOptions};
 use std::io::{self, ErrorKind};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
@@ -12,7 +12,7 @@ use uuid::Uuid;
 pub struct FileSystemStorage {
     root: PathBuf,
     buffer: BytesMut,
-    inner: Arc<Mutex<HashMap<Uuid, Arc<File>>>>,
+    inner: Arc<Mutex<HashMap<FileId, Arc<File>>>>,
 }
 
 impl FileSystemStorage {
@@ -24,12 +24,13 @@ impl FileSystemStorage {
         }
     }
 
-    fn load_or_create(&self, id: Uuid) -> io::Result<Arc<File>> {
+    fn load_or_create(&self, id: FileId) -> io::Result<Arc<File>> {
         let mut inner = self.inner.lock().unwrap();
         let file = if let Some(file) = inner.get(&id) {
             file.clone()
         } else {
-            let file = self.open_file(id.to_string())?;
+            let path = self.file_path(id);
+            let file = self.open_file(path)?;
             inner.insert(id, file.clone());
 
             file
@@ -43,7 +44,7 @@ impl FileSystemStorage {
             .write(true)
             .read(true)
             .create(true)
-            .open(self.root.join(path))?;
+            .open(path)?;
 
         Ok(Arc::new(file))
     }
@@ -52,29 +53,23 @@ impl FileSystemStorage {
         match id {
             FileId::SSTable(id) => self.root.join(id.to_string()),
             FileId::IndexMap => self.root.join("indexmap"),
+            FileId::Chunk { num, version } => self.root.join(chunk_filename_from(num, version)),
         }
     }
 }
 
 impl Storage for FileSystemStorage {
-    fn write_to(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
-        let file = match id {
-            FileId::SSTable(id) => self.load_or_create(id),
-            FileId::IndexMap => self.open_file("indexmap"),
-        }?;
+    fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
+        let file = self.load_or_create(id)?;
 
-        file.write_all_at(&bytes, 0)?;
+        file.write_all_at(&bytes, offset)?;
         file.sync_all()?;
 
         Ok(())
     }
 
     fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
-        let file = match id {
-            FileId::SSTable(id) => self.load_or_create(id),
-            FileId::IndexMap => self.open_file("indexmap"),
-        }?;
-
+        let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         buffer.resize(len, 0);
         file.read_exact_at(&mut buffer, offset)?;
@@ -83,11 +78,7 @@ impl Storage for FileSystemStorage {
     }
 
     fn read_all(&self, id: FileId) -> io::Result<Bytes> {
-        let file = match id {
-            FileId::SSTable(id) => self.load_or_create(id),
-            FileId::IndexMap => self.open_file("indexmap"),
-        }?;
-
+        let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         let len = file.metadata()?.len() as usize;
 
@@ -98,12 +89,7 @@ impl Storage for FileSystemStorage {
     }
 
     fn exists(&self, id: FileId) -> io::Result<bool> {
-        let meta = match id {
-            FileId::SSTable(id) => std::fs::metadata(self.root.join(id.to_string())),
-            FileId::IndexMap => std::fs::metadata(self.root.join("indexmap")),
-        };
-
-        match meta {
+        match std::fs::metadata(self.file_path(id)) {
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e),
             Ok(_) => Ok(true),
@@ -117,4 +103,26 @@ impl Storage for FileSystemStorage {
     fn len(&self, id: FileId) -> io::Result<usize> {
         Ok(std::fs::metadata(self.file_path(id))?.len() as usize)
     }
+
+    fn list<C>(&self, category: C) -> io::Result<Vec<C::Item>>
+    where
+        C: FileCategory,
+    {
+        let mut entries = read_dir(self.root.as_path())?;
+        let mut result = Vec::new();
+
+        while let Some(entry) = entries.next().transpose()? {
+            if let Some(filename) = entry.file_name().to_str() {
+                if let Some(item) = category.parse(filename) {
+                    result.push(item);
+                }
+            }
+        }
+
+        Ok(result)
+    }
+}
+
+fn chunk_filename_from(seq_number: usize, version: usize) -> String {
+    format!("chunk-{:06}.{:06}", seq_number, version)
 }
