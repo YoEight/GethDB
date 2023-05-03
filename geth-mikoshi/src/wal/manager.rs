@@ -1,9 +1,11 @@
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
+use crate::index::{Lsm, LsmSettings};
 use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunk::{Chunk, ChunkInfo};
 use crate::wal::footer::ChunkFooter;
 use crate::wal::header::ChunkHeader;
-use bytes::{Buf, Bytes};
+use bytes::{Buf, Bytes, BytesMut};
+use geth_common::{ExpectedRevision, Propose, WriteResult};
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -26,13 +28,15 @@ struct State {
 
 #[derive(Clone)]
 pub struct ChunkManager<S> {
+    buffer: BytesMut,
+    index: Lsm<S>,
     storage: S,
     state: Arc<RwLock<State>>,
 }
 
 impl<S> ChunkManager<S>
 where
-    S: Storage,
+    S: Storage + 'static,
 {
     pub fn load(storage: S) -> io::Result<Self> {
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
@@ -73,10 +77,25 @@ where
             writer = storage.read_from(FileId::writer_chk(), 0, 8)?.get_u64_le();
         }
 
+        let index = Lsm::load(LsmSettings::default(), storage.clone())?;
+
         Ok(Self {
+            index,
+            buffer: BytesMut::new(),
             storage,
             state: Arc::new(RwLock::new(State { chunks, writer })),
         })
+    }
+
+    pub fn append(
+        &self,
+        stream_name: String,
+        _expected: ExpectedRevision,
+        events: Vec<Propose>,
+    ) -> io::Result<WriteResult> {
+        let mut state = self.state.write().unwrap();
+        for (offset, propose) in events.into_iter().enumerate() {}
+        todo!()
     }
 }
 

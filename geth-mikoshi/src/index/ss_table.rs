@@ -1,5 +1,5 @@
-use crate::index::rannoch::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::range_start;
+use crate::index::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
+use crate::index::range_start;
 use crate::index::{IteratorIO, IteratorIOExt};
 use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};

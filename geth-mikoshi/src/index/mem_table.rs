@@ -1,4 +1,4 @@
-use crate::index::rannoch::block::BlockEntry;
+use crate::index::block::BlockEntry;
 
 use bytes::{Buf, BufMut, BytesMut};
 use std::cmp::Ordering;

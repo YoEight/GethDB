@@ -1,7 +1,7 @@
-use crate::index::rannoch::block::BlockEntry;
-use crate::index::rannoch::mem_table::{MemTable, Scan};
-use crate::index::rannoch::merge::Merge;
-use crate::index::rannoch::tests::{build_mem_table, check_merge_result};
+use crate::index::block::BlockEntry;
+use crate::index::mem_table::{MemTable, Scan};
+use crate::index::merge::Merge;
+use crate::index::tests::{build_mem_table, check_merge_result};
 use std::ops::RangeFull;
 
 #[test]

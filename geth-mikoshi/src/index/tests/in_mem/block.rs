@@ -1,9 +1,7 @@
-use crate::index::rannoch::block::{Block, BLOCK_ENTRY_SIZE};
-use crate::index::rannoch::ss_table::SsTable;
-use crate::index::rannoch::tests::fs::values;
-use crate::index::rannoch::tests::{
-    in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS,
-};
+use crate::index::block::{Block, BLOCK_ENTRY_SIZE};
+use crate::index::ss_table::SsTable;
+use crate::index::tests::fs::values;
+use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS};
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
 use std::io;

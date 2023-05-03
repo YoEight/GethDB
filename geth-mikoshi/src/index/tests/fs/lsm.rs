@@ -1,12 +1,19 @@
-use crate::index::rannoch::lsm::{Lsm, LsmSettings};
-use crate::index::rannoch::mem_table::MEM_TABLE_ENTRY_SIZE;
+use crate::index::lsm::{Lsm, LsmSettings};
+use crate::index::mem_table::MEM_TABLE_ENTRY_SIZE;
+use crate::index::ss_table::SsTable;
+use crate::index::tests::fs::values;
 use crate::index::IteratorIO;
-use crate::storage::in_mem::InMemoryStorage;
+use crate::storage::fs::FileSystemStorage;
+use bytes::BytesMut;
 use std::io;
+use std::path::PathBuf;
+use temp_testdir::TempDir;
 
 #[test]
-fn test_in_mem_lsm_get() -> io::Result<()> {
-    let mut lsm = Lsm::with_default(InMemoryStorage::new());
+fn test_fs_lsm_get() -> io::Result<()> {
+    let temp = TempDir::default();
+    let root = PathBuf::from(temp.as_ref());
+    let mut lsm = Lsm::with_default(FileSystemStorage::new(root));
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
@@ -18,8 +25,10 @@ fn test_in_mem_lsm_get() -> io::Result<()> {
 }
 
 #[test]
-fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
-    let mut lsm = Lsm::with_default(InMemoryStorage::new());
+fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
+    let temp = TempDir::default();
+    let root = PathBuf::from(temp.as_ref());
+    let mut lsm = Lsm::with_default(FileSystemStorage::new(root));
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -96,13 +105,16 @@ fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
 }
 
 /// Simulates compaction by purposely using tiny memtable size.
-/// When scanning, it will access to in-mem sstables.
+/// When scanning, it will access to sstables.
 #[test]
-fn test_in_mem_lsm_sync() -> io::Result<()> {
+fn test_fs_lsm_sync() -> io::Result<()> {
     let mut setts = LsmSettings::default();
     setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
 
-    let mut lsm = Lsm::new(setts, InMemoryStorage::new());
+    let temp = TempDir::default();
+    let root = PathBuf::from(temp.as_ref());
+    let storage = FileSystemStorage::new(root);
+    let mut lsm = Lsm::new(setts, storage);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -124,6 +136,46 @@ fn test_in_mem_lsm_sync() -> io::Result<()> {
     assert_eq!(5, entry.position);
 
     assert!(iter.next()?.is_none());
+
+    Ok(())
+}
+
+#[test]
+fn test_fs_lsm_serialization() -> io::Result<()> {
+    let temp = TempDir::default();
+    let root = PathBuf::from(temp.as_ref());
+    let storage = FileSystemStorage::new(root);
+    let mut buffer = BytesMut::new();
+    let mut lsm = Lsm::with_default(storage.clone());
+
+    let mut table1 = SsTable::with_default(storage.clone());
+    let mut table2 = SsTable::with_default(storage.clone());
+
+    table1.put_iter(&mut buffer, [(1, 2, 3)])?;
+    table2.put_iter(&mut buffer, [(4, 5, 6)])?;
+
+    lsm.logical_position = 1234;
+
+    {
+        lsm.levels.entry(0).or_default().push_back(table1.clone());
+    }
+
+    {
+        lsm.levels.entry(1).or_default().push_back(table2.clone());
+    }
+
+    lsm.persist()?;
+    let actual = Lsm::load(LsmSettings::default(), storage)?;
+
+    assert_eq!(lsm.logical_position, actual.logical_position);
+
+    let actual_table_1 = actual.levels.get(&0).unwrap().front().clone().unwrap();
+    let actual_table_2 = actual.levels.get(&1).unwrap().front().clone().unwrap();
+
+    assert_eq!(table1.id, actual_table_1.id);
+    assert_eq!(table1.metas, actual_table_1.metas);
+    assert_eq!(table2.id, actual_table_2.id);
+    assert_eq!(table2.metas, actual_table_2.metas);
 
     Ok(())
 }

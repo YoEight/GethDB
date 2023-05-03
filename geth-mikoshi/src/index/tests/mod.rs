@@ -1,7 +1,7 @@
-use crate::index::rannoch::block::BlockEntry;
-use crate::index::rannoch::mem_table::MemTable;
-use crate::index::rannoch::merge::Merge;
-use crate::index::rannoch::ss_table::{BlockMetas, SsTable};
+use crate::index::block::BlockEntry;
+use crate::index::mem_table::MemTable;
+use crate::index::merge::Merge;
+use crate::index::ss_table::{BlockMetas, SsTable};
 use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
 use crate::storage::fs::FileSystemStorage;
 use crate::storage::in_mem::InMemoryStorage;

@@ -1,4 +1,4 @@
-use crate::index::rannoch::{in_range, range_start, Range};
+use crate::index::{in_range, range_start, Range};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 

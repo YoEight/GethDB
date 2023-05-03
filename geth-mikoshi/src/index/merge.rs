@@ -1,4 +1,4 @@
-use crate::index::rannoch::block::BlockEntry;
+use crate::index::block::BlockEntry;
 use std::cmp::Ordering;
 
 pub struct Merge<I> {
