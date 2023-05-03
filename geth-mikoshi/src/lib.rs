@@ -1,6 +1,7 @@
 mod backend;
 mod index;
 mod storage;
+mod wal;
 
 use std::path::Path;
 
