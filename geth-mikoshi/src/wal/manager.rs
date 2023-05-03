@@ -1,5 +1,8 @@
-use crate::storage::{FileCategory, Storage};
-use crate::wal::chunk::{Chunk, ChunkInfo};
+use crate::storage::{FileCategory, FileId, Storage};
+use crate::wal::chunk::{Chunk, ChunkInfo, CHUNK_SIZE};
+use crate::wal::footer::{ChunkFooter, CHUNK_FOOTER_SIZE};
+use crate::wal::header::{ChunkHeader, CHUNK_HEADER_SIZE};
+use bytes::{Buf, Bytes};
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -17,7 +20,6 @@ impl FileCategory for Chunks {
 
 struct State {
     chunks: Vec<Chunk>,
-    current_chunk: usize,
     writer: u64,
 }
 
@@ -32,20 +34,58 @@ where
     S: Storage,
 {
     pub fn load(storage: S) -> io::Result<Self> {
-        let mut chunks = BTreeMap::<usize, ChunkInfo>::new();
+        let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
         for info in storage.list(Chunks)? {
-            if let Some(chunk) = chunks.get_mut(&info.seq_num) {
+            if let Some(chunk) = sorted_chunks.get_mut(&info.seq_num) {
                 if chunk.version < info.version {
                     *chunk = info;
                 }
             } else {
-                chunks.insert(info.seq_num, info);
+                sorted_chunks.insert(info.seq_num, info);
             }
         }
 
-        for info in chunks.into_values() {}
+        let mut chunks = Vec::new();
+        for info in sorted_chunks.into_values() {
+            let header = storage.read_from(info.file_id(), 0, CHUNK_HEADER_SIZE)?;
+            let header = ChunkHeader::get(header);
+            let footer = storage.read_from(
+                info.file_id(),
+                (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
+                CHUNK_FOOTER_SIZE,
+            )?;
+            let footer = ChunkFooter::get(footer);
+            let chunk = Chunk {
+                info,
+                header,
+                footer,
+            };
 
-        todo!()
+            chunks.push(chunk);
+        }
+
+        let mut writer = 0u64;
+        if !storage.exists(FileId::writer_chk())? {
+            flush_writer_chk(&storage, writer)?;
+        } else {
+            writer = storage.read_from(FileId::writer_chk(), 0, 8)?.get_u64_le();
+        }
+
+        Ok(Self {
+            storage,
+            state: Arc::new(RwLock::new(State { chunks, writer })),
+        })
     }
+}
+
+fn flush_writer_chk<S>(storage: &S, log_pos: u64) -> io::Result<()>
+where
+    S: Storage,
+{
+    storage.write_to(
+        FileId::writer_chk(),
+        0,
+        Bytes::copy_from_slice(log_pos.to_le_bytes().as_slice()),
+    )
 }

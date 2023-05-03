@@ -1,3 +1,4 @@
+use crate::storage::FileId;
 use crate::wal::footer::{ChunkFooter, CHUNK_FOOTER_SIZE};
 use crate::wal::header::{ChunkHeader, CHUNK_HEADER_SIZE};
 use nom::bytes::complete::{tag, take_till1};
@@ -43,6 +44,13 @@ impl Ord for ChunkInfo {
 }
 
 impl ChunkInfo {
+    pub fn file_id(&self) -> FileId {
+        FileId::Chunk {
+            num: self.seq_num,
+            version: self.version,
+        }
+    }
+
     pub fn from_chunk_filename(input: &str) -> Option<Self> {
         if let Ok((_, info)) = Self::parse_chunk_filename(input) {
             return Some(info);
@@ -106,6 +114,10 @@ impl Chunk {
             },
             footer: None,
         }
+    }
+
+    pub fn file_type(&self) -> FileId {
+        self.info.file_id()
     }
 
     pub fn filename(&self) -> String {

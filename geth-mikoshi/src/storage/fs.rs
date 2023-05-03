@@ -54,6 +54,7 @@ impl FileSystemStorage {
             FileId::SSTable(id) => self.root.join(id.to_string()),
             FileId::IndexMap => self.root.join("indexmap"),
             FileId::Chunk { num, version } => self.root.join(chunk_filename_from(num, version)),
+            FileId::Checkpoint(c) => self.root.join(c.as_str()),
         }
     }
 }

@@ -10,6 +10,38 @@ pub enum FileId {
     SSTable(Uuid),
     IndexMap,
     Chunk { num: usize, version: usize },
+    Checkpoint(Checkpoint),
+}
+
+impl FileId {
+    pub fn ss_table(id: Uuid) -> Self {
+        Self::SSTable(id)
+    }
+
+    pub fn chunk(num: usize, version: usize) -> Self {
+        Self::Chunk { num, version }
+    }
+
+    pub fn writer_chk() -> Self {
+        Self::Checkpoint(Checkpoint::Writer)
+    }
+}
+
+#[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Checkpoint {
+    Writer,
+}
+
+impl Checkpoint {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Checkpoint::Writer => "writer.chk",
+        }
+    }
+
+    pub fn file_id(&self) -> FileId {
+        FileId::Checkpoint(*self)
+    }
 }
 
 pub trait FileCategory {
