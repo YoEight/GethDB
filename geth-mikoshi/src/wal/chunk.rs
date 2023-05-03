@@ -1,21 +1,11 @@
+use crate::constants::{CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::FileId;
-use crate::wal::footer::{ChunkFooter, CHUNK_FOOTER_SIZE};
-use crate::wal::header::{ChunkHeader, CHUNK_HEADER_SIZE};
+use crate::wal::footer::ChunkFooter;
+use crate::wal::header::ChunkHeader;
 use nom::bytes::complete::{tag, take_till1};
 use nom::IResult;
 use std::cmp::Ordering;
 use uuid::Uuid;
-
-pub const CHUNK_SIZE: usize = 256 * 1024 * 1024;
-pub const CHUNK_FILE_SIZE: usize = aligned_size(CHUNK_SIZE + CHUNK_HEADER_SIZE + CHUNK_FOOTER_SIZE);
-
-const fn aligned_size(size: usize) -> usize {
-    if size % 4_096 == 0 {
-        return size;
-    }
-
-    (size / 4_096 + 1) * 4_096
-}
 
 #[derive(Debug, Copy, Clone)]
 pub struct ChunkInfo {

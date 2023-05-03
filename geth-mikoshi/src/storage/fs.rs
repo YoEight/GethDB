@@ -1,3 +1,4 @@
+use crate::constants::CHUNK_SIZE;
 use crate::storage::{FileCategory, FileId, Storage};
 use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
@@ -30,7 +31,13 @@ impl FileSystemStorage {
             file.clone()
         } else {
             let path = self.file_path(id);
-            let file = self.open_file(path)?;
+            let mut file = self.open_file(path)?;
+
+            if let FileId::Chunk { .. } = id {
+                file.set_len(CHUNK_SIZE as u64)?;
+            }
+
+            let file = Arc::new(file);
             inner.insert(id, file.clone());
 
             file
@@ -39,14 +46,14 @@ impl FileSystemStorage {
         Ok(file)
     }
 
-    fn open_file(&self, path: impl AsRef<Path>) -> io::Result<Arc<File>> {
+    fn open_file(&self, path: impl AsRef<Path>) -> io::Result<File> {
         let file = OpenOptions::new()
             .write(true)
             .read(true)
             .create(true)
             .open(path)?;
 
-        Ok(Arc::new(file))
+        Ok(file)
     }
 
     fn file_path(&self, id: FileId) -> PathBuf {

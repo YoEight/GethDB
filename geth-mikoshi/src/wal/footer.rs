@@ -1,7 +1,6 @@
+use crate::constants::CHUNK_FOOTER_SIZE;
 use bitflags::bitflags;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-
-pub const CHUNK_FOOTER_SIZE: usize = 128;
 
 bitflags! {
     pub struct PrepareFlags: u16 {

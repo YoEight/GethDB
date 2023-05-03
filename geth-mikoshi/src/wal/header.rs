@@ -1,7 +1,6 @@
+use crate::constants::CHUNK_HEADER_SIZE;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use uuid::Uuid;
-
-pub const CHUNK_HEADER_SIZE: usize = 128;
 
 #[derive(Debug, Clone, Copy)]
 pub struct ChunkHeader {

@@ -1,4 +1,5 @@
 mod backend;
+mod constants;
 mod index;
 mod storage;
 mod wal;
