@@ -21,7 +21,7 @@ pub struct PrepareLog {
     pub flags: PrepareFlags,
     pub transaction_position: u64,
     pub transaction_offset: u32,
-    pub expected_version: i64,
+    pub expected_revision: i64,
     pub event_stream_id: String,
     pub event_id: Uuid,
     pub correlation_id: Uuid,
@@ -36,7 +36,7 @@ impl PrepareLog {
         self.flags.contains(PrepareFlags::IS_JSON)
     }
 
-    pub fn size_of_without_raw_bytes(&self) -> usize {
+    pub fn size(&self) -> usize {
         2 // prepare flags
             + 8 // transaction position
             + 4 // transaction offset
@@ -48,6 +48,10 @@ impl PrepareLog {
             + 8 // timestamp
             + variable_string_length_bytes_size(self.event_type.len())
             + self.event_type.len()
+            + 4 // data encoded length
+            + self.data.len()
+            + 4 // metadata encoded length
+            + self.metadata.len()
     }
 
     pub fn get(mut src: Bytes) -> Self {
@@ -70,7 +74,7 @@ impl PrepareLog {
             flags,
             transaction_offset,
             transaction_position,
-            expected_version,
+            expected_revision: expected_version,
             event_stream_id,
             event_id,
             correlation_id,
@@ -81,11 +85,11 @@ impl PrepareLog {
         }
     }
 
-    pub fn put(&self, version: u8, buffer: &mut bytes::BytesMut) {
+    pub fn put(&self, buffer: &mut bytes::BytesMut) {
         buffer.put_u16_le(self.flags.bits());
         buffer.put_u64_le(self.transaction_position);
         buffer.put_u32_le(self.transaction_offset);
-        buffer.put_i64_le(self.expected_version);
+        buffer.put_i64_le(self.expected_revision);
         put_string(&self.event_stream_id, buffer);
         buffer.put_u128_le(self.event_id.as_u128());
         buffer.put_u128_le(self.correlation_id.as_u128());

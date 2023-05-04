@@ -184,6 +184,17 @@ pub enum ExpectedRevision {
     StreamExists,
 }
 
+impl ExpectedRevision {
+    pub fn raw(&self) -> i64 {
+        match self {
+            ExpectedRevision::Revision(v) => *v as i64,
+            ExpectedRevision::NoStream => -1,
+            ExpectedRevision::Any => -2,
+            ExpectedRevision::StreamExists => -3,
+        }
+    }
+}
+
 impl Display for ExpectedRevision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {

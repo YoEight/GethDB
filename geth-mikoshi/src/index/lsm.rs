@@ -238,4 +238,8 @@ where
 
         MergeIO::new(scans)
     }
+
+    pub fn highest_revision(&self, key: u64) -> io::Result<Option<BlockEntry>> {
+        self.scan(key, ..).last()
+    }
 }

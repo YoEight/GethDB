@@ -33,6 +33,7 @@ serde_json = "1"
 nom = "6"
 md-5 = "0.10"
 async-trait = "0.1"
+sha2 = "0.10"
 
 [dev-dependencies]
 temp_testdir = "0.2"

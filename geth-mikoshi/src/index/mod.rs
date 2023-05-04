@@ -26,6 +26,19 @@ pub trait IteratorIO {
     {
         Map { func, inner: self }
     }
+
+    fn last(mut self) -> io::Result<Option<Self::Item>>
+    where
+        Self: Sized,
+    {
+        let mut result = None;
+
+        while let Some(value) = self.next()? {
+            result = Some(value);
+        }
+
+        Ok(result)
+    }
 }
 
 pub struct Map<F, I> {

@@ -3,18 +3,6 @@ use bitflags::bitflags;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 bitflags! {
-    pub struct PrepareFlags: u16 {
-        const NO_DATA = 0x00;
-        const HAS_DATA = 0x01;
-        const TRANSACTION_START = 0x02;
-        const TRANSACTION_END = 0x04;
-        const DELETED_STREAM = 0x08;
-        const IS_COMMITTED = 0x20;
-        const IS_JSON = 0x100;
-    }
-}
-
-bitflags! {
     pub struct FooterFlags: u8 {
         const IS_COMPLETED = 0x1;
         const IS_MAP_12_BYTES = 0x2;

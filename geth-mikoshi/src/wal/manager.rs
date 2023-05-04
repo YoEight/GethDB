@@ -1,14 +1,22 @@
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
+use crate::hashing::mikoshi_hash;
 use crate::index::{Lsm, LsmSettings};
 use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunk::{Chunk, ChunkInfo};
-use crate::wal::footer::ChunkFooter;
+use crate::wal::footer::{ChunkFooter, FooterFlags};
 use crate::wal::header::ChunkHeader;
-use bytes::{Buf, Bytes, BytesMut};
+use crate::wal::record::{PrepareFlags, PrepareLog};
+use crate::wal::Proposition;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use chrono::Utc;
 use geth_common::{ExpectedRevision, Propose, WriteResult};
+use md5::Digest;
+use sha2::Sha512;
 use std::collections::BTreeMap;
+use std::hash::Hash;
 use std::io;
 use std::sync::{Arc, RwLock};
+use uuid::Uuid;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Chunks;
@@ -26,10 +34,30 @@ struct State {
     writer: u64,
 }
 
+impl State {
+    fn ongoing_chunk(&self) -> Chunk {
+        self.chunks.last().cloned().unwrap()
+    }
+
+    fn new_chunk(&mut self) -> Chunk {
+        let new = self.ongoing_chunk().next_chunk();
+        self.chunks.push(new.clone());
+
+        new
+    }
+
+    fn chunk_mut(&mut self, idx: usize) -> &mut Chunk {
+        &mut self.chunks[idx]
+    }
+
+    fn ongoing_chunk_mut(&mut self) -> &mut Chunk {
+        self.chunk_mut(self.chunks.len() - 1)
+    }
+}
+
 #[derive(Clone)]
 pub struct ChunkManager<S> {
     buffer: BytesMut,
-    index: Lsm<S>,
     storage: S,
     state: Arc<RwLock<State>>,
 }
@@ -77,10 +105,7 @@ where
             writer = storage.read_from(FileId::writer_chk(), 0, 8)?.get_u64_le();
         }
 
-        let index = Lsm::load(LsmSettings::default(), storage.clone())?;
-
         Ok(Self {
-            index,
             buffer: BytesMut::new(),
             storage,
             state: Arc::new(RwLock::new(State { chunks, writer })),
@@ -90,12 +115,110 @@ where
     pub fn append(
         &self,
         stream_name: String,
-        _expected: ExpectedRevision,
+        expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> io::Result<WriteResult> {
+    ) -> io::Result<Proposition> {
+        let stream_key = mikoshi_hash(stream_name.as_str());
+        // TODO - cache that value when possible.
         let mut state = self.state.write().unwrap();
-        for (offset, propose) in events.into_iter().enumerate() {}
-        todo!()
+        let batch_size = events.len();
+        let correlation_id = Uuid::new_v4();
+        let transaction_position = state.writer;
+        let mut expected_revision = expected.raw();
+        let mut buffer = self.buffer.clone();
+        let mut chunk = state.ongoing_chunk();
+        let mut transient_log_position = transaction_position;
+        let mut before_writing_log_position = transient_log_position;
+        let mut proposition = Proposition::new(stream_key, transaction_position);
+
+        for (offset, propose) in events.into_iter().enumerate() {
+            proposition.claims.push(transaction_position);
+
+            let mut flags: PrepareFlags =
+                PrepareFlags::HAS_DATA | PrepareFlags::IS_COMMITTED | PrepareFlags::IS_JSON;
+
+            if offset == 0 {
+                flags |= PrepareFlags::TRANSACTION_START;
+            }
+
+            if offset == batch_size - 1 {
+                flags |= PrepareFlags::TRANSACTION_END;
+            }
+
+            let prepare = PrepareLog {
+                flags,
+                transaction_position,
+                transaction_offset: offset as u32,
+                expected_revision,
+                event_stream_id: stream_name.clone(),
+                event_id: propose.id,
+                correlation_id,
+                created: Utc::now(),
+                event_type: propose.r#type,
+                data: propose.data,
+                metadata: bytes::Bytes::default(),
+            };
+
+            let log_record_size = 4 // pre record size
+                    + 8 // log position
+                    + prepare.size()
+                    + 4; // post record size
+
+            let projected_logical_position = transient_log_position + log_record_size as u64;
+
+            if chunk.contains_log_position(projected_logical_position) {
+                buffer.put_u32_le(log_record_size as u32);
+                buffer.put_u64_le(transient_log_position);
+                prepare.put(&mut buffer);
+                buffer.put_u32_le(log_record_size as u32);
+
+                transient_log_position += projected_logical_position;
+
+                continue;
+            }
+
+            // Chunk is full and we need to flush previous data we accumulated. We also create a new
+            // chunk for next writes.
+            if !buffer.is_empty() {
+                let end_log_position = transient_log_position + buffer.len() as u64;
+                let local_offset = chunk.raw_position(before_writing_log_position);
+                let physical_data_size =
+                    chunk.raw_position(end_log_position) as usize - CHUNK_HEADER_SIZE;
+                let footer = ChunkFooter {
+                    flags: FooterFlags::IS_COMPLETED,
+                    physical_data_size,
+                    logical_data_size: physical_data_size,
+                    hash: Default::default(),
+                };
+
+                self.storage
+                    .write_to(chunk.file_type(), local_offset, buffer.split().freeze())?;
+
+                footer.put(&mut buffer);
+                state.ongoing_chunk_mut().footer = Some(footer);
+
+                self.storage.write_to(
+                    chunk.file_type(),
+                    (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
+                    buffer.split().freeze(),
+                )?;
+
+                chunk = state.new_chunk();
+                before_writing_log_position = end_log_position;
+                transient_log_position = end_log_position;
+            }
+
+            expected_revision += 1;
+        }
+
+        let local_offset = chunk.raw_position(before_writing_log_position);
+        self.storage
+            .write_to(chunk.file_type(), local_offset, buffer.split().freeze())?;
+
+        state.writer = transient_log_position;
+        flush_writer_chk(&self.storage, state.writer)?;
+
+        Ok(proposition)
     }
 }
 

@@ -106,6 +106,10 @@ impl Chunk {
         }
     }
 
+    pub fn next_chunk(&self) -> Self {
+        Self::new(self.info.seq_num + 1)
+    }
+
     pub fn file_type(&self) -> FileId {
         self.info.file_id()
     }
