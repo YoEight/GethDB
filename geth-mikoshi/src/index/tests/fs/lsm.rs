@@ -154,23 +154,38 @@ fn test_fs_lsm_serialization() -> io::Result<()> {
     table1.put_iter(&mut buffer, [(1, 2, 3)])?;
     table2.put_iter(&mut buffer, [(4, 5, 6)])?;
 
-    lsm.logical_position = 1234;
+    let mut state = lsm.state.write().unwrap();
+
+    state.logical_position = 1234;
 
     {
-        lsm.levels.entry(0).or_default().push_back(table1.clone());
+        state.levels.entry(0).or_default().push_back(table1.clone());
     }
 
     {
-        lsm.levels.entry(1).or_default().push_back(table2.clone());
+        state.levels.entry(1).or_default().push_back(table2.clone());
     }
 
-    lsm.persist()?;
+    state.persist(&mut buffer, &storage)?;
     let actual = Lsm::load(LsmSettings::default(), storage)?;
+    let actual_state = actual.state.read().unwrap();
 
-    assert_eq!(lsm.logical_position, actual.logical_position);
+    assert_eq!(state.logical_position, actual_state.logical_position);
 
-    let actual_table_1 = actual.levels.get(&0).unwrap().front().clone().unwrap();
-    let actual_table_2 = actual.levels.get(&1).unwrap().front().clone().unwrap();
+    let actual_table_1 = actual_state
+        .levels
+        .get(&0)
+        .unwrap()
+        .front()
+        .clone()
+        .unwrap();
+    let actual_table_2 = actual_state
+        .levels
+        .get(&1)
+        .unwrap()
+        .front()
+        .clone()
+        .unwrap();
 
     assert_eq!(table1.id, actual_table_1.id);
     assert_eq!(table1.metas, actual_table_1.metas);

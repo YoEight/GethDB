@@ -1,4 +1,5 @@
 use eyre::bail;
+use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
 use geth_mikoshi::{Mikoshi, MikoshiStream};
@@ -43,18 +44,21 @@ impl StorageClient {
     }
 }
 
-pub fn start<S>(manager: ChunkManager<S>) -> StorageClient
+pub fn start<S>(manager: ChunkManager<S>, index: Lsm<S>) -> StorageClient
 where
-    S: Storage + 'static,
+    S: Storage + Send + Sync + 'static,
 {
     let (sender, mailbox) = mpsc::unbounded_channel();
 
-    tokio::spawn(service(mailbox));
+    tokio::spawn(service(mailbox, manager, index));
 
     StorageClient { inner: sender }
 }
 
-async fn service(mut mailbox: UnboundedReceiver<Msg>) {
+async fn service<S>(mut mailbox: UnboundedReceiver<Msg>, manager: ChunkManager<S>, index: Lsm<S>)
+where
+    S: Storage + Send + 'static,
+{
     let mut mikoshi = Mikoshi::in_memory();
 
     while let Some(msg) = mailbox.recv().await {

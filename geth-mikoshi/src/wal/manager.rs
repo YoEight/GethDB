@@ -1,3 +1,5 @@
+mod prepare_logs;
+
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::hashing::mikoshi_hash;
 use crate::index::{Lsm, LsmSettings};
@@ -5,6 +7,7 @@ use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunk::{Chunk, ChunkInfo};
 use crate::wal::footer::{ChunkFooter, FooterFlags};
 use crate::wal::header::ChunkHeader;
+use crate::wal::manager::prepare_logs::PrepareLogs;
 use crate::wal::record::{PrepareFlags, PrepareLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
@@ -255,6 +258,23 @@ where
             next_expected_version: ExpectedRevision::Revision(revision),
             position: Position(transient_log_position),
         }))
+    }
+
+    pub fn prepare_logs(&self, log_position: u64) -> PrepareLogs<S> {
+        let state = self.state.read().unwrap();
+
+        PrepareLogs {
+            log_position,
+            writer: state.writer,
+            inner: self.clone(),
+        }
+    }
+
+    pub fn read_next_prepare(
+        &self,
+        log_position: u64,
+    ) -> io::Result<Option<(PrepareLog, u64, u64)>> {
+        todo!()
     }
 }
 

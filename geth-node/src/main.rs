@@ -23,9 +23,11 @@ async fn main() -> eyre::Result<()> {
     let (bus, mailbox) = new_bus(500);
     let storage = FileSystemStorage::new(PathBuf::from("./geth"))?;
     let index = Lsm::load(LsmSettings::default(), storage.clone())?;
-    let manager = ChunkManager::load(storage, index)?;
 
-    process::start(mailbox, manager);
+    let manager = ChunkManager::load(storage, index.clone())?;
+    index.rebuild(&manager)?;
+
+    process::start(mailbox, manager, index);
     grpc::start_server(bus).await?;
 
     Ok(())
