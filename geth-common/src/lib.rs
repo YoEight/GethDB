@@ -428,3 +428,8 @@ pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
     pub position: Position,
 }
+
+pub enum WriteCompleted {
+    Success(WriteResult),
+    Error(WrongExpectedRevisionError),
+}

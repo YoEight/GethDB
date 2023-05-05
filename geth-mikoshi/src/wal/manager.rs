@@ -9,7 +9,10 @@ use crate::wal::record::{PrepareFlags, PrepareLog};
 use crate::wal::Proposition;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
-use geth_common::{ExpectedRevision, Propose, WriteResult};
+use geth_common::{
+    ExpectedRevision, Position, Propose, Revision, WriteCompleted, WriteResult,
+    WrongExpectedRevisionError,
+};
 use md5::Digest;
 use sha2::Sha512;
 use std::collections::BTreeMap;
@@ -26,6 +29,28 @@ impl FileCategory for Chunks {
 
     fn parse(&self, name: &str) -> Option<Self::Item> {
         ChunkInfo::from_chunk_filename(name)
+    }
+}
+
+#[derive(Copy, Clone)]
+enum CurrentRevision {
+    NoStream,
+    Revision(u64),
+}
+
+impl CurrentRevision {
+    fn raw(self) -> u64 {
+        match self {
+            CurrentRevision::NoStream => 0,
+            CurrentRevision::Revision(r) => r,
+        }
+    }
+
+    fn as_expected(self) -> ExpectedRevision {
+        match self {
+            CurrentRevision::NoStream => ExpectedRevision::NoStream,
+            CurrentRevision::Revision(v) => ExpectedRevision::Revision(v),
+        }
     }
 }
 
@@ -59,6 +84,7 @@ impl State {
 pub struct ChunkManager<S> {
     buffer: BytesMut,
     storage: S,
+    index: Lsm<S>,
     state: Arc<RwLock<State>>,
 }
 
@@ -66,7 +92,7 @@ impl<S> ChunkManager<S>
 where
     S: Storage + 'static,
 {
-    pub fn load(storage: S) -> io::Result<Self> {
+    pub fn load(storage: S, index: Lsm<S>) -> io::Result<Self> {
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
         for info in storage.list(Chunks)? {
@@ -106,6 +132,7 @@ where
         }
 
         Ok(Self {
+            index,
             buffer: BytesMut::new(),
             storage,
             state: Arc::new(RwLock::new(State { chunks, writer })),
@@ -117,23 +144,30 @@ where
         stream_name: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
-    ) -> io::Result<Proposition> {
+    ) -> io::Result<WriteCompleted> {
         let stream_key = mikoshi_hash(stream_name.as_str());
+        let current_revision = self
+            .index
+            .highest_revision(stream_key)?
+            .map(CurrentRevision::Revision)
+            .unwrap_or(CurrentRevision::NoStream);
+
+        if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
+            return Ok(WriteCompleted::Error(e));
+        }
+
         // TODO - cache that value when possible.
         let mut state = self.state.write().unwrap();
         let batch_size = events.len();
         let correlation_id = Uuid::new_v4();
         let transaction_position = state.writer;
-        let mut expected_revision = expected.raw();
         let mut buffer = self.buffer.clone();
         let mut chunk = state.ongoing_chunk();
         let mut transient_log_position = transaction_position;
         let mut before_writing_log_position = transient_log_position;
-        let mut proposition = Proposition::new(stream_key, transaction_position);
+        let mut revision = current_revision.raw();
 
         for (offset, propose) in events.into_iter().enumerate() {
-            proposition.claims.push(transaction_position);
-
             let mut flags: PrepareFlags =
                 PrepareFlags::HAS_DATA | PrepareFlags::IS_COMMITTED | PrepareFlags::IS_JSON;
 
@@ -149,14 +183,14 @@ where
                 flags,
                 transaction_position,
                 transaction_offset: offset as u32,
-                expected_revision,
+                revision,
                 event_stream_id: stream_name.clone(),
                 event_id: propose.id,
                 correlation_id,
                 created: Utc::now(),
                 event_type: propose.r#type,
                 data: propose.data,
-                metadata: bytes::Bytes::default(),
+                metadata: Bytes::default(),
             };
 
             let log_record_size = 4 // pre record size
@@ -208,7 +242,7 @@ where
                 transient_log_position = end_log_position;
             }
 
-            expected_revision += 1;
+            revision += 1;
         }
 
         let local_offset = chunk.raw_position(before_writing_log_position);
@@ -218,7 +252,10 @@ where
         state.writer = transient_log_position;
         flush_writer_chk(&self.storage, state.writer)?;
 
-        Ok(proposition)
+        Ok(WriteCompleted::Success(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(revision),
+            position: Position(transient_log_position),
+        }))
     }
 }
 
@@ -231,4 +268,20 @@ where
         0,
         Bytes::copy_from_slice(log_pos.to_le_bytes().as_slice()),
     )
+}
+
+fn optimistic_concurrency_check(
+    expected: ExpectedRevision,
+    current: CurrentRevision,
+) -> Option<WrongExpectedRevisionError> {
+    match (expected, current) {
+        (ExpectedRevision::NoStream, CurrentRevision::NoStream) => None,
+        (ExpectedRevision::StreamExists, CurrentRevision::Revision(_)) => None,
+        (ExpectedRevision::Any, _) => None,
+        (ExpectedRevision::Revision(a), CurrentRevision::Revision(b)) if a == b => None,
+        _ => Some(WrongExpectedRevisionError {
+            expected,
+            current: current.as_expected(),
+        }),
+    }
 }

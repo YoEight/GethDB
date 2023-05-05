@@ -21,7 +21,7 @@ pub struct PrepareLog {
     pub flags: PrepareFlags,
     pub transaction_position: u64,
     pub transaction_offset: u32,
-    pub expected_revision: i64,
+    pub revision: u64,
     pub event_stream_id: String,
     pub event_id: Uuid,
     pub correlation_id: Uuid,
@@ -59,7 +59,7 @@ impl PrepareLog {
             PrepareFlags::from_bits(src.get_u16_le()).expect("Invalid prepare flags parsing");
         let transaction_position = src.get_u64_le();
         let transaction_offset = src.get_u32_le();
-        let expected_version = src.get_i64_le();
+        let expected_version = src.get_u64_le();
         let event_stream_id = get_string(&mut src);
         let event_id = Uuid::from_u128(src.get_u128_le());
         let correlation_id = Uuid::from_u128(src.get_u128_le());
@@ -74,7 +74,7 @@ impl PrepareLog {
             flags,
             transaction_offset,
             transaction_position,
-            expected_revision: expected_version,
+            revision: expected_version,
             event_stream_id,
             event_id,
             correlation_id,
@@ -89,7 +89,7 @@ impl PrepareLog {
         buffer.put_u16_le(self.flags.bits());
         buffer.put_u64_le(self.transaction_position);
         buffer.put_u32_le(self.transaction_offset);
-        buffer.put_i64_le(self.expected_revision);
+        buffer.put_u64_le(self.revision);
         put_string(&self.event_stream_id, buffer);
         buffer.put_u128_le(self.event_id.as_u128());
         buffer.put_u128_le(self.correlation_id.as_u128());
