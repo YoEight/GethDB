@@ -65,19 +65,23 @@ where
     }
 
     pub fn load(settings: LsmSettings, storage: S) -> io::Result<Self> {
-        let mut bytes = storage.read_all(FileId::IndexMap)?;
-
-        let logical_position = bytes.get_u64_le();
-        let _block_size = bytes.get_u32_le();
         let mut levels = BTreeMap::<u8, VecDeque<SsTable<S>>>::new();
+        let mut logical_position = 0u64;
 
-        // 17 stands for a level byte and an uuid encoded as a 128bits, which is 16bytes.
-        while bytes.remaining() >= 17 {
-            let level = bytes.get_u8();
-            let id = Uuid::from_u128(bytes.get_u128_le());
-            let table = SsTable::load(storage.clone(), id)?;
+        if storage.exists(FileId::IndexMap)? {
+            let mut bytes = storage.read_all(FileId::IndexMap)?;
 
-            levels.entry(level).or_default().push_back(table);
+            logical_position = bytes.get_u64_le();
+            let _block_size = bytes.get_u32_le();
+
+            // 17 stands for a level byte and an uuid encoded as a 128bits, which is 16bytes.
+            while bytes.remaining() >= 17 {
+                let level = bytes.get_u8();
+                let id = Uuid::from_u128(bytes.get_u128_le());
+                let table = SsTable::load(storage.clone(), id)?;
+
+                levels.entry(level).or_default().push_back(table);
+            }
         }
 
         Ok(Lsm {

@@ -17,12 +17,14 @@ pub struct FileSystemStorage {
 }
 
 impl FileSystemStorage {
-    pub fn new(root: PathBuf) -> Self {
-        Self {
+    pub fn new(root: PathBuf) -> io::Result<Self> {
+        std::fs::create_dir_all(root.as_path())?;
+
+        Ok(Self {
             root,
             buffer: BytesMut::default(),
             inner: Arc::new(Mutex::new(Default::default())),
-        }
+        })
     }
 
     fn load_or_create(&self, id: FileId) -> io::Result<Arc<File>> {

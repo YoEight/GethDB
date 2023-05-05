@@ -1,5 +1,8 @@
-pub mod fs;
-pub mod in_mem;
+pub(crate) mod fs;
+pub(crate) mod in_mem;
+
+pub use fs::FileSystemStorage;
+pub use in_mem::InMemoryStorage;
 
 use bytes::Bytes;
 use std::io;

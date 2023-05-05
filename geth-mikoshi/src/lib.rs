@@ -1,9 +1,9 @@
 mod backend;
 mod constants;
 pub(crate) mod hashing;
-mod index;
-mod storage;
-mod wal;
+pub mod index;
+pub mod storage;
+pub mod wal;
 
 use std::path::Path;
 

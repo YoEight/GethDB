@@ -1,4 +1,6 @@
 use eyre::bail;
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::ChunkManager;
 use geth_mikoshi::{Mikoshi, MikoshiStream};
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
@@ -16,7 +18,7 @@ pub struct StorageClient {
 }
 
 impl StorageClient {
-    pub fn read_stream(
+    pub async fn read_stream(
         &self,
         msg: ReadStream,
         callback: oneshot::Sender<ReadStreamCompleted>,
@@ -28,7 +30,7 @@ impl StorageClient {
         Ok(())
     }
 
-    pub fn append_stream(
+    pub async fn append_stream(
         &self,
         msg: AppendStream,
         callback: oneshot::Sender<AppendStreamCompleted>,
@@ -41,7 +43,10 @@ impl StorageClient {
     }
 }
 
-pub fn start() -> StorageClient {
+pub fn start<S>(manager: ChunkManager<S>) -> StorageClient
+where
+    S: Storage + 'static,
+{
     let (sender, mailbox) = mpsc::unbounded_channel();
 
     tokio::spawn(service(mailbox));

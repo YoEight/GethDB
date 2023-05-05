@@ -6,7 +6,6 @@ use crate::wal::chunk::{Chunk, ChunkInfo};
 use crate::wal::footer::{ChunkFooter, FooterFlags};
 use crate::wal::header::ChunkHeader;
 use crate::wal::record::{PrepareFlags, PrepareLog};
-use crate::wal::Proposition;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
 use geth_common::{
