@@ -10,6 +10,7 @@ use geth_common::protocol::streams::{
 };
 
 use crate::bus::Bus;
+use crate::messages::AppendStreamCompleted;
 use crate::messages::{AppendStream, ReadStream};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
@@ -177,16 +178,28 @@ impl Streams for StreamsImpl {
             .await
             .map_err(|e| Status::unavailable(e.to_string()))?;
 
-        let resp = AppendResp {
-            result: Some(append_resp::Result::Success(Success {
-                current_revision_option: Some(resp.result.next_expected_version.into()),
-                position_option: Some(append_resp::success::PositionOption::Position(
-                    resp.result.position.into(),
+        let resp = match resp {
+            AppendStreamCompleted::Success(result) => AppendResp {
+                result: Some(append_resp::Result::Success(Success {
+                    current_revision_option: Some(result.next_expected_version.into()),
+                    position_option: Some(append_resp::success::PositionOption::Position(
+                        result.position.into(),
+                    )),
+                })),
+            },
+
+            AppendStreamCompleted::Failure(e) => AppendResp {
+                result: Some(append_resp::Result::WrongExpectedVersion(
+                    append_resp::WrongExpectedVersion {
+                        current_revision_option_20_6_0: None,
+                        expected_revision_option_20_6_0: None,
+                        current_revision_option: Some(e.current.into()),
+                        expected_revision_option: Some(e.expected.into()),
+                    },
                 )),
-            })),
+            },
         };
 
-        tracing::info!("Append to stream successfully");
         Ok(Response::new(resp))
     }
 

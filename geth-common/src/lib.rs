@@ -381,6 +381,47 @@ impl From<ExpectedRevision> for append_resp::success::CurrentRevisionOption {
     }
 }
 
+impl From<ExpectedRevision> for append_resp::wrong_expected_version::CurrentRevisionOption {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                append_resp::wrong_expected_version::CurrentRevisionOption::CurrentRevision(v)
+            }
+            ExpectedRevision::NoStream => {
+                append_resp::wrong_expected_version::CurrentRevisionOption::CurrentNoStream(
+                    Default::default(),
+                )
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<ExpectedRevision> for append_resp::wrong_expected_version::ExpectedRevisionOption {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedRevision(v)
+            }
+            ExpectedRevision::NoStream => {
+                append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedNoStream(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::Any => {
+                append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedAny(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::StreamExists => {
+                append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedStreamExists(
+                    Default::default(),
+                )
+            }
+        }
+    }
+}
+
 impl From<append_resp::wrong_expected_version::CurrentRevisionOption> for ExpectedRevision {
     fn from(value: append_resp::wrong_expected_version::CurrentRevisionOption) -> Self {
         match value {

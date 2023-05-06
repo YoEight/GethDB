@@ -1,4 +1,7 @@
-use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
+use geth_common::{
+    protocol::streams::append_resp::WrongExpectedVersion, Direction, ExpectedRevision, Propose,
+    Revision, WriteResult, WrongExpectedRevisionError,
+};
 use geth_mikoshi::MikoshiStream;
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -26,7 +29,7 @@ pub struct AppendStream {
 }
 
 #[derive(Debug)]
-pub struct AppendStreamCompleted {
-    pub correlation: Uuid,
-    pub result: WriteResult,
+pub enum AppendStreamCompleted {
+    Success(WriteResult),
+    Failure(WrongExpectedRevisionError),
 }
