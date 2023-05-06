@@ -1,6 +1,6 @@
 mod backend;
 mod constants;
-pub(crate) mod hashing;
+pub mod hashing;
 pub mod index;
 pub mod storage;
 pub mod wal;

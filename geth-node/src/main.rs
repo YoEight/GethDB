@@ -9,7 +9,7 @@ use geth_mikoshi::index::{Lsm, LsmSettings};
 use geth_mikoshi::storage::FileSystemStorage;
 use geth_mikoshi::wal::ChunkManager;
 use std::path::PathBuf;
-use tracing::{debug, Level};
+use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
 #[tokio::main]
@@ -24,7 +24,7 @@ async fn main() -> eyre::Result<()> {
     let storage = FileSystemStorage::new(PathBuf::from("./geth"))?;
     let index = Lsm::load(LsmSettings::default(), storage.clone())?;
 
-    let manager = ChunkManager::load(storage, index.clone())?;
+    let manager = ChunkManager::load(storage)?;
     index.rebuild(&manager)?;
 
     process::start(mailbox, manager, index);

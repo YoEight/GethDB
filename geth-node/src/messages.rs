@@ -1,5 +1,6 @@
 use geth_common::{Direction, ExpectedRevision, Propose, Revision, WriteResult};
 use geth_mikoshi::MikoshiStream;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug)]
@@ -24,6 +25,7 @@ pub struct AppendStream {
     pub expected: ExpectedRevision,
 }
 
+#[derive(Debug)]
 pub struct AppendStreamCompleted {
     pub correlation: Uuid,
     pub result: WriteResult,

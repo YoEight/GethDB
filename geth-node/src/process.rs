@@ -14,8 +14,8 @@ where
     tokio::spawn(async move {
         while let Some(msg) = mailbox.next().await {
             match msg {
-                Msg::AppendStream(opts, callback) => {
-                    storage_client.append_stream(opts, callback).await?;
+                Msg::AppendStream(msg) => {
+                    storage_client.append_stream(msg).await?;
                 }
 
                 Msg::ReadStream(opts, callback) => {

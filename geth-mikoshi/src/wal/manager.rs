@@ -12,13 +12,10 @@ use crate::wal::record::{PrepareFlags, PrepareLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
 use geth_common::{
-    ExpectedRevision, Position, Propose, Revision, WriteCompleted, WriteResult,
+    Entry, ExpectedRevision, Position, Propose, Revision, WriteCompleted, WriteResult,
     WrongExpectedRevisionError,
 };
-use md5::Digest;
-use sha2::Sha512;
 use std::collections::BTreeMap;
-use std::hash::Hash;
 use std::io;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
@@ -31,28 +28,6 @@ impl FileCategory for Chunks {
 
     fn parse(&self, name: &str) -> Option<Self::Item> {
         ChunkInfo::from_chunk_filename(name)
-    }
-}
-
-#[derive(Copy, Clone)]
-enum CurrentRevision {
-    NoStream,
-    Revision(u64),
-}
-
-impl CurrentRevision {
-    fn raw(self) -> u64 {
-        match self {
-            CurrentRevision::NoStream => 0,
-            CurrentRevision::Revision(r) => r,
-        }
-    }
-
-    fn as_expected(self) -> ExpectedRevision {
-        match self {
-            CurrentRevision::NoStream => ExpectedRevision::NoStream,
-            CurrentRevision::Revision(v) => ExpectedRevision::Revision(v),
-        }
     }
 }
 
@@ -86,7 +61,6 @@ impl State {
 pub struct ChunkManager<S> {
     buffer: BytesMut,
     storage: S,
-    index: Lsm<S>,
     state: Arc<RwLock<State>>,
 }
 
@@ -94,7 +68,7 @@ impl<S> ChunkManager<S>
 where
     S: Storage + 'static,
 {
-    pub fn load(storage: S, index: Lsm<S>) -> io::Result<Self> {
+    pub fn load(storage: S) -> io::Result<Self> {
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
         for info in storage.list(Chunks)? {
@@ -134,7 +108,6 @@ where
         }
 
         Ok(Self {
-            index,
             buffer: BytesMut::new(),
             storage,
             state: Arc::new(RwLock::new(State { chunks, writer })),
@@ -144,30 +117,19 @@ where
     pub fn append(
         &self,
         stream_name: String,
-        expected: ExpectedRevision,
+        mut revision: u64,
         events: Vec<Propose>,
     ) -> io::Result<WriteCompleted> {
         let stream_key = mikoshi_hash(stream_name.as_str());
-        let current_revision = self
-            .index
-            .highest_revision(stream_key)?
-            .map(CurrentRevision::Revision)
-            .unwrap_or(CurrentRevision::NoStream);
-
-        if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
-            return Ok(WriteCompleted::Error(e));
-        }
-
-        // TODO - cache that value when possible.
         let mut state = self.state.write().unwrap();
         let batch_size = events.len();
         let correlation_id = Uuid::new_v4();
         let transaction_position = state.writer;
         let mut buffer = self.buffer.clone();
-        let mut chunk = state.ongoing_chunk();
-        let mut transient_log_position = transaction_position;
-        let mut before_writing_log_position = transient_log_position;
-        let mut revision = current_revision.raw();
+        let mut chunk: Chunk = state.ongoing_chunk();
+        let mut logical_position = transaction_position;
+        let mut before_writing_log_position = logical_position;
+        let mut entries = Vec::new();
 
         for (offset, propose) in events.into_iter().enumerate() {
             let mut flags: PrepareFlags =
@@ -180,6 +142,12 @@ where
             if offset == batch_size - 1 {
                 flags |= PrepareFlags::TRANSACTION_END;
             }
+
+            entries.push(Entry {
+                key: stream_key,
+                rev: revision,
+                pos: logical_position,
+            });
 
             let prepare = PrepareLog {
                 flags,
@@ -200,15 +168,15 @@ where
                     + prepare.size()
                     + 4; // post record size
 
-            let projected_logical_position = transient_log_position + log_record_size as u64;
+            let projected_next_logical_position = logical_position + log_record_size as u64 + 4 + 4;
 
-            if chunk.contains_log_position(projected_logical_position) {
+            if chunk.contains_log_position(projected_next_logical_position) {
                 buffer.put_u32_le(log_record_size as u32);
-                buffer.put_u64_le(transient_log_position);
+                buffer.put_u64_le(logical_position);
                 prepare.put(&mut buffer);
                 buffer.put_u32_le(log_record_size as u32);
 
-                transient_log_position += projected_logical_position;
+                logical_position += projected_next_logical_position;
 
                 continue;
             }
@@ -216,7 +184,7 @@ where
             // Chunk is full and we need to flush previous data we accumulated. We also create a new
             // chunk for next writes.
             if !buffer.is_empty() {
-                let end_log_position = transient_log_position + buffer.len() as u64;
+                let end_log_position = logical_position + buffer.len() as u64;
                 let local_offset = chunk.raw_position(before_writing_log_position);
                 let physical_data_size =
                     chunk.raw_position(end_log_position) as usize - CHUNK_HEADER_SIZE;
@@ -241,7 +209,7 @@ where
 
                 chunk = state.new_chunk();
                 before_writing_log_position = end_log_position;
-                transient_log_position = end_log_position;
+                logical_position = end_log_position;
             }
 
             revision += 1;
@@ -251,13 +219,13 @@ where
         self.storage
             .write_to(chunk.file_type(), local_offset, buffer.split().freeze())?;
 
-        state.writer = transient_log_position;
+        state.writer = logical_position;
         flush_writer_chk(&self.storage, state.writer)?;
 
-        Ok(WriteCompleted::Success(WriteResult {
-            next_expected_version: ExpectedRevision::Revision(revision),
-            position: Position(transient_log_position),
-        }))
+        Ok(WriteCompleted {
+            next_logical_position: logical_position,
+            entries,
+        })
     }
 
     pub fn prepare_logs(&self, log_position: u64) -> PrepareLogs<S> {
@@ -287,20 +255,4 @@ where
         0,
         Bytes::copy_from_slice(log_pos.to_le_bytes().as_slice()),
     )
-}
-
-fn optimistic_concurrency_check(
-    expected: ExpectedRevision,
-    current: CurrentRevision,
-) -> Option<WrongExpectedRevisionError> {
-    match (expected, current) {
-        (ExpectedRevision::NoStream, CurrentRevision::NoStream) => None,
-        (ExpectedRevision::StreamExists, CurrentRevision::Revision(_)) => None,
-        (ExpectedRevision::Any, _) => None,
-        (ExpectedRevision::Revision(a), CurrentRevision::Revision(b)) if a == b => None,
-        _ => Some(WrongExpectedRevisionError {
-            expected,
-            current: current.as_expected(),
-        }),
-    }
 }

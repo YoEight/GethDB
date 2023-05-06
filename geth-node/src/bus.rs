@@ -8,7 +8,12 @@ use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStrea
 
 pub enum Msg {
     ReadStream(ReadStream, oneshot::Sender<ReadStreamCompleted>),
-    AppendStream(AppendStream, oneshot::Sender<AppendStreamCompleted>),
+    AppendStream(AppendStreamMsg),
+}
+
+pub struct AppendStreamMsg {
+    pub payload: AppendStream,
+    pub mail: oneshot::Sender<AppendStreamCompleted>,
 }
 
 #[derive(Clone)]
@@ -34,7 +39,10 @@ impl Bus {
         let (sender, recv) = oneshot::channel();
         if self
             .inner
-            .send(Msg::AppendStream(msg, sender))
+            .send(Msg::AppendStream(AppendStreamMsg {
+                payload: msg,
+                mail: sender,
+            }))
             .await
             .is_err()
         {

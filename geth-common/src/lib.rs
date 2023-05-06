@@ -429,7 +429,14 @@ pub struct WriteResult {
     pub position: Position,
 }
 
-pub enum WriteCompleted {
-    Success(WriteResult),
-    Error(WrongExpectedRevisionError),
+#[derive(Debug, Copy, Clone)]
+pub struct Entry {
+    pub key: u64,
+    pub rev: u64,
+    pub pos: u64,
+}
+
+pub struct WriteCompleted {
+    pub next_logical_position: u64,
+    pub entries: Vec<Entry>,
 }
