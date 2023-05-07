@@ -25,7 +25,7 @@ pub struct PrepareLog {
     pub event_stream_id: String,
     pub event_id: Uuid,
     pub correlation_id: Uuid,
-    pub created: DateTime<Utc>,
+    pub created: i64,
     pub event_type: String,
     pub data: Bytes,
     pub metadata: Bytes,
@@ -78,7 +78,7 @@ impl PrepareLog {
             event_stream_id,
             event_id,
             correlation_id,
-            created: Utc.timestamp_opt(timestamp, 0).unwrap(),
+            created: timestamp,
             event_type,
             data,
             metadata,
@@ -93,7 +93,7 @@ impl PrepareLog {
         put_string(&self.event_stream_id, buffer);
         buffer.put_u128_le(self.event_id.as_u128());
         buffer.put_u128_le(self.correlation_id.as_u128());
-        buffer.put_i64_le(self.created.timestamp());
+        buffer.put_i64_le(self.created);
         put_string(&self.event_type, buffer);
         buffer.put_u32_le(self.data.len() as u32);
         buffer.put(self.data.clone());

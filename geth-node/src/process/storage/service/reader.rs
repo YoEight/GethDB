@@ -1,3 +1,4 @@
+use chrono::{TimeZone, Utc};
 use std::io;
 use std::sync::mpsc;
 use uuid::Uuid;
@@ -73,7 +74,7 @@ where
                     revision: record.revision,
                     data: record.data,
                     position: Position(entry.position),
-                    created: record.created,
+                    created: Utc.timestamp_opt(record.created, 0).unwrap(),
                 };
 
                 // if failing means that we don't need to read form the transaction log.

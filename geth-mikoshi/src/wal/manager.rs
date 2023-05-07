@@ -143,6 +143,7 @@ where
         let batch_size = events.len();
         let correlation_id = Uuid::new_v4();
         let transaction_position = state.writer;
+        let created = Utc::now().timestamp();
         let mut buffer = self.buffer.clone();
         let mut chunk: Chunk = state.ongoing_chunk();
         let mut logical_position = transaction_position;
@@ -168,7 +169,7 @@ where
                 event_stream_id: stream_name.clone(),
                 event_id: propose.id,
                 correlation_id,
-                created: Utc::now(),
+                created,
                 event_type: propose.r#type,
                 data: propose.data,
                 metadata: Bytes::default(),

@@ -75,6 +75,7 @@ impl Client {
                 Ok(WriteResult {
                     next_expected_version,
                     position,
+                    next_logical_position: 0,
                 })
             }
             append_resp::Result::WrongExpectedVersion(err) => {
