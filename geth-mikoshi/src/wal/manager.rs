@@ -78,6 +78,7 @@ where
     S: Storage + 'static,
 {
     pub fn load(storage: S) -> io::Result<Self> {
+        let mut buffer = BytesMut::new();
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
         for info in storage.list(Chunks)? {
@@ -109,6 +110,15 @@ where
             chunks.push(chunk);
         }
 
+        if chunks.is_empty() {
+            let chunk = Chunk::new(0);
+
+            chunk.header.put(&mut buffer);
+            storage.write_to(chunk.file_type(), 0, buffer.split().freeze())?;
+
+            chunks.push(chunk);
+        }
+
         let mut writer = 0u64;
         if !storage.exists(FileId::writer_chk())? {
             flush_writer_chk(&storage, writer)?;
@@ -117,7 +127,7 @@ where
         }
 
         Ok(Self {
-            buffer: BytesMut::new(),
+            buffer,
             storage,
             state: Arc::new(RwLock::new(State { chunks, writer })),
         })
@@ -129,7 +139,6 @@ where
         mut revision: u64,
         events: Vec<Propose>,
     ) -> io::Result<(u64, u64)> {
-        let stream_key = mikoshi_hash(stream_name.as_str());
         let mut state = self.state.write().unwrap();
         let batch_size = events.len();
         let correlation_id = Uuid::new_v4();

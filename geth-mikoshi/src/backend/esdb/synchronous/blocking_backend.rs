@@ -168,6 +168,7 @@ impl Backend for BlockingEsdbBackend {
         Ok(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
             position: Position(self.manager.writer),
+            next_logical_position: 0,
         })
     }
 

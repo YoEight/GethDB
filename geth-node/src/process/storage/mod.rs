@@ -17,15 +17,13 @@ use tokio::sync::{
 
 use crate::bus::{AppendStreamMsg, ReadStreamMsg};
 use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted};
-use crate::process::storage::service::{reader, writer};
+use crate::process::storage::service::{index, reader, writer};
 
 use self::service::writer::StorageWriterService;
 enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
 }
-
-pub type InMemoryCheckpoint = Arc<AtomicU64>;
 
 pub struct StorageClient {
     inner: mpsc::UnboundedSender<Msg>,
@@ -54,7 +52,8 @@ where
     S: Storage + Send + Sync + 'static,
 {
     let (sender, mailbox) = mpsc::unbounded_channel();
-    let writer_queue = writer::start(manager.clone(), index.clone());
+    let index_queue = index::start(manager.clone(), index.clone());
+    let writer_queue = writer::start(manager.clone(), index.clone(), index_queue);
     let reader_queue = reader::start(manager.clone(), index.clone());
 
     tokio::spawn(service(mailbox, reader_queue, writer_queue));

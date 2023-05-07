@@ -79,24 +79,30 @@ where
         Ok(AppendStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(next_pos),
             position: Position(trans_pos),
+            next_logical_position: next_pos,
         }))
     }
 }
 
-pub fn start<S>(manager: ChunkManager<S>, index: Lsm<S>) -> mpsc::Sender<AppendStreamMsg>
+pub fn start<S>(
+    manager: ChunkManager<S>,
+    index: Lsm<S>,
+    index_queue: mpsc::Sender<u64>,
+) -> mpsc::Sender<AppendStreamMsg>
 where
     S: Storage + Send + Sync + 'static,
 {
     let (sender, recv) = mpsc::channel();
     let service = StorageWriterService::new(manager, index);
 
-    tokio::task::spawn_blocking(|| process(service, recv));
+    tokio::task::spawn_blocking(|| process(service, index_queue, recv));
 
     sender
 }
 
 fn process<S>(
     mut service: StorageWriterService<S>,
+    index_queue: mpsc::Sender<u64>,
     queue: mpsc::Receiver<AppendStreamMsg>,
 ) -> io::Result<()>
 where
@@ -104,6 +110,11 @@ where
 {
     while let Ok(msg) = queue.recv() {
         let result = service.append(msg.payload)?;
+
+        if let AppendStreamCompleted::Success(result) = &result {
+            let _ = index_queue.send(result.next_logical_position);
+        }
+
         let _ = msg.mail.send(result);
     }
 

@@ -468,4 +468,5 @@ impl From<Option<u64>> for protocol::streams::CurrentRevisionOption {
 pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
     pub position: Position,
+    pub next_logical_position: u64,
 }

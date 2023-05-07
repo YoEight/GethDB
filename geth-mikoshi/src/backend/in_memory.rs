@@ -47,6 +47,7 @@ impl Backend for InMemoryBackend {
         Ok(WriteResult {
             next_expected_version: ExpectedRevision::Revision(*rev),
             position: Position(log_position as u64),
+            next_logical_position: 0,
         })
     }
 

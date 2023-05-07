@@ -1,4 +1,3 @@
-use crate::process::storage::InMemoryCheckpoint;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
