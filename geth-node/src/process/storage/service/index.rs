@@ -22,9 +22,10 @@ where
     pub fn chase(&mut self, target: u64) -> io::Result<()> {
         let mut records = self.manager.prepare_logs(target);
 
-        while let Some((position, record)) = records.next()? {
+        while let Some(record) = records.next()? {
             let key = mikoshi_hash(&record.event_stream_id);
-            self.index.put(key, record.revision, position)?;
+            self.index
+                .put(key, record.revision, record.logical_position)?;
         }
 
         Ok(())

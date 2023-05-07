@@ -7,6 +7,7 @@ use uuid::Uuid;
 fn test_prepare_log_serialization() {
     let mut buffer = BytesMut::new();
     let expected = PrepareLog {
+        logical_position: 1234,
         flags: PrepareFlags::HAS_DATA | PrepareFlags::IS_JSON,
         transaction_position: 34,
         transaction_offset: 50,
@@ -23,6 +24,7 @@ fn test_prepare_log_serialization() {
     expected.put(&mut buffer);
     let actual = PrepareLog::get(buffer.freeze());
 
+    assert_eq!(expected.logical_position, actual.logical_position);
     assert_eq!(expected.flags, actual.flags);
     assert_eq!(expected.transaction_position, actual.transaction_position);
     assert_eq!(expected.transaction_offset, actual.transaction_offset);

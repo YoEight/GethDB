@@ -1,1 +1,2 @@
+mod manager;
 mod records;

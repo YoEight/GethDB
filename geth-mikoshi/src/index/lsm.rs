@@ -134,10 +134,10 @@ where
         let logical_position = self.state.read().unwrap().logical_position;
         let mut records = manager.prepare_logs(logical_position);
 
-        while let Some((log_position, record)) = records.next()? {
+        while let Some(record) = records.next()? {
             let key = mikoshi_hash(record.event_stream_id.as_str());
 
-            self.put(key, record.revision, log_position)?;
+            self.put(key, record.revision, record.logical_position)?;
         }
 
         Ok(())

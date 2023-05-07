@@ -13,17 +13,16 @@ impl<S> PrepareLogs<S>
 where
     S: Storage + 'static,
 {
-    pub fn next(&mut self) -> io::Result<Option<(u64, PrepareLog)>> {
+    pub fn next(&mut self) -> io::Result<Option<PrepareLog>> {
         if self.log_position >= self.writer {
             return Ok(None);
         }
 
-        let record_log_position = self.log_position;
         let record = self.inner.read_at(self.log_position)?;
 
         // We advance by the record size plus the pre and post record size (4 bytes each).
-        self.log_position = record.size() as u64 + 8;
+        self.log_position += record.size() as u64 + 8;
 
-        Ok(Some((record_log_position, record)))
+        Ok(Some(record))
     }
 }

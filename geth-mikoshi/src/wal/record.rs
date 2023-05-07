@@ -18,6 +18,7 @@ bitflags! {
 
 #[derive(Debug, Clone)]
 pub struct PrepareLog {
+    pub logical_position: u64,
     pub flags: PrepareFlags,
     pub transaction_position: u64,
     pub transaction_offset: u32,
@@ -37,7 +38,8 @@ impl PrepareLog {
     }
 
     pub fn size(&self) -> usize {
-        2 // prepare flags
+        8 // log position
+            + 2 // prepare flags
             + 8 // transaction position
             + 4 // transaction offset
             + 8 // expected version 
@@ -55,6 +57,7 @@ impl PrepareLog {
     }
 
     pub fn get(mut src: Bytes) -> Self {
+        let logical_position = src.get_u64_le();
         let flags =
             PrepareFlags::from_bits(src.get_u16_le()).expect("Invalid prepare flags parsing");
         let transaction_position = src.get_u64_le();
@@ -71,6 +74,7 @@ impl PrepareLog {
         let metadata = src.copy_to_bytes(metadata_len as usize);
 
         PrepareLog {
+            logical_position,
             flags,
             transaction_offset,
             transaction_position,
@@ -86,6 +90,7 @@ impl PrepareLog {
     }
 
     pub fn put(&self, buffer: &mut bytes::BytesMut) {
+        buffer.put_u64_le(self.logical_position);
         buffer.put_u16_le(self.flags.bits());
         buffer.put_u64_le(self.transaction_position);
         buffer.put_u32_le(self.transaction_offset);

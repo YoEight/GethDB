@@ -162,6 +162,7 @@ where
             }
 
             let prepare = PrepareLog {
+                logical_position,
                 flags,
                 transaction_position,
                 transaction_offset: offset as u32,
@@ -175,27 +176,16 @@ where
                 metadata: Bytes::default(),
             };
 
-            let log_record_size = 4 // pre record size
-                    + 8 // log position
+            let log_entry_size = 4 // pre record size
                     + prepare.size()
                     + 4; // post record size
 
-            let projected_next_logical_position = logical_position + log_record_size as u64 + 4 + 4;
-
-            if chunk.contains_log_position(projected_next_logical_position) {
-                buffer.put_u32_le(log_record_size as u32);
-                buffer.put_u64_le(logical_position);
-                prepare.put(&mut buffer);
-                buffer.put_u32_le(log_record_size as u32);
-
-                logical_position += projected_next_logical_position;
-
-                continue;
-            }
+            let projected_next_logical_position = logical_position + log_entry_size as u64 + 4 + 4;
+            let record_size = prepare.size();
 
             // Chunk is full and we need to flush previous data we accumulated. We also create a new
             // chunk for next writes.
-            if !buffer.is_empty() {
+            if !chunk.contains_log_position(projected_next_logical_position) {
                 let end_log_position = logical_position + buffer.len() as u64;
                 let local_offset = chunk.raw_position(before_writing_log_position);
                 let physical_data_size =
@@ -224,6 +214,11 @@ where
                 logical_position = end_log_position;
             }
 
+            buffer.put_u32_le(record_size as u32);
+            prepare.put(&mut buffer);
+            buffer.put_u32_le(record_size as u32);
+            logical_position += log_entry_size as u64;
+
             revision += 1;
         }
 
@@ -249,7 +244,6 @@ where
 
     pub fn read_at(&self, logical_position: u64) -> io::Result<PrepareLog> {
         let state = self.state.read().unwrap();
-        let mut buffer = self.buffer.clone();
         let chunk = if let Some(chunk) = state.find_chunk(logical_position) {
             chunk
         } else {
@@ -259,17 +253,15 @@ where
             ));
         };
 
-        let local_offset = chunk.local_physical_position(logical_position);
+        let local_offset = chunk.raw_position(logical_position);
         let record_size = self
             .storage
             .read_from(chunk.file_type(), local_offset, 4)?
-            .get_u32_le();
+            .get_u32_le() as usize;
 
-        let record_bytes = self.storage.read_from(
-            chunk.file_type(),
-            record_size as u64 + 4,
-            (record_size) as usize,
-        )?;
+        let record_bytes =
+            self.storage
+                .read_from(chunk.file_type(), local_offset + 4, record_size)?;
 
         Ok(PrepareLog::get(record_bytes))
     }

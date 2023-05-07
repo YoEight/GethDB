@@ -1,5 +1,6 @@
+use crate::constants::CHUNK_SIZE;
 use crate::storage::{FileCategory, FileId, Storage};
-use bytes::{Buf, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -20,13 +21,28 @@ impl InMemoryStorage {
 
 impl Storage for InMemoryStorage {
     fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
-        match &id {
-            FileId::SSTable(_) | FileId::IndexMap => {
-                let mut inner = self.inner.lock().unwrap();
-                inner.insert(id, bytes);
-            }
+        let mut inner = self.inner.lock().unwrap();
 
-            _ => {}
+        if let Some(saved) = inner.get_mut(&id) {
+            let mut content = saved.to_vec();
+
+            let offset = offset as usize;
+            content
+                .splice(offset..offset + bytes.len(), bytes)
+                .collect::<Vec<_>>();
+
+            *saved = content.into();
+        } else {
+            let mut buffer = BytesMut::new();
+            let bytes = if let FileId::Chunk { .. } = id {
+                buffer.resize(CHUNK_SIZE, 0);
+                buffer.put(bytes);
+                buffer.freeze()
+            } else {
+                bytes
+            };
+
+            inner.insert(id, bytes);
         }
 
         Ok(())
