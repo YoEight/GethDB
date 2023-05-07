@@ -12,8 +12,7 @@ use crate::wal::record::{PrepareFlags, PrepareLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
 use geth_common::{
-    Entry, ExpectedRevision, Position, Propose, Revision, WriteCompleted, WriteResult,
-    WrongExpectedRevisionError,
+    ExpectedRevision, Position, Propose, Revision, WriteResult, WrongExpectedRevisionError,
 };
 use std::collections::BTreeMap;
 use std::io;
@@ -54,6 +53,16 @@ impl State {
 
     fn ongoing_chunk_mut(&mut self) -> &mut Chunk {
         self.chunk_mut(self.chunks.len() - 1)
+    }
+
+    fn find_chunk(&self, logical_position: u64) -> Option<&Chunk> {
+        for chunk in &self.chunks {
+            if chunk.contains_log_position(logical_position) {
+                return Some(chunk);
+            }
+        }
+
+        None
     }
 }
 
@@ -119,7 +128,7 @@ where
         stream_name: String,
         mut revision: u64,
         events: Vec<Propose>,
-    ) -> io::Result<WriteCompleted> {
+    ) -> io::Result<(u64, u64)> {
         let stream_key = mikoshi_hash(stream_name.as_str());
         let mut state = self.state.write().unwrap();
         let batch_size = events.len();
@@ -129,7 +138,6 @@ where
         let mut chunk: Chunk = state.ongoing_chunk();
         let mut logical_position = transaction_position;
         let mut before_writing_log_position = logical_position;
-        let mut entries = Vec::new();
 
         for (offset, propose) in events.into_iter().enumerate() {
             let mut flags: PrepareFlags =
@@ -142,12 +150,6 @@ where
             if offset == batch_size - 1 {
                 flags |= PrepareFlags::TRANSACTION_END;
             }
-
-            entries.push(Entry {
-                key: stream_key,
-                rev: revision,
-                pos: logical_position,
-            });
 
             let prepare = PrepareLog {
                 flags,
@@ -222,10 +224,7 @@ where
         state.writer = logical_position;
         flush_writer_chk(&self.storage, state.writer)?;
 
-        Ok(WriteCompleted {
-            next_logical_position: logical_position,
-            entries,
-        })
+        Ok((transaction_position, logical_position))
     }
 
     pub fn prepare_logs(&self, log_position: u64) -> PrepareLogs<S> {
@@ -238,11 +237,31 @@ where
         }
     }
 
-    pub fn read_next_prepare(
-        &self,
-        log_position: u64,
-    ) -> io::Result<Option<(PrepareLog, u64, u64)>> {
-        todo!()
+    pub fn read_at(&self, logical_position: u64) -> io::Result<PrepareLog> {
+        let state = self.state.read().unwrap();
+        let mut buffer = self.buffer.clone();
+        let chunk = if let Some(chunk) = state.find_chunk(logical_position) {
+            chunk
+        } else {
+            return Err(io::Error::new(
+                io::ErrorKind::NotFound,
+                format!("log position {} doesn't exist", logical_position),
+            ));
+        };
+
+        let local_offset = chunk.local_physical_position(logical_position);
+        let record_size = self
+            .storage
+            .read_from(chunk.file_type(), local_offset, 4)?
+            .get_u32_le();
+
+        let record_bytes = self.storage.read_from(
+            chunk.file_type(),
+            record_size as u64 + 4,
+            (record_size) as usize,
+        )?;
+
+        Ok(PrepareLog::get(record_bytes))
     }
 }
 

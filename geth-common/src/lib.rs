@@ -469,15 +469,3 @@ pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
     pub position: Position,
 }
-
-#[derive(Debug, Copy, Clone)]
-pub struct Entry {
-    pub key: u64,
-    pub rev: u64,
-    pub pos: u64,
-}
-
-pub struct WriteCompleted {
-    pub next_logical_position: u64,
-    pub entries: Vec<Entry>,
-}

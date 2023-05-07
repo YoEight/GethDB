@@ -18,15 +18,12 @@ where
             return Ok(None);
         }
 
-        if let Some((prepare, log_position, next_pos)) =
-            self.inner.read_next_prepare(self.log_position)?
-        {
-            self.log_position = next_pos;
-            return Ok(Some((log_position, prepare)));
-        }
+        let record_log_position = self.log_position;
+        let record = self.inner.read_at(self.log_position)?;
 
-        self.log_position = self.writer;
+        // We advance by the record size plus the pre and post record size (4 bytes each).
+        self.log_position = record.size() as u64 + 8;
 
-        Ok(None)
+        Ok(Some((record_log_position, record)))
     }
 }
