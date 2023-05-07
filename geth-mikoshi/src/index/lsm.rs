@@ -100,6 +100,10 @@ where
         Self::new(Default::default(), storage)
     }
 
+    pub fn checkpoint(&self) -> u64 {
+        self.state.read().unwrap().logical_position
+    }
+
     pub fn load(settings: LsmSettings, storage: S) -> io::Result<Self> {
         let mut state = State::default();
 
@@ -167,6 +171,7 @@ where
         let mut state = self.state.write().unwrap();
         let mut buffer = self.buffer.clone();
         state.active_table.put(key, revision, position);
+        state.logical_position = position;
 
         if state.active_table.size() < self.settings.mem_table_max_size {
             return Ok(());
@@ -215,7 +220,6 @@ where
 
         // We only update the logical position this late because if we went beyond the main loop,
         // it means we actually flushed some data to disk. Anything prior is stored in mem-table.
-        state.logical_position = position;
         state.persist(&mut buffer, &self.storage)?;
 
         for id in cleanups {
