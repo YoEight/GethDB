@@ -18,8 +18,8 @@ where
                     storage_client.append_stream(msg).await?;
                 }
 
-                Msg::ReadStream(opts, callback) => {
-                    storage_client.read_stream(opts, callback).await?;
+                Msg::ReadStream(msg) => {
+                    storage_client.read_stream(msg).await?;
                 }
             }
         }

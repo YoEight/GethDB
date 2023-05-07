@@ -7,8 +7,13 @@ use tokio::sync::{
 use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted};
 
 pub enum Msg {
-    ReadStream(ReadStream, oneshot::Sender<ReadStreamCompleted>),
+    ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
+}
+
+pub struct ReadStreamMsg {
+    pub payload: ReadStream,
+    pub mail: oneshot::Sender<ReadStreamCompleted>,
 }
 
 pub struct AppendStreamMsg {
@@ -24,7 +29,15 @@ pub struct Bus {
 impl Bus {
     pub async fn read_stream(&self, msg: ReadStream) -> eyre::Result<ReadStreamCompleted> {
         let (sender, recv) = oneshot::channel();
-        if self.inner.send(Msg::ReadStream(msg, sender)).await.is_err() {
+        if self
+            .inner
+            .send(Msg::ReadStream(ReadStreamMsg {
+                payload: msg,
+                mail: sender,
+            }))
+            .await
+            .is_err()
+        {
             bail!("Main bus has shutdown!");
         }
 

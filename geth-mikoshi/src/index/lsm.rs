@@ -85,7 +85,7 @@ pub struct Lsm<S> {
 
 impl<S> Lsm<S>
 where
-    S: Storage + 'static,
+    S: Storage + Send + Sync + 'static,
 {
     pub fn new(settings: LsmSettings, storage: S) -> Self {
         Self {
@@ -254,12 +254,12 @@ where
         Ok(None)
     }
 
-    pub fn scan<R>(&self, key: u64, range: R) -> impl IteratorIO<Item = BlockEntry>
+    pub fn scan<R>(&self, key: u64, range: R) -> impl IteratorIO<Item = BlockEntry> + Send + Sync
     where
-        R: RangeBounds<u64> + Clone + 'static,
+        R: RangeBounds<u64> + Clone + Send + Sync + 'static,
     {
         let state = self.state.read().unwrap();
-        let mut scans: Vec<Box<dyn IteratorIO<Item = BlockEntry>>> = Vec::new();
+        let mut scans: Vec<Box<dyn IteratorIO<Item = BlockEntry> + Send + Sync>> = Vec::new();
 
         scans.push(Box::new(state.active_table.scan(key, range.clone()).lift()));
 
