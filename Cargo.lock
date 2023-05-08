@@ -606,6 +606,7 @@ dependencies = [
  "geth-common",
  "geth-mikoshi",
  "glyph",
+ "serde",
  "serde_json",
  "structopt",
  "tokio",

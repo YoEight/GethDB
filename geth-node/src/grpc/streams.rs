@@ -15,6 +15,7 @@ use crate::messages::{AppendStream, ReadStream};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use geth_common::{Direction, ExpectedRevision, Propose};
+use std::collections::HashMap;
 use uuid::Uuid;
 
 pub struct StreamsImpl {
@@ -110,7 +111,11 @@ impl Streams for StreamsImpl {
                     }
                     Ok(record) => {
                         tracing::info!("Record received: {:?}", record);
+
                         if let Some(record) = record {
+                            let mut metadata = HashMap::new();
+                            metadata.insert("type".to_string(), record.r#type);
+
                             let raw_pos = record.position.raw();
                             let event = RecordedEvent {
                                 id: Some(record.id.into()),
@@ -118,7 +123,7 @@ impl Streams for StreamsImpl {
                                 stream_revision: record.revision,
                                 prepare_position: raw_pos,
                                 commit_position: raw_pos,
-                                metadata: Default::default(),
+                                metadata,
                                 custom_metadata: Default::default(),
                                 data: record.data.to_vec(),
                             };
@@ -240,7 +245,7 @@ fn parse_propose(req: AppendReq) -> Option<Propose> {
     if let append_req::Content::ProposedMessage(msg) = req.content? {
         let id = msg.id.and_then(|x| x.try_into().ok())?;
         let data = msg.data.into();
-        let r#type = msg.metadata.get("event-type").cloned().unwrap_or_default();
+        let r#type = msg.metadata.get("type").cloned().unwrap_or_default();
 
         return Some(Propose { id, data, r#type });
     }

@@ -3,6 +3,7 @@ use std::{fs::File, path::PathBuf};
 
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
+use serde::Deserialize;
 use structopt::StructOpt;
 use uuid::Uuid;
 
@@ -137,6 +138,7 @@ async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()
         let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
         let record = serde_json::json!({
             "stream_name": record.stream_name,
+            "type": record.r#type,
             "id": record.id,
             "revision": record.revision,
             "position": record.position.raw(),
@@ -150,16 +152,22 @@ async fn read_stream(client: &mut Client, params: ReadStream) -> eyre::Result<()
     Ok(())
 }
 
+#[derive(Deserialize)]
+struct JsonEvent {
+    r#type: String,
+    payload: serde_json::Value,
+}
+
 async fn append_stream(client: &mut Client, params: AppendStream) -> eyre::Result<()> {
     let file = File::open(params.json_file)?;
-    let events = serde_json::from_reader::<_, Vec<serde_json::Value>>(file)?;
+    let events = serde_json::from_reader::<_, Vec<JsonEvent>>(file)?;
     let mut proposes = Vec::new();
 
     for event in events {
         proposes.push(Propose {
             id: Uuid::new_v4(),
-            r#type: "<repl-type>".to_string(),
-            data: serde_json::to_vec(&event)?.into(),
+            r#type: event.r#type,
+            data: serde_json::to_vec(&event.payload)?.into(),
         });
     }
 

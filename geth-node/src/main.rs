@@ -2,7 +2,6 @@ mod bus;
 mod grpc;
 pub mod messages;
 mod process;
-pub mod types;
 
 use bus::new_bus;
 use geth_mikoshi::index::{Lsm, LsmSettings};

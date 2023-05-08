@@ -12,6 +12,7 @@ use geth_common::{
     Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
     WrongExpectedRevisionError,
 };
+use std::collections::HashMap;
 use tonic::{
     codegen::StdError,
     transport::{self, Channel, Endpoint},
@@ -51,10 +52,15 @@ impl Client {
         });
 
         for p in events {
+            let mut metadata = HashMap::new();
+
+            metadata.insert("type".to_string(), p.r#type);
+            metadata.insert("content-type".to_string(), "application/json".to_string());
+
             msgs.push(AppendReq {
                 content: Some(append_req::Content::ProposedMessage(ProposedMessage {
-                    id: Some(uuid::Uuid::new_v4().into()),
-                    metadata: Default::default(),
+                    id: Some(p.id.into()),
+                    metadata,
                     custom_metadata: Default::default(),
                     data: p.data.to_vec(),
                 })),
@@ -131,11 +137,13 @@ impl ReadStream {
         if let Some(item) = self.inner.try_next().await? {
             if let read_resp::Content::Event(item) = item.content.unwrap() {
                 let item = item.event.unwrap();
+                let r#type = item.metadata.get("type").cloned().unwrap_or_default();
+
                 return Ok(Some(Record {
                     id: item
                         .id
                         .map_or_else(Uuid::nil, |x| x.try_into().unwrap_or_default()),
-                    r#type: "<todo>".to_string(),
+                    r#type,
                     stream_name: item.stream_identifier.unwrap().try_into()?,
                     position: Position(item.prepare_position),
                     revision: item.stream_revision,
