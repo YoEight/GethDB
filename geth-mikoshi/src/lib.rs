@@ -1,4 +1,3 @@
-mod backend;
 mod constants;
 pub mod hashing;
 pub mod index;
@@ -7,7 +6,6 @@ pub mod wal;
 
 use std::path::Path;
 
-use crate::backend::Backend;
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
@@ -24,64 +22,6 @@ pub struct Entry {
     pub data: Bytes,
     pub position: Position,
     pub created: DateTime<Utc>,
-}
-
-pub struct Mikoshi {
-    backend: Box<dyn Backend + Send + 'static>,
-    root: String,
-}
-
-impl Mikoshi {
-    pub fn in_memory() -> Self {
-        Self {
-            backend: Box::new(backend::in_memory_backend()),
-            root: "<in memory>".to_string(),
-        }
-    }
-
-    pub fn esdb(path: impl AsRef<Path>) -> eyre::Result<Self> {
-        let root = path.as_ref().to_string_lossy().to_string();
-        Ok(Self {
-            backend: Box::new(backend::esdb_backend(path)?),
-            root,
-        })
-    }
-
-    pub fn append(
-        &mut self,
-        stream_name: String,
-        expected: ExpectedRevision,
-        events: Vec<Propose>,
-    ) -> eyre::Result<WriteResult> {
-        self.backend.append(stream_name, expected, events)
-    }
-
-    pub fn read(
-        &mut self,
-        stream_name: String,
-        starting: Revision<u64>,
-        direction: Direction,
-    ) -> eyre::Result<BoxedSyncMikoshiStream> {
-        self.backend.read(stream_name, starting, direction)
-    }
-
-    pub fn root(&self) -> &str {
-        self.root.as_str()
-    }
-}
-
-pub type BoxedSyncMikoshiStream = Box<dyn SyncMikoshiStream + Sync + Send + 'static>;
-
-pub trait SyncMikoshiStream {
-    fn next(&mut self) -> eyre::Result<Option<Entry>>;
-}
-
-pub struct EmptyMikoshiStream;
-
-impl SyncMikoshiStream for EmptyMikoshiStream {
-    fn next(&mut self) -> eyre::Result<Option<Entry>> {
-        Ok(None)
-    }
 }
 
 pub struct MikoshiStream {

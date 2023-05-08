@@ -9,7 +9,7 @@ use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
-use geth_mikoshi::{Mikoshi, MikoshiStream};
+use geth_mikoshi::MikoshiStream;
 use tokio::sync::{
     mpsc::{self, UnboundedReceiver},
     oneshot,
