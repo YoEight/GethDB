@@ -13,6 +13,8 @@ use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revisi
 use tokio::sync::mpsc;
 use uuid::Uuid;
 
+pub use index::IteratorIO;
+
 #[derive(Debug, Clone)]
 pub struct Entry {
     pub id: Uuid,

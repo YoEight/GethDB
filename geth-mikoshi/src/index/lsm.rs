@@ -8,6 +8,7 @@ use crate::wal::ChunkManager;
 use bytes::{Buf, BufMut, BytesMut};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
+use std::iter::once;
 use std::ops::RangeBounds;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
@@ -132,15 +133,13 @@ where
 
     pub fn rebuild(&self, manager: &ChunkManager<S>) -> io::Result<()> {
         let logical_position = self.state.read().unwrap().logical_position;
-        let mut records = manager.prepare_logs(logical_position);
+        let records = manager.prepare_logs(logical_position).map(|r| {
+            let key = mikoshi_hash(&r.event_stream_id);
 
-        while let Some(record) = records.next()? {
-            let key = mikoshi_hash(record.event_stream_id.as_str());
+            (key, r.revision, r.logical_position)
+        });
 
-            self.put(key, record.revision, record.logical_position)?;
-        }
-
-        Ok(())
+        self.put(records)
     }
 
     pub fn ss_table_count(&self) -> usize {
@@ -154,24 +153,28 @@ where
         ts.get(0).cloned()
     }
 
-    #[cfg(test)]
-    pub fn put_values<V>(&mut self, mut values: V) -> io::Result<()>
+    pub fn put_values<V>(&self, values: V) -> io::Result<()>
     where
         V: IntoIterator<Item = (u64, u64, u64)>,
     {
-        for (key, rev, pos) in values {
-            self.put(key, rev, pos)?;
-        }
-
-        Ok(())
+        self.put(values.into_iter().lift())
     }
 
-    // TODO - implement a version where we acquire the lock for until an IteratorIO is exhausted.
-    pub fn put(&self, key: u64, revision: u64, position: u64) -> io::Result<()> {
+    pub fn put_single(&self, key: u64, revision: u64, position: u64) -> io::Result<()> {
+        self.put_values(once((key, revision, position)))
+    }
+
+    pub fn put<Values>(&self, mut values: Values) -> io::Result<()>
+    where
+        Values: IteratorIO<Item = (u64, u64, u64)>,
+    {
         let mut state = self.state.write().unwrap();
         let mut buffer = self.buffer.clone();
-        state.active_table.put(key, revision, position);
-        state.logical_position = position;
+
+        while let Some((key, revision, position)) = values.next()? {
+            state.active_table.put(key, revision, position);
+            state.logical_position = position;
+        }
 
         if state.active_table.size() < self.settings.mem_table_max_size {
             return Ok(());

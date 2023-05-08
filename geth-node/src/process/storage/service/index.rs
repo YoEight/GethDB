@@ -2,6 +2,7 @@ use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
+use geth_mikoshi::IteratorIO;
 use std::io;
 use std::sync::atomic::AtomicU64;
 use std::sync::{mpsc, Arc};
@@ -20,15 +21,13 @@ where
     }
 
     pub fn chase(&mut self, starting_position: u64) -> io::Result<()> {
-        let mut records = self.manager.prepare_logs(starting_position);
-
-        while let Some(record) = records.next()? {
+        let records = self.manager.prepare_logs(starting_position).map(|record| {
             let key = mikoshi_hash(&record.event_stream_id);
-            self.index
-                .put(key, record.revision, record.logical_position)?;
-        }
 
-        Ok(())
+            (key, record.revision, record.logical_position)
+        });
+
+        self.index.put(records)
     }
 }
 

@@ -1,6 +1,7 @@
 use crate::storage::Storage;
 use crate::wal::record::PrepareLog;
 use crate::wal::ChunkManager;
+use crate::IteratorIO;
 use std::io;
 
 pub struct PrepareLogs<S> {
@@ -9,11 +10,13 @@ pub struct PrepareLogs<S> {
     pub(crate) inner: ChunkManager<S>,
 }
 
-impl<S> PrepareLogs<S>
+impl<S> IteratorIO for PrepareLogs<S>
 where
     S: Storage + 'static,
 {
-    pub fn next(&mut self) -> io::Result<Option<PrepareLog>> {
+    type Item = PrepareLog;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
         if self.log_position >= self.writer {
             return Ok(None);
         }

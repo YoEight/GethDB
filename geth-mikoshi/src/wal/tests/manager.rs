@@ -1,5 +1,6 @@
 use crate::storage::{FileSystemStorage, InMemoryStorage, Storage};
 use crate::wal::ChunkManager;
+use crate::IteratorIO;
 use geth_common::Propose;
 use std::io;
 use std::path::PathBuf;
