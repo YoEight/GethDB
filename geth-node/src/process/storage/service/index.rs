@@ -19,8 +19,8 @@ where
         Self { manager, index }
     }
 
-    pub fn chase(&mut self, target: u64) -> io::Result<()> {
-        let mut records = self.manager.prepare_logs(target);
+    pub fn chase(&mut self, starting_position: u64) -> io::Result<()> {
+        let mut records = self.manager.prepare_logs(starting_position);
 
         while let Some(record) = records.next()? {
             let key = mikoshi_hash(&record.event_stream_id);
@@ -58,8 +58,8 @@ where
             continue;
         }
 
+        service.chase(checkpoint)?;
         checkpoint = msg;
-        service.chase(msg)?;
     }
 
     Ok(())

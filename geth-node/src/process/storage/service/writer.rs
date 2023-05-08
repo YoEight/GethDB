@@ -16,10 +16,10 @@ enum CurrentRevision {
 }
 
 impl CurrentRevision {
-    fn raw(self) -> u64 {
+    fn next_revision(self) -> u64 {
         match self {
             CurrentRevision::NoStream => 0,
-            CurrentRevision::Revision(r) => r,
+            CurrentRevision::Revision(r) => r + 1,
         }
     }
 
@@ -70,7 +70,7 @@ where
             return Ok(AppendStreamCompleted::Failure(e));
         }
 
-        let starting_revision = current_revision.raw();
+        let starting_revision = current_revision.next_revision();
 
         let (trans_pos, next_pos) =
             self.manager
