@@ -114,7 +114,7 @@ where
         })
     }
 
-    pub fn file_type(&self) -> FileId {
+    pub fn file_id(&self) -> FileId {
         FileId::SSTable(self.id)
     }
 
@@ -157,9 +157,9 @@ where
     pub fn read_block(&self, block_idx: usize) -> io::Result<Block> {
         let meta = self.metas.read(block_idx);
         let block_size = self.block_actual_size(block_idx);
-        let block_bytes =
-            self.storage
-                .read_from(self.file_type(), meta.offset as u64, block_size)?;
+        let block_bytes = self
+            .storage
+            .read_from(self.file_id(), meta.offset as u64, block_size)?;
 
         Ok(Block::new(block_bytes))
     }
@@ -219,7 +219,7 @@ where
         buffer.put_u32_le(meta_offset);
 
         self.storage
-            .write_to(self.file_type(), 0, buffer.split().freeze())?;
+            .write_to(self.file_id(), 0, buffer.split().freeze())?;
         self.metas = BlockMetas::new(metas);
         self.meta_offset = meta_offset as u64;
 

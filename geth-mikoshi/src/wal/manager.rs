@@ -114,7 +114,7 @@ where
             let chunk = Chunk::new(0);
 
             chunk.header.put(&mut buffer);
-            storage.write_to(chunk.file_type(), 0, buffer.split().freeze())?;
+            storage.write_to(chunk.file_id(), 0, buffer.split().freeze())?;
 
             chunks.push(chunk);
         }
@@ -198,13 +198,13 @@ where
                 };
 
                 self.storage
-                    .write_to(chunk.file_type(), local_offset, buffer.split().freeze())?;
+                    .write_to(chunk.file_id(), local_offset, buffer.split().freeze())?;
 
                 footer.put(&mut buffer);
                 state.ongoing_chunk_mut().footer = Some(footer);
 
                 self.storage.write_to(
-                    chunk.file_type(),
+                    chunk.file_id(),
                     (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
                     buffer.split().freeze(),
                 )?;
@@ -224,7 +224,7 @@ where
 
         let local_offset = chunk.raw_position(before_writing_log_position);
         self.storage
-            .write_to(chunk.file_type(), local_offset, buffer.split().freeze())?;
+            .write_to(chunk.file_id(), local_offset, buffer.split().freeze())?;
 
         state.writer = logical_position;
         flush_writer_chk(&self.storage, state.writer)?;
@@ -256,12 +256,12 @@ where
         let local_offset = chunk.raw_position(logical_position);
         let record_size = self
             .storage
-            .read_from(chunk.file_type(), local_offset, 4)?
+            .read_from(chunk.file_id(), local_offset, 4)?
             .get_u32_le() as usize;
 
         let record_bytes =
             self.storage
-                .read_from(chunk.file_type(), local_offset + 4, record_size)?;
+                .read_from(chunk.file_id(), local_offset + 4, record_size)?;
 
         Ok(PrepareLog::get(record_bytes))
     }
