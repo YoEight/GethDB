@@ -1,12 +1,29 @@
-use crate::storage::InMemoryStorage;
+use crate::storage::{FileSystemStorage, InMemoryStorage, Storage};
 use crate::wal::ChunkManager;
 use geth_common::Propose;
 use std::io;
+use std::path::PathBuf;
+use temp_testdir::TempDir;
 use uuid::Uuid;
 
 #[test]
 fn test_in_mem_new_chunk() -> io::Result<()> {
     let storage = InMemoryStorage::new();
+    test_new_chunk(storage)
+}
+
+#[test]
+fn test_fs_new_chunk() -> io::Result<()> {
+    let temp = TempDir::default();
+    let storage = FileSystemStorage::new(PathBuf::from(temp.as_ref()))?;
+
+    test_new_chunk(storage)
+}
+
+fn test_new_chunk<S>(storage: S) -> io::Result<()>
+where
+    S: Storage + 'static,
+{
     let manager = ChunkManager::load(storage)?;
 
     let propose = Propose {
