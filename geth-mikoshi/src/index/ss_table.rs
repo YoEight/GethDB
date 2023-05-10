@@ -250,9 +250,9 @@ where
 
     pub fn scan<R>(&self, key: u64, range: R) -> SsTableScan<S, R>
     where
-        R: RangeBounds<u64> + Clone,
+        R: RangeBounds<u64>,
     {
-        let candidates = self.find_best_candidates(key, range_start(range.clone()));
+        let candidates = self.find_best_candidates(key, range_start(&range));
         SsTableScan {
             range,
             key,

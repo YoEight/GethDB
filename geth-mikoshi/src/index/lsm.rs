@@ -268,10 +268,12 @@ where
         let state = self.state.read().unwrap();
         let mut scans: Vec<Box<dyn IteratorIO<Item = BlockEntry> + Send + Sync>> = Vec::new();
 
-        scans.push(Box::new(state.active_table.scan(key, range.clone()).lift()));
+        scans.push(Box::new(
+            state.active_table.scan_forward(key, range.clone()).lift(),
+        ));
 
         for mem_table in state.immutable_tables.iter() {
-            scans.push(Box::new(mem_table.scan(key, range.clone()).lift()));
+            scans.push(Box::new(mem_table.scan_forward(key, range.clone()).lift()));
         }
 
         for tables in state.levels.values() {

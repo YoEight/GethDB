@@ -7,6 +7,7 @@ mod ss_table;
 mod tests;
 
 use crate::index::block::BlockEntry;
+use geth_common::Direction;
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::io;
@@ -186,13 +187,36 @@ pub struct IndexedPosition {
     pub position: u64,
 }
 
+pub struct Rev<R> {
+    inner: R,
+}
+
+impl<R> Rev<R> {
+    pub fn new(inner: R) -> Self {
+        Self { inner }
+    }
+}
+
+impl<R> RangeBounds<u64> for Rev<R>
+where
+    R: RangeBounds<u64>,
+{
+    fn start_bound(&self) -> Bound<&u64> {
+        self.inner.end_bound()
+    }
+
+    fn end_bound(&self) -> Bound<&u64> {
+        self.inner.start_bound()
+    }
+}
+
 #[derive(Debug, Copy, Clone)]
 pub enum Range {
     Inbound,
     Outbound(Ordering),
 }
 
-pub fn range_start<R>(range: R) -> u64
+pub fn range_start<R>(range: &R) -> u64
 where
     R: RangeBounds<u64>,
 {
@@ -200,6 +224,28 @@ where
         Bound::Included(start) => *start,
         Bound::Excluded(start) => *start + 1,
         Bound::Unbounded => 0,
+    }
+}
+
+pub fn range_start_decr<R>(range: &R) -> u64
+where
+    R: RangeBounds<u64>,
+{
+    match range.end_bound() {
+        Bound::Included(start) => *start,
+        Bound::Excluded(start) => *start - 1,
+        Bound::Unbounded => u64::MAX,
+    }
+}
+
+pub fn range_end<R>(range: &R) -> u64
+where
+    R: RangeBounds<u64>,
+{
+    match range.start_bound() {
+        Bound::Included(start) => *start,
+        Bound::Excluded(start) => *start + 1,
+        Bound::Unbounded => u64::MAX,
     }
 }
 

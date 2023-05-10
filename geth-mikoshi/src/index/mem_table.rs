@@ -1,6 +1,8 @@
 use crate::index::block::BlockEntry;
 
+use crate::index::{range_start, range_start_decr, Rev};
 use bytes::{Buf, BufMut, BytesMut};
+use geth_common::Direction;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{Bound, RangeBounds, RangeFull};
@@ -38,13 +40,22 @@ impl MemTable {
         self.entries_count += 1;
     }
 
-    pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
+    pub fn scan_forward<R>(&self, key: u64, range: R) -> Scan<R>
     where
         R: RangeBounds<u64>,
     {
         let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
 
-        Scan::new(key, buffer, range)
+        Scan::new(key, buffer, Direction::Forward, range)
+    }
+
+    pub fn scan_backward<R>(&self, key: u64, range: R) -> Scan<Rev<R>>
+    where
+        R: RangeBounds<u64>,
+    {
+        let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
+
+        Scan::new(key, buffer, Direction::Backward, Rev::new(range))
     }
 
     pub fn size(&self) -> usize {
@@ -71,30 +82,39 @@ impl IntoIterator for MemTable {
 
 pub struct Scan<R> {
     key: u64,
+    current: usize,
+    end: usize,
     buffer: BytesMut,
     range: R,
+    direction: Direction,
 }
 
 impl<R> Scan<R>
 where
     R: RangeBounds<u64>,
 {
-    fn new(key: u64, mut buffer: BytesMut, range: R) -> Self {
-        let current = match range.start_bound() {
-            Bound::Included(x) => *x,
-            Bound::Excluded(x) => *x + 1,
-            Bound::Unbounded => 0,
+    fn new(key: u64, mut buffer: BytesMut, direction: Direction, range: R) -> Self {
+        let count = buffer.len() / MEM_TABLE_ENTRY_SIZE;
+        let current = if let Direction::Forward = direction {
+            range_start(&range)
+        } else {
+            let start = range_start_decr(&range);
+
+            if start == u64::MAX {
+                (count as u64).checked_sub(1).unwrap_or(u64::MAX)
+            } else {
+                start
+            }
         };
 
-        let offset = current as usize * MEM_TABLE_ENTRY_SIZE;
-
-        if offset > buffer.remaining() {
-            buffer.advance(buffer.remaining());
-        } else {
-            buffer.advance(offset);
+        Self {
+            key,
+            current: current as usize,
+            end: buffer.len() / MEM_TABLE_ENTRY_SIZE,
+            buffer,
+            range,
+            direction,
         }
-
-        Self { key, buffer, range }
     }
 }
 
@@ -105,21 +125,31 @@ where
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if !self.buffer.has_remaining() {
+        match self.direction {
+            Direction::Forward if self.current >= self.end => return None,
+            Direction::Backward if self.current == usize::MAX => return None,
+            _ => {}
+        }
+
+        let offset = self.current * MEM_TABLE_ENTRY_SIZE;
+        let mut slice = &self.buffer.as_ref()[offset..offset + MEM_TABLE_ENTRY_SIZE];
+        let revision = slice.get_u64_le();
+
+        if !self.range.contains(&revision) {
             return None;
         }
 
-        let revision = self.buffer.get_u64_le();
+        let position = slice.get_u64_le();
 
-        if !self.range.contains(&revision) {
-            self.buffer.advance(self.buffer.remaining());
-            return None;
+        match self.direction {
+            Direction::Forward => self.current += 1,
+            Direction::Backward => self.current = self.current.checked_sub(1).unwrap_or(usize::MAX),
         }
 
         Some(BlockEntry {
             key: self.key,
             revision,
-            position: self.buffer.get_u64_le(),
+            position,
         })
     }
 }
@@ -136,7 +166,7 @@ impl Iterator for IntoIter {
         loop {
             if self.current.is_none() {
                 let (key, buffer) = self.inner.next()?;
-                self.current = Some(Scan::new(key, buffer, ..));
+                self.current = Some(Scan::new(key, buffer, Direction::Forward, ..));
             }
 
             let scan = self.current.as_mut()?;

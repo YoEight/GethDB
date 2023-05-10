@@ -219,10 +219,10 @@ pub struct Scan<R> {
 
 impl<R> Scan<R>
 where
-    R: RangeBounds<u64> + Clone,
+    R: RangeBounds<u64>,
 {
     fn new(key: u64, mut buffer: Bytes, range: R) -> Self {
-        let current = range_start(range.clone());
+        let current = range_start(&range);
         let count = buffer.len() / BLOCK_ENTRY_SIZE;
 
         if count != 0 {

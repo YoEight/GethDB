@@ -20,14 +20,14 @@ fn test_mem_table_get() {
 }
 
 #[test]
-fn test_mem_table_iter() {
+fn test_mem_table_forward_iter() {
     let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 0);
     mem_table.put(1, 1, 5);
     mem_table.put(1, 2, 10);
 
-    let mut iter = mem_table.scan(1, ..);
+    let mut iter = mem_table.scan_forward(1, ..);
     assert_eq!(
         BlockEntry {
             key: 1,
@@ -55,7 +55,7 @@ fn test_mem_table_iter() {
         iter.next().unwrap()
     );
 
-    let mut iter = mem_table.scan(1, 1..);
+    let mut iter = mem_table.scan_forward(1, 1..);
 
     assert_eq!(
         BlockEntry {
@@ -76,7 +76,7 @@ fn test_mem_table_iter() {
     );
     assert!(iter.next().is_none());
 
-    let mut iter = mem_table.scan(1, 0..=2);
+    let mut iter = mem_table.scan_forward(1, 0..=2);
 
     assert_eq!(
         BlockEntry {
@@ -101,6 +101,97 @@ fn test_mem_table_iter() {
             key: 1,
             revision: 2,
             position: 10,
+        },
+        iter.next().unwrap()
+    );
+
+    assert!(iter.next().is_none());
+}
+
+#[test]
+fn test_mem_table_backward_iter() {
+    let mut mem_table = MemTable::default();
+
+    mem_table.put(1, 0, 0);
+    mem_table.put(1, 1, 5);
+    mem_table.put(1, 2, 10);
+
+    let mut iter = mem_table.scan_backward(1, ..);
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 2,
+            position: 10,
+        },
+        iter.next().unwrap()
+    );
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 1,
+            position: 5,
+        },
+        iter.next().unwrap()
+    );
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 0,
+            position: 0,
+        },
+        iter.next().unwrap()
+    );
+
+    assert!(iter.next().is_none());
+
+    let mut iter = mem_table.scan_backward(1, 1..);
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 1,
+            position: 5,
+        },
+        iter.next().unwrap()
+    );
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 0,
+            position: 0,
+        },
+        iter.next().unwrap()
+    );
+    assert!(iter.next().is_none());
+
+    let mut iter = mem_table.scan_backward(1, 2..=0);
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 2,
+            position: 10,
+        },
+        iter.next().unwrap()
+    );
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 1,
+            position: 5,
+        },
+        iter.next().unwrap()
+    );
+
+    assert_eq!(
+        BlockEntry {
+            key: 1,
+            revision: 0,
+            position: 0,
         },
         iter.next().unwrap()
     );
