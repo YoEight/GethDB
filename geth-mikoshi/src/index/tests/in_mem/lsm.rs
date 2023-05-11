@@ -6,7 +6,7 @@ use std::io;
 
 #[test]
 fn test_in_mem_lsm_get() -> io::Result<()> {
-    let mut lsm = Lsm::with_default(InMemoryStorage::new());
+    let lsm = Lsm::with_default(InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
@@ -19,7 +19,7 @@ fn test_in_mem_lsm_get() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
-    let mut lsm = Lsm::with_default(InMemoryStorage::new());
+    let lsm = Lsm::with_default(InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -102,7 +102,7 @@ fn test_in_mem_lsm_sync() -> io::Result<()> {
     let mut setts = LsmSettings::default();
     setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
 
-    let mut lsm = Lsm::new(setts, InMemoryStorage::new());
+    let lsm = Lsm::new(setts, InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 

@@ -4,12 +4,10 @@ pub mod index;
 pub mod storage;
 pub mod wal;
 
-use std::path::Path;
-
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
-use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
+use geth_common::{Position, Record};
 use tokio::sync::mpsc;
 use uuid::Uuid;
 

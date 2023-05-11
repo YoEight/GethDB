@@ -1,11 +1,10 @@
-use crate::index::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
+use crate::index::block::BLOCK_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
 use crate::index::tests::{in_mem_generate_sst, key_of, position_of, revision_of, NUM_OF_KEYS};
 use crate::index::IteratorIO;
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
 use std::io;
-use uuid::Uuid;
 
 #[test]
 fn test_in_mem_sst_build_single_key() -> io::Result<()> {

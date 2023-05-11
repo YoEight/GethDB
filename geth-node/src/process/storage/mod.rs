@@ -1,25 +1,14 @@
 mod service;
 
-use std::io;
-use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-
 use eyre::bail;
-use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
-use geth_mikoshi::MikoshiStream;
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver},
-    oneshot,
-};
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, ReadStreamMsg};
-use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted};
 use crate::process::storage::service::{index, reader, writer};
 
-use self::service::writer::StorageWriterService;
 enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),

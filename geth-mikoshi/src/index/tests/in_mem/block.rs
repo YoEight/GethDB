@@ -1,6 +1,5 @@
-use crate::index::block::{Block, BLOCK_ENTRY_SIZE};
+use crate::index::block::BLOCK_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
-use crate::index::tests::fs::values;
 use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS};
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
@@ -48,7 +47,7 @@ fn test_in_mem_block_build_full() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_build_all() -> io::Result<()> {
-    let mut table = in_mem_generate_block();
+    let table = in_mem_generate_block();
     let block = table.read_block(0)?;
 
     for idx in 0..NUM_OF_KEYS {
@@ -64,7 +63,7 @@ fn test_in_mem_block_build_all() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_find_key() -> io::Result<()> {
-    let mut table = in_mem_generate_block();
+    let table = in_mem_generate_block();
     let block = table.read_block(0)?;
 
     for i in 0..NUM_OF_KEYS {

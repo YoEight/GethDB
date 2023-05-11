@@ -7,7 +7,6 @@ use std::io::{self, ErrorKind};
 use std::os::unix::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct FileSystemStorage {
@@ -33,7 +32,7 @@ impl FileSystemStorage {
             file.clone()
         } else {
             let path = self.file_path(id);
-            let mut file = self.open_file(path)?;
+            let file = self.open_file(path)?;
 
             if let FileId::Chunk { .. } = id {
                 file.set_len(CHUNK_SIZE as u64)?;

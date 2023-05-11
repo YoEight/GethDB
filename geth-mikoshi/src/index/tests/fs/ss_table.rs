@@ -1,17 +1,14 @@
-use crate::index::block::{BLOCK_ENTRY_SIZE, BLOCK_MIN_SIZE};
+use crate::index::block::BLOCK_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
-use crate::index::tests::fs::values;
 use crate::index::tests::{
-    fs_generate_stt, fs_generate_stt_with_size, in_mem_generate_sst, key_of, position_of,
-    revision_of, NUM_OF_KEYS,
+    fs_generate_stt_with_size, key_of, position_of, revision_of, NUM_OF_KEYS,
 };
-use crate::index::{IteratorIO, IteratorIOExt};
+use crate::index::IteratorIO;
 use crate::storage::fs::FileSystemStorage;
 use bytes::BytesMut;
 use std::io;
 use std::path::PathBuf;
 use temp_testdir::TempDir;
-use uuid::Uuid;
 
 #[test]
 fn test_fs_sst_build_single_key() -> io::Result<()> {
@@ -77,7 +74,7 @@ fn test_fs_sst_find_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut table = fs_generate_stt_with_size(storage, BLOCK_ENTRY_SIZE)?;
+    let table = fs_generate_stt_with_size(storage, BLOCK_ENTRY_SIZE)?;
 
     for i in 0..NUM_OF_KEYS {
         let key = key_of(i);

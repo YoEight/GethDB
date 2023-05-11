@@ -7,7 +7,6 @@ mod ss_table;
 mod tests;
 
 use crate::index::block::BlockEntry;
-use geth_common::Direction;
 use std::cmp::Ordering;
 use std::collections::Bound;
 use std::io;

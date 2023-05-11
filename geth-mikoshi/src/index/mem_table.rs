@@ -5,7 +5,7 @@ use bytes::{Buf, BufMut, BytesMut};
 use geth_common::Direction;
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::ops::{Bound, RangeBounds, RangeFull};
+use std::ops::{RangeBounds, RangeFull};
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 
@@ -93,7 +93,7 @@ impl<R> Scan<R>
 where
     R: RangeBounds<u64>,
 {
-    fn new(key: u64, mut buffer: BytesMut, direction: Direction, range: R) -> Self {
+    fn new(key: u64, buffer: BytesMut, direction: Direction, range: R) -> Self {
         let count = buffer.len() / MEM_TABLE_ENTRY_SIZE;
         let current = if let Direction::Forward = direction {
             range_start(&range)

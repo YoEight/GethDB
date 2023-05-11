@@ -5,13 +5,10 @@ use std::cmp::Ordering;
 use geth_common::Direction;
 use std::ops::RangeBounds;
 
-struct Offsets(Bytes);
-
 pub const BLOCK_KEY_SIZE: usize = 8;
 pub const BLOCK_VERSION_SIZE: usize = 8;
 pub const BLOCK_LOG_POSITION_SIZE: usize = 8;
 pub const BLOCK_ENTRY_SIZE: usize = BLOCK_KEY_SIZE + BLOCK_VERSION_SIZE + BLOCK_LOG_POSITION_SIZE;
-pub const BLOCK_MIN_SIZE: usize = BLOCK_ENTRY_SIZE + 2;
 
 #[derive(Copy, Clone)]
 pub struct KeyId {

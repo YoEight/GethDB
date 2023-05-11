@@ -3,9 +3,7 @@ use std::io;
 use std::sync::mpsc;
 use uuid::Uuid;
 
-use geth_common::{
-    Direction, ExpectedRevision, Position, Revision, WriteResult, WrongExpectedRevisionError,
-};
+use geth_common::{Direction, Position, Revision};
 use geth_mikoshi::{
     hashing::mikoshi_hash,
     index::{IteratorIO, Lsm},
@@ -16,10 +14,6 @@ use geth_mikoshi::{
 
 use crate::bus::ReadStreamMsg;
 use crate::messages::{ReadStream, ReadStreamCompleted};
-use crate::{
-    bus::AppendStreamMsg,
-    messages::{AppendStream, AppendStreamCompleted},
-};
 
 pub struct StorageReaderService<S> {
     manager: ChunkManager<S>,

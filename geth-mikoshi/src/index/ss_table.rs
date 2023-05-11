@@ -5,8 +5,6 @@ use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 use std::io;
-use std::mem::take;
-use std::net::ToSocketAddrs;
 use std::ops::RangeBounds;
 use uuid::Uuid;
 
@@ -176,7 +174,7 @@ where
         Ok(None)
     }
 
-    pub fn put_iter<Values>(&mut self, buffer: &mut BytesMut, mut values: Values) -> io::Result<()>
+    pub fn put_iter<Values>(&mut self, buffer: &mut BytesMut, values: Values) -> io::Result<()>
     where
         Values: IntoIterator<Item = (u64, u64, u64)>,
     {
@@ -236,7 +234,6 @@ where
 
     pub fn iter(&self) -> SsTableIter<S> {
         SsTableIter {
-            block_size: self.block_size,
             block_idx: 0,
             entry_idx: 0,
             block: None,
@@ -257,7 +254,6 @@ where
             range,
             key,
             block_idx: 0,
-            block_size: self.block_size,
             block: None,
             table: self.clone(),
             candidates,
@@ -266,7 +262,6 @@ where
 }
 
 pub struct SsTableIter<S> {
-    block_size: usize,
     block_idx: usize,
     entry_idx: usize,
     block: Option<Block>,
@@ -314,7 +309,6 @@ pub struct SsTableScan<S, R> {
     range: R,
     key: u64,
     block_idx: usize,
-    block_size: usize,
     block: Option<Scan<R>>,
     table: SsTable<S>,
     candidates: Vec<usize>,

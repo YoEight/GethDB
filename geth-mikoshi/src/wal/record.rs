@@ -226,10 +226,6 @@ impl SystemLog {
         buf.put_u32_le(self.data.len() as u32);
         buf.put(self.data.clone());
     }
-
-    pub fn is_json_format(&self) -> bool {
-        self.format == SystemRecordFormat::Json
-    }
 }
 
 #[derive(Serialize, Deserialize, Debug)]

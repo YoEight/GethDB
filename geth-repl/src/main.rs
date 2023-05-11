@@ -9,7 +9,7 @@ use uuid::Uuid;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
-    let user_dirs = directories::UserDirs::new().expect("to be defined");
+    let user_dirs = UserDirs::new().expect("to be defined");
     let history_path = PathBuf::from(user_dirs.home_dir()).join(".geth-repl");
     let mut inputs = glyph::file_backed_inputs(Default::default(), history_path)?;
     let mut client = None;

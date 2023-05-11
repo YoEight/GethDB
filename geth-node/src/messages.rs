@@ -1,9 +1,7 @@
 use geth_common::{
-    protocol::streams::append_resp::WrongExpectedVersion, Direction, ExpectedRevision, Propose,
-    Revision, WriteResult, WrongExpectedRevisionError,
+    Direction, ExpectedRevision, Propose, Revision, WriteResult, WrongExpectedRevisionError,
 };
 use geth_mikoshi::MikoshiStream;
-use tokio::sync::oneshot;
 use uuid::Uuid;
 
 #[derive(Debug)]

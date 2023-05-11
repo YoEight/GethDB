@@ -4,7 +4,6 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct InMemoryStorage {
@@ -27,7 +26,7 @@ impl Storage for InMemoryStorage {
             let mut content = saved.to_vec();
 
             let offset = offset as usize;
-            content
+            let _ = content
                 .splice(offset..offset + bytes.len(), bytes)
                 .collect::<Vec<_>>();
 
@@ -50,7 +49,7 @@ impl Storage for InMemoryStorage {
 
     fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
         let mut bytes = {
-            let mut inner = self.inner.lock().unwrap();
+            let inner = self.inner.lock().unwrap();
             inner.get(&id).cloned().unwrap_or_default()
         };
 
@@ -59,7 +58,7 @@ impl Storage for InMemoryStorage {
     }
 
     fn read_all(&self, id: FileId) -> io::Result<Bytes> {
-        let mut inner = self.inner.lock().unwrap();
+        let inner = self.inner.lock().unwrap();
 
         Ok(inner.get(&id).cloned().unwrap_or_default())
     }
@@ -82,7 +81,7 @@ impl Storage for InMemoryStorage {
         Ok(inner.get(&id).map(|b| b.len()).unwrap_or_default())
     }
 
-    fn list<C>(&self, category: C) -> io::Result<Vec<C::Item>>
+    fn list<C>(&self, _category: C) -> io::Result<Vec<C::Item>>
     where
         C: FileCategory,
     {

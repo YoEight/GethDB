@@ -31,7 +31,6 @@ impl ChunkHeader {
         let chunk_size = buf.get_u32_le() as usize;
         let chunk_start_number = buf.get_u32_le() as usize;
         let chunk_end_number = buf.get_u32_le() as usize;
-        let is_scavenged = if buf.get_u8() == 1 { true } else { false };
         let chunk_id = Uuid::from_u128(buf.get_u128_le());
 
         Self {

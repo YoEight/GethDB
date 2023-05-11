@@ -1,7 +1,6 @@
 use crate::index::lsm::{Lsm, LsmSettings};
 use crate::index::mem_table::MEM_TABLE_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
-use crate::index::tests::fs::values;
 use crate::index::IteratorIO;
 use crate::storage::fs::FileSystemStorage;
 use bytes::BytesMut;
@@ -13,7 +12,7 @@ use temp_testdir::TempDir;
 fn test_fs_lsm_get() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut lsm = Lsm::with_default(FileSystemStorage::new(root)?);
+    let lsm = Lsm::with_default(FileSystemStorage::new(root)?);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
@@ -28,7 +27,7 @@ fn test_fs_lsm_get() -> io::Result<()> {
 fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut lsm = Lsm::with_default(FileSystemStorage::new(root)?);
+    let lsm = Lsm::with_default(FileSystemStorage::new(root)?);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -114,7 +113,7 @@ fn test_fs_lsm_sync() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut lsm = Lsm::new(setts, storage);
+    let lsm = Lsm::new(setts, storage);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -146,7 +145,7 @@ fn test_fs_lsm_serialization() -> io::Result<()> {
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
     let mut buffer = BytesMut::new();
-    let mut lsm = Lsm::with_default(storage.clone());
+    let lsm = Lsm::with_default(storage.clone());
 
     let mut table1 = SsTable::with_default(storage.clone());
     let mut table2 = SsTable::with_default(storage.clone());

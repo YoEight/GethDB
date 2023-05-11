@@ -114,10 +114,6 @@ impl Chunk {
         self.info.file_id()
     }
 
-    pub fn filename(&self) -> String {
-        chunk_filename_from(self.info.seq_num, self.info.version)
-    }
-
     pub fn local_physical_position(&self, log_position: u64) -> u64 {
         log_position - self.start_position()
     }
@@ -137,8 +133,4 @@ impl Chunk {
     pub fn contains_log_position(&self, log_position: u64) -> bool {
         log_position >= self.start_position() && log_position < self.end_position()
     }
-}
-
-fn chunk_filename_from(seq_number: usize, version: usize) -> String {
-    format!("chunk-{:06}.{:06}", seq_number, version)
 }

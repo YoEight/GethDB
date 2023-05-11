@@ -4,8 +4,7 @@ use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
 use geth_mikoshi::IteratorIO;
 use std::io;
-use std::sync::atomic::AtomicU64;
-use std::sync::{mpsc, Arc};
+use std::sync::mpsc;
 
 pub struct StorageIndexService<S> {
     manager: ChunkManager<S>,

@@ -1,15 +1,12 @@
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
-use crate::index::ss_table::{BlockMetas, SsTable};
-use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
+use crate::index::ss_table::SsTable;
+use crate::index::{IteratorIO, MergeIO};
 use crate::storage::fs::FileSystemStorage;
 use crate::storage::in_mem::InMemoryStorage;
-use crate::storage::FileId::SSTable;
 use bytes::BytesMut;
 use std::io;
-use std::path::PathBuf;
-use uuid::Uuid;
 
 mod fs;
 mod in_mem;
@@ -44,10 +41,6 @@ pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
     table.put_iter(&mut buffer, values).unwrap();
 
     table
-}
-
-pub fn fs_generate_stt(storage: FileSystemStorage) -> io::Result<SsTable<FileSystemStorage>> {
-    fs_generate_stt_with_size(storage, 4_096)
 }
 
 pub fn fs_generate_stt_with_size(
