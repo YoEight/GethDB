@@ -187,6 +187,7 @@ pub struct IndexedPosition {
     pub position: u64,
 }
 
+#[derive(Clone)]
 pub struct Rev<R> {
     inner: R,
 }

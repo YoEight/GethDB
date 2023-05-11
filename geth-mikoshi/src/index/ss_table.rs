@@ -347,7 +347,7 @@ where
                 self.block_idx = self.candidates.remove(0);
                 let block = self.table.read_block(self.block_idx)?;
 
-                self.block = Some(block.scan(self.key, self.range.clone()));
+                self.block = Some(block.scan_forward(self.key, self.range.clone()));
 
                 continue;
             }

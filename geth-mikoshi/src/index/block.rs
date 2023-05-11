@@ -1,7 +1,8 @@
-use crate::index::{in_range, range_start, Range};
+use crate::index::{in_range, range_start, range_start_decr, Range, Rev};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 
+use geth_common::Direction;
 use std::ops::RangeBounds;
 
 struct Offsets(Bytes);
@@ -94,7 +95,7 @@ impl Block {
             println!("<empty_block>");
         }
 
-        let mut temp = self.data.clone();
+        let mut temp = self.data.as_ref();
 
         for _ in 0..self.count() {
             println!(
@@ -112,8 +113,7 @@ impl Block {
         }
 
         let offset = idx * BLOCK_ENTRY_SIZE;
-        let mut temp = self.data.clone();
-        temp.advance(offset);
+        let mut temp = &self.data[offset..offset + BLOCK_ENTRY_SIZE];
 
         let entry = BlockEntry {
             key: temp.get_u64_le(),
@@ -128,11 +128,18 @@ impl Block {
         find_block_entry(&self.data, key, revision).some()
     }
 
-    pub fn scan<R>(&self, key: u64, range: R) -> Scan<R>
+    pub fn scan_forward<R>(&self, key: u64, range: R) -> Scan<R>
     where
         R: RangeBounds<u64> + Clone,
     {
-        Scan::new(key, self.data.clone(), range)
+        Scan::new(key, self.data.clone(), Direction::Forward, range)
+    }
+
+    pub fn scan_backward<R>(&self, key: u64, range: R) -> Scan<Rev<R>>
+    where
+        R: RangeBounds<u64> + Clone,
+    {
+        Scan::new(key, self.data.clone(), Direction::Backward, Rev::new(range))
     }
 
     pub fn len(&self) -> usize {
@@ -140,13 +147,13 @@ impl Block {
     }
 }
 
-fn read_block_entry(bytes: &Bytes, idx: usize) -> Option<BlockEntry> {
+fn read_block_entry(bytes: &[u8], idx: usize) -> Option<BlockEntry> {
     if bytes.remaining() < BLOCK_ENTRY_SIZE {
         return None;
     }
 
-    let mut temp = bytes.clone();
-    temp.advance(idx * BLOCK_ENTRY_SIZE);
+    let offset = idx * BLOCK_ENTRY_SIZE;
+    let mut temp = &bytes[offset..offset + BLOCK_ENTRY_SIZE];
 
     Some(BlockEntry {
         key: temp.get_u64_le(),
@@ -155,16 +162,12 @@ fn read_block_entry(bytes: &Bytes, idx: usize) -> Option<BlockEntry> {
     })
 }
 
-fn read_block_entry_mut(bytes: &mut Bytes) -> Option<BlockEntry> {
-    if bytes.remaining() < BLOCK_ENTRY_SIZE {
-        return None;
-    }
-
-    Some(BlockEntry {
+fn read_block_entry_mut(mut bytes: &[u8]) -> BlockEntry {
+    BlockEntry {
         key: bytes.get_u64_le(),
         revision: bytes.get_u64_le(),
         position: bytes.get_u64_le(),
-    })
+    }
 }
 
 fn block_entry_len(bytes: &Bytes) -> usize {
@@ -172,7 +175,7 @@ fn block_entry_len(bytes: &Bytes) -> usize {
 }
 
 enum SearchResult {
-    Found { offset: usize, entry: BlockEntry },
+    Found { index: usize, entry: BlockEntry },
     NotFound { edge: usize },
 }
 
@@ -199,7 +202,7 @@ fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
             Ordering::Greater => high = mid - 1,
             Ordering::Equal => {
                 return SearchResult::Found {
-                    offset: mid as usize,
+                    index: mid as usize,
                     entry,
                 }
             }
@@ -215,34 +218,73 @@ pub struct Scan<R> {
     buffer: Bytes,
     range: R,
     anchored: bool,
+    index: usize,
+    direction: Direction,
+    count: usize,
 }
 
 impl<R> Scan<R>
 where
     R: RangeBounds<u64>,
 {
-    fn new(key: u64, mut buffer: Bytes, range: R) -> Self {
-        let current = range_start(&range);
-        let count = buffer.len() / BLOCK_ENTRY_SIZE;
+    fn new(key: u64, buffer: Bytes, direction: Direction, range: R) -> Self {
+        let current = if let Direction::Forward = direction {
+            range_start(&range)
+        } else {
+            range_start_decr(&range)
+        };
+
+        let mut count = buffer.len() / BLOCK_ENTRY_SIZE;
 
         if count != 0 {
             let first_entry = read_block_entry(&buffer, 0).unwrap();
             let last_entry = read_block_entry(&buffer, count - 1).unwrap();
 
             if first_entry.key > key || last_entry.key < key {
-                buffer = Bytes::new();
+                count = 0;
             }
-        } else {
-            buffer = Bytes::new();
         }
 
         Self {
             key,
+            direction,
             revision: current,
             buffer,
             range,
+            index: 0,
+            count,
             anchored: false,
         }
+    }
+}
+
+impl<R> Scan<R> {
+    fn progress(&mut self) {
+        match self.direction {
+            Direction::Forward => {
+                if let Some(value) = self.index.checked_add(1) {
+                    self.index = value;
+
+                    if let Some(value) = self.revision.checked_add(1) {
+                        self.revision = value;
+                        return;
+                    }
+                }
+            }
+            Direction::Backward => {
+                if let Some(value) = self.index.checked_sub(1) {
+                    self.index = value;
+
+                    if let Some(value) = self.revision.checked_sub(1) {
+                        self.revision = value;
+                        return;
+                    }
+                }
+            }
+        }
+
+        // Means we can no longer make any progress.
+        self.index = self.count;
     }
 }
 
@@ -254,7 +296,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if !self.buffer.has_remaining() || self.buffer.len() / BLOCK_ENTRY_SIZE == 0 {
+            if self.anchored && self.index >= self.count {
                 return None;
             }
 
@@ -268,32 +310,42 @@ where
             if !self.anchored {
                 self.anchored = true;
                 match find_block_entry(&self.buffer, self.key, self.revision) {
-                    SearchResult::Found { offset, entry } => {
-                        // We move pass the entry we are about to return.
-                        self.buffer
-                            .advance(offset * BLOCK_ENTRY_SIZE + BLOCK_ENTRY_SIZE);
-                        self.revision += 1;
+                    SearchResult::Found { index, entry } => {
+                        self.index = index;
+                        self.progress();
 
                         return Some(entry);
                     }
 
                     SearchResult::NotFound { edge } => {
-                        self.buffer.advance(edge * BLOCK_ENTRY_SIZE);
+                        self.index = edge;
+
+                        if self.direction == Direction::Backward {
+                            if let Some(value) = self.index.checked_sub(1) {
+                                self.index = value;
+                            } else {
+                                self.index = self.count;
+                            }
+                        }
 
                         continue;
                     }
                 }
             }
 
-            if let Some(entry) = read_block_entry_mut(&mut self.buffer) {
-                if entry.key != self.key {
-                    self.buffer = Bytes::new();
-                    return None;
-                }
+            let offset = self.index * BLOCK_ENTRY_SIZE;
+            let temp = &self.buffer[offset..offset + BLOCK_ENTRY_SIZE];
+            let entry = read_block_entry_mut(temp);
 
-                self.revision = entry.revision + 1;
-                return Some(entry);
+            if entry.key != self.key {
+                self.index = self.count;
+                return None;
             }
+
+            self.revision = entry.revision;
+            self.progress();
+
+            return Some(entry);
         }
     }
 }
