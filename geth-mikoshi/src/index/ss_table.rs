@@ -1,5 +1,5 @@
 use crate::index::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::range_start;
+use crate::index::{range_start, range_start_decr, Rev};
 use crate::index::{IteratorIO, IteratorIOExt};
 use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -245,13 +245,32 @@ where
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan<R>(&self, key: u64, range: R) -> SsTableScan<S, R>
+    pub fn scan_forward<R>(&self, key: u64, range: R) -> SsTableScanForward<S, R>
     where
         R: RangeBounds<u64>,
     {
         let candidates = self.find_best_candidates(key, range_start(&range));
-        SsTableScan {
+        SsTableScanForward {
             range,
+            key,
+            block_idx: 0,
+            block: None,
+            table: self.clone(),
+            candidates,
+        }
+    }
+
+    pub fn scan_backward<R>(&self, key: u64, range: R) -> SsTableScanBackward<S, R>
+    where
+        R: RangeBounds<u64>,
+    {
+        let range = Rev::new(range);
+        let mut candidates = self.find_best_candidates(key, range_start_decr(&range));
+
+        candidates.reverse();
+
+        SsTableScanBackward {
+            range: range.inner,
             key,
             block_idx: 0,
             block: None,
@@ -305,7 +324,7 @@ where
     }
 }
 
-pub struct SsTableScan<S, R> {
+pub struct SsTableScanForward<S, R> {
     range: R,
     key: u64,
     block_idx: usize,
@@ -314,7 +333,7 @@ pub struct SsTableScan<S, R> {
     candidates: Vec<usize>,
 }
 
-impl<S, R> IteratorIO for SsTableScan<S, R>
+impl<S, R> IteratorIO for SsTableScanForward<S, R>
 where
     R: RangeBounds<u64> + Clone,
     S: Storage,
@@ -347,6 +366,62 @@ where
             }
 
             if self.block_idx <= self.table.len() - 1 {
+                self.candidates.push(self.block_idx);
+                continue;
+            }
+
+            return Ok(None);
+        }
+    }
+}
+
+pub struct SsTableScanBackward<S, R> {
+    range: R,
+    key: u64,
+    block_idx: usize,
+    block: Option<Scan<Rev<R>>>,
+    table: SsTable<S>,
+    candidates: Vec<usize>,
+}
+
+impl<S, R> IteratorIO for SsTableScanBackward<S, R>
+where
+    R: RangeBounds<u64> + Clone,
+    S: Storage,
+{
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        loop {
+            if self.block_idx >= self.table.len() {
+                return Ok(None);
+            }
+
+            if let Some(mut block) = self.block.take() {
+                if let Some(entry) = block.next() {
+                    self.block = Some(block);
+                    return Ok(Some(entry));
+                }
+
+                if let Some(value) = self.block_idx.checked_sub(1) {
+                    self.block_idx = value;
+                } else {
+                    self.block_idx = self.table.len();
+                }
+
+                continue;
+            }
+
+            if !self.candidates.is_empty() {
+                self.block_idx = self.candidates.remove(0);
+                let block = self.table.read_block(self.block_idx)?;
+
+                self.block = Some(block.scan_backward(self.key, self.range.clone()));
+
+                continue;
+            }
+
+            if self.block_idx >= 0 {
                 self.candidates.push(self.block_idx);
                 continue;
             }

@@ -188,7 +188,7 @@ pub struct IndexedPosition {
 
 #[derive(Clone)]
 pub struct Rev<R> {
-    inner: R,
+    pub inner: R,
 }
 
 impl<R> Rev<R> {

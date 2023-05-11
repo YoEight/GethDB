@@ -278,7 +278,7 @@ where
 
         for tables in state.levels.values() {
             for table in tables {
-                scans.push(Box::new(table.scan(key, range.clone())));
+                scans.push(Box::new(table.scan_forward(key, range.clone())));
             }
         }
 
