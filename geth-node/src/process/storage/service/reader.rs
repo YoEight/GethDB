@@ -3,7 +3,7 @@ use std::io;
 use std::sync::mpsc;
 use uuid::Uuid;
 
-use geth_common::{Direction, Position, Revision};
+use geth_common::Position;
 use geth_mikoshi::{
     hashing::mikoshi_hash,
     index::{IteratorIO, Lsm},

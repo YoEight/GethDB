@@ -1,5 +1,5 @@
 use crate::index::tests::{build_mem_table, check_merge_io_result};
-use crate::index::{IteratorIOExt, MergeIO};
+use crate::index::{IteratorIOExt, Merge};
 use std::io;
 
 #[test]
@@ -14,7 +14,7 @@ fn test_merge_io_mem_table_1() -> io::Result<()> {
         mem_3.clone().into_iter().lift(),
     ];
 
-    let merge_iter = MergeIO::new(iters);
+    let merge_iter = Merge::new(iters);
 
     check_merge_io_result(merge_iter, [(1, 0, 1), (2, 0, 2), (3, 0, 3), (4, 0, 8)])?;
 
@@ -24,7 +24,7 @@ fn test_merge_io_mem_table_1() -> io::Result<()> {
         mem_2.into_iter().lift(),
     ];
 
-    let merge_iter = MergeIO::new(iters);
+    let merge_iter = Merge::new(iters);
 
     check_merge_io_result(merge_iter, [(1, 0, 1), (2, 0, 12), (3, 0, 18), (4, 0, 24)])?;
 
@@ -38,7 +38,7 @@ fn test_merge_io_mem_table_2() -> io::Result<()> {
     let mem_3 = build_mem_table([(8, 0, 31), (9, 0, 32), (10, 0, 33), (11, 0, 34)]);
     let mem_4 = build_mem_table(vec![]);
 
-    let merge_iter = MergeIO::new(vec![
+    let merge_iter = Merge::new(vec![
         mem_1.clone().into_iter().lift(),
         mem_2.clone().into_iter().lift(),
         mem_3.clone().into_iter().lift(),
@@ -61,7 +61,7 @@ fn test_merge_io_mem_table_2() -> io::Result<()> {
 
     check_merge_io_result(merge_iter, result.clone())?;
 
-    let merge_iter = MergeIO::new(vec![
+    let merge_iter = Merge::new(vec![
         mem_2.clone().into_iter().lift(),
         mem_4.clone().into_iter().lift(),
         mem_3.clone().into_iter().lift(),
@@ -70,7 +70,7 @@ fn test_merge_io_mem_table_2() -> io::Result<()> {
 
     check_merge_io_result(merge_iter, result.clone())?;
 
-    let merge_iter = MergeIO::new(vec![
+    let merge_iter = Merge::new(vec![
         mem_4.clone().into_iter().lift(),
         mem_3.clone().into_iter().lift(),
         mem_2.clone().into_iter().lift(),

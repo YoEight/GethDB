@@ -1,8 +1,7 @@
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
-use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::index::{IteratorIO, MergeIO};
+use crate::index::{IteratorIO, Merge};
 use crate::storage::fs::FileSystemStorage;
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
@@ -68,25 +67,7 @@ where
     mem_table
 }
 
-pub fn check_merge_result<I, Values>(mut target: Merge<I>, expecteds: Values)
-where
-    I: Iterator<Item = BlockEntry>,
-    Values: IntoIterator<Item = (u64, u64, u64)>,
-{
-    for (key, revision, position) in expecteds {
-        let actual = target.next().unwrap();
-        assert_eq!(
-            BlockEntry {
-                key,
-                revision,
-                position,
-            },
-            actual
-        );
-    }
-}
-
-pub fn check_merge_io_result<I, Values>(mut target: MergeIO<I>, expecteds: Values) -> io::Result<()>
+pub fn check_merge_io_result<I, Values>(mut target: Merge<I>, expecteds: Values) -> io::Result<()>
 where
     I: IteratorIO<Item = BlockEntry>,
     Values: IntoIterator<Item = (u64, u64, u64)>,

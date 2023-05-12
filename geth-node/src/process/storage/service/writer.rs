@@ -1,7 +1,7 @@
 use std::io;
 use std::sync::mpsc;
 
-use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage, wal::ChunkManager};
 
 use crate::{

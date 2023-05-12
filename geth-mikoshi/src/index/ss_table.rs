@@ -1,12 +1,10 @@
 use crate::index::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
-use crate::index::{range_start, range_start_decr, Rev};
 use crate::index::{IteratorIO, IteratorIOExt};
 use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, Revision};
 use std::cmp::Ordering;
 use std::io;
-use std::ops::RangeBounds;
 use uuid::Uuid;
 
 const SSTABLE_META_ENTRY_SIZE: usize = 4 + 8 + 8;

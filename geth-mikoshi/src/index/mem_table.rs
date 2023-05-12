@@ -1,11 +1,9 @@
 use crate::index::block::BlockEntry;
 
-use crate::index::{range_start, range_start_decr, Rev};
 use bytes::{Buf, BufMut, BytesMut};
 use geth_common::{Direction, Revision};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
-use std::ops::{RangeBounds, RangeFull};
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 

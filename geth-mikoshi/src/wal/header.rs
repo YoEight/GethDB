@@ -12,11 +12,6 @@ pub struct ChunkHeader {
 }
 
 impl ChunkHeader {
-    /// Number of chunks located in the file.
-    pub fn chunk_count(&self) -> usize {
-        self.chunk_start_number + 1
-    }
-
     pub fn put(&self, buf: &mut BytesMut) {
         buf.put_u8(self.version);
         buf.put_u32_le(self.chunk_size as u32);

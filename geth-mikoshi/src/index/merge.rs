@@ -1,5 +1,7 @@
 use crate::index::block::BlockEntry;
+use crate::IteratorIO;
 use std::cmp::Ordering;
+use std::io;
 
 pub struct Merge<I> {
     pub iters: Vec<I>,
@@ -8,7 +10,7 @@ pub struct Merge<I> {
 
 impl<I> Merge<I>
 where
-    I: Iterator<Item = BlockEntry>,
+    I: IteratorIO<Item = BlockEntry>,
 {
     pub fn new(iters: Vec<I>) -> Self {
         let mut caches = Vec::with_capacity(iters.len());
@@ -47,12 +49,12 @@ where
         None
     }
 
-    fn fill_caches(&mut self) -> Option<()> {
+    fn fill_caches(&mut self) -> io::Result<bool> {
         let mut found = false;
 
         for (idx, cell) in self.caches.iter_mut().enumerate() {
             if cell.is_none() {
-                let value = self.iters[idx].next();
+                let value = self.iters[idx].next()?;
                 found |= value.is_some();
                 *cell = value;
             } else {
@@ -60,22 +62,21 @@ where
             }
         }
 
-        if found {
-            return Some(());
-        }
-
-        None
+        Ok(found)
     }
 }
 
-impl<I> Iterator for Merge<I>
+impl<I> IteratorIO for Merge<I>
 where
-    I: Iterator<Item = BlockEntry>,
+    I: IteratorIO<Item = BlockEntry>,
 {
     type Item = BlockEntry;
 
-    fn next(&mut self) -> Option<Self::Item> {
-        self.fill_caches()?;
-        self.pull_from_cache()
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        if self.fill_caches()? {
+            return Ok(self.pull_from_cache());
+        }
+
+        Ok(None)
     }
 }

@@ -1,9 +1,7 @@
-use crate::index::{in_range, range_start, range_start_decr, Range, Rev};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 
 use geth_common::{Direction, Revision};
-use std::ops::RangeBounds;
 
 pub const BLOCK_KEY_SIZE: usize = 8;
 pub const BLOCK_VERSION_SIZE: usize = 8;
@@ -224,7 +222,7 @@ impl Scan {
             Revision::Revision(r) => r,
         };
 
-        let mut len = buffer.len() / BLOCK_ENTRY_SIZE;
+        let len = buffer.len() / BLOCK_ENTRY_SIZE;
 
         if len != 0 {
             let first_entry = read_block_entry(&buffer, 0).unwrap();

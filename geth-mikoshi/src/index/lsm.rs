@@ -2,7 +2,7 @@ use crate::hashing::mikoshi_hash;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
-use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
+use crate::index::{IteratorIO, IteratorIOExt, Merge};
 use crate::storage::{FileId, Storage};
 use crate::wal::ChunkManager;
 use bytes::{Buf, BufMut, BytesMut};
@@ -10,7 +10,6 @@ use geth_common::{Direction, Revision};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::iter::once;
-use std::ops::RangeBounds;
 use std::sync::{Arc, RwLock};
 use uuid::Uuid;
 
@@ -200,7 +199,7 @@ where
                         cleanups.push(table.id);
                     }
 
-                    let values = MergeIO::new(targets).map(|e| (e.key, e.revision, e.position));
+                    let values = Merge::new(targets).map(|e| (e.key, e.revision, e.position));
 
                     new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
                     new_table.put(&mut buffer, values)?;
@@ -288,7 +287,7 @@ where
             }
         }
 
-        MergeIO::new(scans)
+        Merge::new(scans)
     }
 
     pub fn highest_revision(&self, key: u64) -> io::Result<Option<u64>> {
