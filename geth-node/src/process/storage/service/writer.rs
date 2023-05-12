@@ -72,15 +72,11 @@ where
 
         let starting_revision = current_revision.next_revision();
 
-        let (trans_pos, next_pos) =
-            self.manager
-                .append(params.stream_name, starting_revision, params.events)?;
+        let result = self
+            .manager
+            .append(params.stream_name, starting_revision, params.events)?;
 
-        Ok(AppendStreamCompleted::Success(WriteResult {
-            next_expected_version: ExpectedRevision::Revision(next_pos),
-            position: Position(trans_pos),
-            next_logical_position: next_pos,
-        }))
+        Ok(AppendStreamCompleted::Success(result))
     }
 }
 

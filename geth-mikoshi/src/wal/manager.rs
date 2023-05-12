@@ -9,7 +9,7 @@ use crate::wal::manager::prepare_logs::PrepareLogs;
 use crate::wal::record::{PrepareFlags, PrepareLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
-use geth_common::Propose;
+use geth_common::{ExpectedRevision, Position, Propose, WriteResult};
 use std::collections::BTreeMap;
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -134,7 +134,7 @@ where
         stream_name: String,
         mut revision: u64,
         events: Vec<Propose>,
-    ) -> io::Result<(u64, u64)> {
+    ) -> io::Result<WriteResult> {
         let mut state = self.state.write().unwrap();
         let batch_size = events.len();
         let correlation_id = Uuid::new_v4();
@@ -225,7 +225,11 @@ where
         state.writer = logical_position;
         flush_writer_chk(&self.storage, state.writer)?;
 
-        Ok((transaction_position, logical_position))
+        Ok(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(revision),
+            position: Position(transaction_position),
+            next_logical_position: logical_position,
+        })
     }
 
     pub fn prepare_logs(&self, log_position: u64) -> PrepareLogs<S> {
