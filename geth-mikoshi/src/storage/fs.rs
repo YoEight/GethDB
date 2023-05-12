@@ -65,6 +65,10 @@ impl FileSystemStorage {
             FileId::Checkpoint(c) => self.root.join(c.as_str()),
         }
     }
+
+    pub fn root(&self) -> &Path {
+        self.root.as_path()
+    }
 }
 
 impl Storage for FileSystemStorage {
