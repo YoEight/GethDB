@@ -37,16 +37,16 @@ where
         .into(),
     };
 
-    let (log_pos, next_log_pos) = manager.append("foobar".to_string(), 0, vec![propose.clone()])?;
+    let result = manager.append("foobar".to_string(), 0, vec![propose.clone()])?;
 
-    assert_eq!(log_pos, 0);
-    assert!(log_pos < next_log_pos);
+    assert_eq!(result.position.0, 0);
+    assert!(result.position.0 < result.next_logical_position);
 
-    let mut iter = manager.prepare_logs(log_pos);
+    let mut iter = manager.prepare_logs(result.position.0);
 
     let prepare = iter.next()?.unwrap();
 
-    assert_eq!(log_pos, prepare.logical_position);
+    assert_eq!(result.position.0, prepare.logical_position);
     assert_eq!(propose.id, prepare.event_id);
     assert_eq!(propose.r#type, prepare.event_type);
     assert_eq!(propose.data, prepare.data);
