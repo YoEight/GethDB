@@ -3,6 +3,7 @@ use crate::index::ss_table::SsTable;
 use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS};
 use crate::storage::in_mem::InMemoryStorage;
 use bytes::BytesMut;
+use geth_common::{Direction, Revision};
 use std::io;
 
 #[test]
@@ -117,7 +118,7 @@ fn test_in_mem_block_scan_skipped() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -154,7 +155,7 @@ fn test_in_mem_block_scan_skipped_backward() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -192,7 +193,7 @@ fn test_in_mem_block_scan_forward() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -235,7 +236,7 @@ fn test_in_mem_block_scan_backward() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -265,7 +266,7 @@ fn test_in_mem_block_scan_gap() -> io::Result<()> {
     table.put_iter(&mut buffer, [(2, 1, 5), (2, 2, 6)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -290,7 +291,7 @@ fn test_in_mem_block_scan_gap_backward() -> io::Result<()> {
     table.put_iter(&mut buffer, [(2, 1, 5), (2, 2, 6)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     let entry = iter.next().unwrap();
     assert_eq!(2, entry.key);
@@ -315,7 +316,7 @@ fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
     table.put_iter(&mut buffer, [(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     assert!(iter.next().is_none());
 
@@ -330,7 +331,7 @@ fn test_in_mem_block_scan_not_found_easy_1_backward() -> io::Result<()> {
     table.put_iter(&mut buffer, [(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     assert!(iter.next().is_none());
 
@@ -345,7 +346,7 @@ fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
     table.put_iter(&mut buffer, [(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     assert!(iter.next().is_none());
 
@@ -360,7 +361,7 @@ fn test_in_mem_block_scan_not_found_easy_2_backward() -> io::Result<()> {
     table.put_iter(&mut buffer, [(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     assert!(iter.next().is_none());
 
@@ -385,7 +386,7 @@ fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_forward(2, ..);
+    let mut iter = block.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     assert!(iter.next().is_none());
 
@@ -410,7 +411,7 @@ fn test_in_mem_block_scan_not_found_hard_backward() -> io::Result<()> {
     )?;
 
     let block = table.read_block(0)?;
-    let mut iter = block.scan_backward(2, ..);
+    let mut iter = block.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     assert!(iter.next().is_none());
 

@@ -118,6 +118,14 @@ impl Revision<u64> {
             Revision::Revision(point) => *point > rev,
         }
     }
+
+    pub fn raw(&self) -> u64 {
+        match self {
+            Revision::Start => 0,
+            Revision::End => u64::MAX,
+            Revision::Revision(r) => *r,
+        }
+    }
 }
 
 impl<D: Display> Display for Revision<D> {

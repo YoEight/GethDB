@@ -2,7 +2,7 @@ use crate::index::block::BlockEntry;
 
 use crate::index::{range_start, range_start_decr, Rev};
 use bytes::{Buf, BufMut, BytesMut};
-use geth_common::Direction;
+use geth_common::{Direction, Revision};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
 use std::ops::{RangeBounds, RangeFull};
@@ -40,22 +40,10 @@ impl MemTable {
         self.entries_count += 1;
     }
 
-    pub fn scan_forward<R>(&self, key: u64, range: R) -> Scan<R>
-    where
-        R: RangeBounds<u64>,
-    {
+    pub fn scan(&self, key: u64, direction: Direction, start: Revision<u64>, count: usize) -> Scan {
         let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
 
-        Scan::new(key, buffer, Direction::Forward, range)
-    }
-
-    pub fn scan_backward<R>(&self, key: u64, range: R) -> Scan<Rev<R>>
-    where
-        R: RangeBounds<u64>,
-    {
-        let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
-
-        Scan::new(key, buffer, Direction::Backward, Rev::new(range))
+        Scan::new(key, buffer, direction, start, count)
     }
 
     pub fn size(&self) -> usize {
@@ -74,89 +62,116 @@ impl IntoIterator for MemTable {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
-            inner: self.inner.into_iter(),
+            table: self,
             current: None,
         }
     }
 }
 
-pub struct Scan<R> {
+fn binary_search_index(buffer: &[u8], revision: u64) -> usize {
+    let mut low = 0i64;
+    let mut high = (buffer.len() / MEM_TABLE_ENTRY_SIZE) as i64 - 1;
+
+    while low <= high {
+        let mid = ((low + high) / 2) as usize;
+        let offset = mid * MEM_TABLE_ENTRY_SIZE;
+        let mut temp = &buffer[offset..offset + 8];
+        let value = temp.get_u64_le();
+
+        match revision.cmp(&value) {
+            Ordering::Less => high = mid as i64 - 1,
+            Ordering::Equal => return mid,
+            Ordering::Greater => low = mid as i64 + 1,
+        }
+    }
+
+    low as usize
+}
+
+pub struct Scan {
     key: u64,
-    current: usize,
-    end: usize,
+    len: usize,
+    index: usize,
     buffer: BytesMut,
-    range: R,
+    count: usize,
     direction: Direction,
 }
 
-impl<R> Scan<R>
-where
-    R: RangeBounds<u64>,
-{
-    fn new(key: u64, buffer: BytesMut, direction: Direction, range: R) -> Self {
-        let count = buffer.len() / MEM_TABLE_ENTRY_SIZE;
-        let current = if let Direction::Forward = direction {
-            range_start(&range)
-        } else {
-            let start = range_start_decr(&range);
+impl Scan {
+    fn new(
+        key: u64,
+        buffer: BytesMut,
+        direction: Direction,
+        start: Revision<u64>,
+        mut count: usize,
+    ) -> Self {
+        let len = buffer.len() / MEM_TABLE_ENTRY_SIZE;
+        let mut index = 0usize;
 
-            if start == u64::MAX {
-                (count as u64).checked_sub(1).unwrap_or(u64::MAX)
-            } else {
-                start
+        if len == 0 {
+            count = 0;
+        } else {
+            index = binary_search_index(buffer.as_ref(), start.raw());
+
+            if index >= len - 1 {
+                index = len - 1;
             }
-        };
+        }
 
         Self {
             key,
-            current: current as usize,
-            end: buffer.len() / MEM_TABLE_ENTRY_SIZE,
+            len,
+            index,
             buffer,
-            range,
+            count,
             direction,
         }
     }
 }
 
-impl<R> Iterator for Scan<R>
-where
-    R: RangeBounds<u64>,
-{
+impl Iterator for Scan {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
-        match self.direction {
-            Direction::Forward if self.current >= self.end => return None,
-            Direction::Backward if self.current == usize::MAX => return None,
-            _ => {}
-        }
-
-        let offset = self.current * MEM_TABLE_ENTRY_SIZE;
-        let mut slice = &self.buffer.as_ref()[offset..offset + MEM_TABLE_ENTRY_SIZE];
-        let revision = slice.get_u64_le();
-
-        if !self.range.contains(&revision) {
+        if self.count == 0 {
             return None;
         }
 
-        let position = slice.get_u64_le();
+        let offset = self.index * MEM_TABLE_ENTRY_SIZE;
+        let mut slice = &self.buffer.as_ref()[offset..offset + MEM_TABLE_ENTRY_SIZE];
+        let entry = BlockEntry {
+            key: self.key,
+            revision: slice.get_u64_le(),
+            position: slice.get_u64_le(),
+        };
+
+        self.count -= 1;
 
         match self.direction {
-            Direction::Forward => self.current += 1,
-            Direction::Backward => self.current = self.current.checked_sub(1).unwrap_or(usize::MAX),
+            Direction::Forward => {
+                self.index += 1;
+
+                if self.index >= self.len {
+                    self.count = 0;
+                }
+            }
+
+            Direction::Backward => {
+                if let Some(value) = self.index.checked_sub(1) {
+                    self.index = value;
+                } else {
+                    self.count = 0;
+                }
+            }
         }
 
-        Some(BlockEntry {
-            key: self.key,
-            revision,
-            position,
-        })
+        Some(entry)
     }
 }
 
 pub struct IntoIter {
-    inner: std::collections::btree_map::IntoIter<u64, BytesMut>,
-    current: Option<Scan<RangeFull>>,
+    table: MemTable,
+    current: Option<Scan>,
 }
 
 impl Iterator for IntoIter {
@@ -165,8 +180,15 @@ impl Iterator for IntoIter {
     fn next(&mut self) -> Option<Self::Item> {
         loop {
             if self.current.is_none() {
-                let (key, buffer) = self.inner.next()?;
-                self.current = Some(Scan::new(key, buffer, Direction::Forward, ..));
+                let (key, buffer) = self.table.inner.pop_first()?;
+
+                self.current = Some(Scan::new(
+                    key,
+                    buffer,
+                    Direction::Forward,
+                    Revision::Start,
+                    usize::MAX,
+                ));
             }
 
             let scan = self.current.as_mut()?;

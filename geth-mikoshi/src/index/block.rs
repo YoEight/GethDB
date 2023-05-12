@@ -2,7 +2,7 @@ use crate::index::{in_range, range_start, range_start_decr, Range, Rev};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::cmp::Ordering;
 
-use geth_common::Direction;
+use geth_common::{Direction, Revision};
 use std::ops::RangeBounds;
 
 pub const BLOCK_KEY_SIZE: usize = 8;
@@ -125,18 +125,8 @@ impl Block {
         find_block_entry(&self.data, key, revision).some()
     }
 
-    pub fn scan_forward<R>(&self, key: u64, range: R) -> Scan<R>
-    where
-        R: RangeBounds<u64> + Clone,
-    {
-        Scan::new(key, self.data.clone(), Direction::Forward, range)
-    }
-
-    pub fn scan_backward<R>(&self, key: u64, range: R) -> Scan<Rev<R>>
-    where
-        R: RangeBounds<u64> + Clone,
-    {
-        Scan::new(key, self.data.clone(), Direction::Backward, Rev::new(range))
+    pub fn scan(&self, key: u64, direction: Direction, start: Revision<u64>, count: usize) -> Scan {
+        Scan::new(key, self.data.clone(), direction, start, count)
     }
 
     pub fn len(&self) -> usize {
@@ -209,99 +199,89 @@ fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
     SearchResult::NotFound { edge: low as usize }
 }
 
-pub struct Scan<R> {
+pub struct Scan {
     key: u64,
-    revision: u64,
     buffer: Bytes,
-    range: R,
     anchored: bool,
+    revision: u64,
     index: usize,
     direction: Direction,
+    len: usize,
     count: usize,
 }
 
-impl<R> Scan<R>
-where
-    R: RangeBounds<u64>,
-{
-    fn new(key: u64, buffer: Bytes, direction: Direction, range: R) -> Self {
-        let current = if let Direction::Forward = direction {
-            range_start(&range)
-        } else {
-            range_start_decr(&range)
+impl Scan {
+    fn new(
+        key: u64,
+        buffer: Bytes,
+        direction: Direction,
+        start: Revision<u64>,
+        mut count: usize,
+    ) -> Self {
+        let revision = match start {
+            Revision::Start => 0,
+            Revision::End => u64::MAX,
+            Revision::Revision(r) => r,
         };
 
-        let mut count = buffer.len() / BLOCK_ENTRY_SIZE;
+        let mut len = buffer.len() / BLOCK_ENTRY_SIZE;
 
-        if count != 0 {
+        if len != 0 {
             let first_entry = read_block_entry(&buffer, 0).unwrap();
-            let last_entry = read_block_entry(&buffer, count - 1).unwrap();
+            let last_entry = read_block_entry(&buffer, len - 1).unwrap();
 
             if first_entry.key > key || last_entry.key < key {
                 count = 0;
             }
+        } else {
+            count = 0;
         }
 
         Self {
             key,
             direction,
-            revision: current,
+            revision,
             buffer,
-            range,
-            index: 0,
             count,
+            len,
+            index: 0,
             anchored: false,
         }
     }
 }
 
-impl<R> Scan<R> {
+impl Scan {
     fn progress(&mut self) {
+        self.count -= 1;
+
         match self.direction {
             Direction::Forward => {
-                if let Some(value) = self.index.checked_add(1) {
-                    self.index = value;
+                self.index += 1;
 
-                    if let Some(value) = self.revision.checked_add(1) {
-                        self.revision = value;
-                        return;
-                    }
+                if self.index >= self.len {
+                    self.count = 0;
                 }
             }
+
             Direction::Backward => {
                 if let Some(value) = self.index.checked_sub(1) {
                     self.index = value;
-
-                    if let Some(value) = self.revision.checked_sub(1) {
-                        self.revision = value;
-                        return;
-                    }
+                    return;
                 }
+
+                self.count = 0;
             }
         }
-
-        // Means we can no longer make any progress.
-        self.index = self.count;
     }
 }
 
-impl<R> Iterator for Scan<R>
-where
-    R: RangeBounds<u64> + Clone,
-{
+impl Iterator for Scan {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.anchored && self.index >= self.count {
+            if self.count == 0 {
                 return None;
-            }
-
-            if let Range::Outbound(r) = in_range(&self.range, self.revision) {
-                if r.is_gt() {
-                    self.buffer = Bytes::new();
-                    return None;
-                }
             }
 
             if !self.anchored {
@@ -321,7 +301,7 @@ where
                             if let Some(value) = self.index.checked_sub(1) {
                                 self.index = value;
                             } else {
-                                self.index = self.count;
+                                self.count = 0;
                             }
                         }
 
@@ -335,11 +315,11 @@ where
             let entry = read_block_entry_mut(temp);
 
             if entry.key != self.key {
-                self.index = self.count;
+                self.count = 0;
+
                 return None;
             }
 
-            self.revision = entry.revision;
             self.progress();
 
             return Some(entry);

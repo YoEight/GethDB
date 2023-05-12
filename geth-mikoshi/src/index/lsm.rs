@@ -6,6 +6,7 @@ use crate::index::{IteratorIO, IteratorIOExt, MergeIO};
 use crate::storage::{FileId, Storage};
 use crate::wal::ChunkManager;
 use bytes::{Buf, BufMut, BytesMut};
+use geth_common::{Direction, Revision};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::iter::once;
@@ -261,24 +262,29 @@ where
         Ok(None)
     }
 
-    pub fn scan<R>(&self, key: u64, range: R) -> impl IteratorIO<Item = BlockEntry> + Send + Sync
-    where
-        R: RangeBounds<u64> + Clone + Send + Sync + 'static,
-    {
+    pub fn scan(
+        &self,
+        key: u64,
+        direction: Direction,
+        start: Revision<u64>,
+        count: usize,
+    ) -> impl IteratorIO<Item = BlockEntry> + Send + Sync {
         let state = self.state.read().unwrap();
         let mut scans: Vec<Box<dyn IteratorIO<Item = BlockEntry> + Send + Sync>> = Vec::new();
 
         scans.push(Box::new(
-            state.active_table.scan_forward(key, range.clone()).lift(),
+            state.active_table.scan(key, direction, start, count).lift(),
         ));
 
         for mem_table in state.immutable_tables.iter() {
-            scans.push(Box::new(mem_table.scan_forward(key, range.clone()).lift()));
+            scans.push(Box::new(
+                mem_table.scan(key, direction, start, count).lift(),
+            ));
         }
 
         for tables in state.levels.values() {
             for table in tables {
-                scans.push(Box::new(table.scan_forward(key, range.clone())));
+                scans.push(Box::new(table.scan(key, direction, start, count)));
             }
         }
 
@@ -286,6 +292,9 @@ where
     }
 
     pub fn highest_revision(&self, key: u64) -> io::Result<Option<u64>> {
-        Ok(self.scan(key, ..).last()?.map(|e| e.revision))
+        Ok(self
+            .scan(key, Direction::Backward, Revision::End, 1)
+            .last()?
+            .map(|e| e.revision))
     }
 }

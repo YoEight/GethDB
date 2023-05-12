@@ -6,6 +6,7 @@ use crate::index::tests::{
 use crate::index::IteratorIO;
 use crate::storage::fs::FileSystemStorage;
 use bytes::BytesMut;
+use geth_common::{Direction, Revision};
 use std::io;
 use std::path::PathBuf;
 use temp_testdir::TempDir;
@@ -114,8 +115,7 @@ fn test_fs_ss_table_scan() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan_forward(2, ..);
-
+    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -159,7 +159,7 @@ fn test_fs_ss_table_scan_backward() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan_backward(2, ..);
+    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -206,7 +206,7 @@ fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
 
     assert_eq!(3, table.len());
 
-    let mut iter = table.scan_forward(2, ..);
+    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -252,7 +252,7 @@ fn test_fs_ss_table_scan_3_blocks_backward() -> io::Result<()> {
 
     assert_eq!(3, table.len());
 
-    let mut iter = table.scan_backward(2, ..);
+    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -294,7 +294,7 @@ fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan_forward(2, ..);
+    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
 
     assert!(iter.next()?.is_none());
 
@@ -321,7 +321,7 @@ fn test_fs_ss_table_scan_not_found_backward() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan_backward(2, ..);
+    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
 
     assert!(iter.next()?.is_none());
 

@@ -29,30 +29,10 @@ where
     }
 
     pub fn read(&mut self, params: ReadStream) -> io::Result<ReadStreamCompleted> {
-        match params.direction {
-            Direction::Backward => todo!(),
-            Direction::Forward => {
-                self.read_forward(params.stream_name, params.starting, params.count)
-            }
-        }
-    }
-
-    pub fn read_forward(
-        &mut self,
-        stream_name: String,
-        start: Revision<u64>,
-        count: usize,
-    ) -> io::Result<ReadStreamCompleted> {
-        let key = mikoshi_hash(&stream_name);
-        let starting_from = match start {
-            Revision::End => unreachable!(),
-            Revision::Start => 0,
-            Revision::Revision(rev) => rev,
-        };
-
+        let key = mikoshi_hash(&params.stream_name);
         let mut iter = self
             .index
-            .scan(key, starting_from..starting_from + count as u64);
+            .scan(key, params.direction, params.starting, params.count);
 
         let manager = self.manager.clone();
         let (read_stream, read_queue) = tokio::sync::mpsc::channel(500);

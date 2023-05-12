@@ -3,6 +3,7 @@ use crate::index::{range_start, range_start_decr, Rev};
 use crate::index::{IteratorIO, IteratorIOExt};
 use crate::storage::{FileId, Storage};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use geth_common::{Direction, Revision};
 use std::cmp::Ordering;
 use std::io;
 use std::ops::RangeBounds;
@@ -245,33 +246,24 @@ where
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan_forward<R>(&self, key: u64, range: R) -> SsTableScanForward<S, R>
-    where
-        R: RangeBounds<u64>,
-    {
-        let candidates = self.find_best_candidates(key, range_start(&range));
-        SsTableScanForward {
-            range,
-            key,
-            block_idx: 0,
-            block: None,
-            table: self.clone(),
-            candidates,
+    pub fn scan(
+        &self,
+        key: u64,
+        direction: Direction,
+        start: Revision<u64>,
+        count: usize,
+    ) -> SsTableScan<S> {
+        let mut candidates = self.find_best_candidates(key, start.raw());
+
+        if direction == Direction::Backward {
+            candidates.reverse();
         }
-    }
 
-    pub fn scan_backward<R>(&self, key: u64, range: R) -> SsTableScanBackward<S, R>
-    where
-        R: RangeBounds<u64>,
-    {
-        let range = Rev::new(range);
-        let mut candidates = self.find_best_candidates(key, range_start_decr(&range));
-
-        candidates.reverse();
-
-        SsTableScanBackward {
-            range: range.inner,
+        SsTableScan {
             key,
+            revision: start,
+            direction,
+            count,
             block_idx: 0,
             block: None,
             table: self.clone(),
@@ -324,109 +316,67 @@ where
     }
 }
 
-pub struct SsTableScanForward<S, R> {
-    range: R,
+pub struct SsTableScan<S> {
     key: u64,
+    revision: Revision<u64>,
+    direction: Direction,
+    count: usize,
     block_idx: usize,
-    block: Option<Scan<R>>,
+    block: Option<Scan>,
     table: SsTable<S>,
     candidates: Vec<usize>,
 }
 
-impl<S, R> IteratorIO for SsTableScanForward<S, R>
+impl<S> IteratorIO for SsTableScan<S>
 where
-    R: RangeBounds<u64> + Clone,
     S: Storage,
 {
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         loop {
-            if self.block_idx >= self.table.len() {
+            if self.count == 0 {
                 return Ok(None);
             }
 
             if let Some(mut block) = self.block.take() {
                 if let Some(entry) = block.next() {
+                    self.revision = Revision::Revision(entry.revision);
                     self.block = Some(block);
+                    self.count -= 1;
+
                     return Ok(Some(entry));
                 }
-
-                self.block_idx += 1;
-                continue;
             }
 
             if !self.candidates.is_empty() {
                 self.block_idx = self.candidates.remove(0);
                 let block = self.table.read_block(self.block_idx)?;
 
-                self.block = Some(block.scan_forward(self.key, self.range.clone()));
+                self.block = Some(block.scan(self.key, self.direction, self.revision, self.count));
 
                 continue;
             }
 
-            if self.block_idx <= self.table.len() - 1 {
-                self.candidates.push(self.block_idx);
-                continue;
-            }
+            match self.direction {
+                Direction::Forward => {
+                    self.block_idx += 1;
 
-            return Ok(None);
-        }
-    }
-}
-
-pub struct SsTableScanBackward<S, R> {
-    range: R,
-    key: u64,
-    block_idx: usize,
-    block: Option<Scan<Rev<R>>>,
-    table: SsTable<S>,
-    candidates: Vec<usize>,
-}
-
-impl<S, R> IteratorIO for SsTableScanBackward<S, R>
-where
-    R: RangeBounds<u64> + Clone,
-    S: Storage,
-{
-    type Item = BlockEntry;
-
-    fn next(&mut self) -> io::Result<Option<Self::Item>> {
-        loop {
-            if self.block_idx >= self.table.len() {
-                return Ok(None);
-            }
-
-            if let Some(mut block) = self.block.take() {
-                if let Some(entry) = block.next() {
-                    self.block = Some(block);
-                    return Ok(Some(entry));
+                    if self.block_idx >= self.table.len() {
+                        self.count = 0;
+                    }
                 }
 
-                if let Some(value) = self.block_idx.checked_sub(1) {
-                    self.block_idx = value;
-                } else {
-                    self.block_idx = self.table.len();
+                Direction::Backward => {
+                    if let Some(value) = self.block_idx.checked_sub(1) {
+                        self.block_idx = value;
+                    } else {
+                        self.count = 0;
+                    }
                 }
-
-                continue;
             }
 
-            if !self.candidates.is_empty() {
-                self.block_idx = self.candidates.remove(0);
-                let block = self.table.read_block(self.block_idx)?;
-
-                self.block = Some(block.scan_backward(self.key, self.range.clone()));
-
-                continue;
-            }
-
-            if self.block_idx >= 0 {
-                self.candidates.push(self.block_idx);
-                continue;
-            }
-
-            return Ok(None);
+            self.candidates.push(self.block_idx);
         }
     }
 }
