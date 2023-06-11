@@ -4,7 +4,10 @@ use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{self, ErrorKind};
+#[cfg(target_os = "unix")]
 use std::os::unix::fs::FileExt;
+#[cfg(target_os = "windows")]
+use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
@@ -75,7 +78,10 @@ impl Storage for FileSystemStorage {
     fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
         let file = self.load_or_create(id)?;
 
+        #[cfg(target_os = "unix")]
         file.write_all_at(&bytes, offset)?;
+        #[cfg(target_os = "windows")]
+        win_write_all(&file, &bytes, offset)?;
         file.sync_all()?;
 
         Ok(())
@@ -85,7 +91,10 @@ impl Storage for FileSystemStorage {
         let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         buffer.resize(len, 0);
+        #[cfg(target_os = "unix")]
         file.read_exact_at(&mut buffer, offset)?;
+        #[cfg(target_os = "windows")]
+        win_read_exact(&file, &mut buffer, offset)?;
 
         Ok(buffer.freeze())
     }
@@ -96,7 +105,10 @@ impl Storage for FileSystemStorage {
         let len = file.metadata()?.len() as usize;
 
         buffer.resize(len, 0);
+        #[cfg(target_os = "unix")]
         file.read_exact_at(&mut buffer, 0)?;
+        #[cfg(target_os = "windows")]
+        win_read_exact(&file, &mut buffer, 0)?;
 
         Ok(buffer.freeze())
     }
@@ -138,4 +150,33 @@ impl Storage for FileSystemStorage {
 
 fn chunk_filename_from(seq_number: usize, version: usize) -> String {
     format!("chunk-{:06}.{:06}", seq_number, version)
+}
+
+#[cfg(target_os = "windows")]
+fn win_write_all(file: &File, bytes: &Bytes, mut offset: u64) -> io::Result<()> {
+    let mut buffer = bytes.as_ref();
+
+    while !buffer.is_empty() {
+        let written = file.seek_write(buffer, offset)?;
+        buffer = &buffer[written..];
+        offset += written as u64;
+    }
+
+    Ok(())
+}
+
+#[cfg(target_os = "windows")]
+fn win_read_exact(file: &File, mut buffer: &mut [u8], mut offset: u64) -> io::Result<()> {
+    while !buffer.is_empty() {
+        let read = file.seek_read(buffer, offset)?;
+
+        if read == 0 {
+            break;
+        }
+
+        buffer = &mut buffer[read..];
+        offset += read as u64;
+    }
+
+    Ok(())
 }
