@@ -223,8 +223,10 @@ where
     S: Storage + Send + Sync + 'static,
 {
     let stream_key = mikoshi_hash(&stream_name);
-    let current_revision = index.highest_revision(stream_key)?.unwrap_or_default();
-    let result = manager.append(stream_name, current_revision + 1, proposes)?;
+    let next_revision = index
+        .highest_revision(stream_key)?
+        .map_or_else(|| 0, |x| x + 1);
+    let result = manager.append(stream_name, next_revision, proposes)?;
 
     let records = manager.prepare_logs(result.position.0).map(|record| {
         let key = mikoshi_hash(&record.event_stream_id);
