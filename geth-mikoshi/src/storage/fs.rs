@@ -4,7 +4,7 @@ use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{self, ErrorKind};
-#[cfg(target_os = "unix")]
+#[cfg(target_os = "linux")]
 use std::os::unix::fs::FileExt;
 #[cfg(target_os = "windows")]
 use std::os::windows::fs::FileExt;
@@ -78,7 +78,7 @@ impl Storage for FileSystemStorage {
     fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
         let file = self.load_or_create(id)?;
 
-        #[cfg(target_os = "unix")]
+        #[cfg(target_os = "linux")]
         file.write_all_at(&bytes, offset)?;
         #[cfg(target_os = "windows")]
         win_write_all(&file, &bytes, offset)?;
@@ -91,7 +91,7 @@ impl Storage for FileSystemStorage {
         let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         buffer.resize(len, 0);
-        #[cfg(target_os = "unix")]
+        #[cfg(target_os = "linux")]
         file.read_exact_at(&mut buffer, offset)?;
         #[cfg(target_os = "windows")]
         win_read_exact(&file, &mut buffer, offset)?;
@@ -105,7 +105,7 @@ impl Storage for FileSystemStorage {
         let len = file.metadata()?.len() as usize;
 
         buffer.resize(len, 0);
-        #[cfg(target_os = "unix")]
+        #[cfg(target_os = "linux")]
         file.read_exact_at(&mut buffer, 0)?;
         #[cfg(target_os = "windows")]
         win_read_exact(&file, &mut buffer, 0)?;
