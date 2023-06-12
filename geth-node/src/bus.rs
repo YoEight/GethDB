@@ -4,11 +4,15 @@ use tokio::sync::{
     oneshot,
 };
 
-use crate::messages::{AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted};
+use crate::messages::{
+    AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted, SubscribeTo,
+    SubscriptionConfirmed,
+};
 
 pub enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
+    Subscribe(SubscribeMsg),
 }
 
 pub struct ReadStreamMsg {
@@ -19,6 +23,11 @@ pub struct ReadStreamMsg {
 pub struct AppendStreamMsg {
     pub payload: AppendStream,
     pub mail: oneshot::Sender<AppendStreamCompleted>,
+}
+
+pub struct SubscribeMsg {
+    pub payload: SubscribeTo,
+    pub mail: oneshot::Sender<SubscriptionConfirmed>,
 }
 
 #[derive(Clone)]
@@ -53,6 +62,27 @@ impl Bus {
         if self
             .inner
             .send(Msg::AppendStream(AppendStreamMsg {
+                payload: msg,
+                mail: sender,
+            }))
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn subscribe_to(&self, msg: SubscribeTo) -> eyre::Result<SubscriptionConfirmed> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .inner
+            .send(Msg::Subscribe(SubscribeMsg {
                 payload: msg,
                 mail: sender,
             }))

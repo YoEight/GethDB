@@ -10,8 +10,8 @@ use geth_common::protocol::streams::{
 };
 
 use crate::bus::Bus;
-use crate::messages::AppendStreamCompleted;
-use crate::messages::{AppendStream, ReadStream};
+use crate::messages::{AppendStream, ReadStream, StreamTarget, SubscriptionTarget};
+use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use geth_common::{Direction, ExpectedRevision, Propose};
@@ -75,29 +75,42 @@ impl Streams for StreamsImpl {
             .count_option
             .ok_or(Status::invalid_argument("count_options was not provided"))?;
 
-        let count = match count {
-            CountOption::Count(c) => c as usize,
-            CountOption::Subscription(_) => {
-                return Err(Status::unimplemented(
-                    "Subscriptions are not implemented yet",
-                ));
+        let mut reader = match count {
+            CountOption::Count(count) => {
+                let msg = ReadStream {
+                    correlation: Uuid::new_v4(),
+                    starting: revision,
+                    count: count as usize,
+                    stream_name,
+                    direction,
+                };
+
+                tracing::info!("Managed to parse read stream successfully");
+                match self.bus.read_stream(msg).await {
+                    Ok(resp) => resp.reader,
+                    Err(e) => {
+                        tracing::error!("Error when reading from mikoshi: {}", e);
+                        return Err(Status::unavailable(e.to_string()));
+                    }
+                }
             }
-        };
 
-        let msg = ReadStream {
-            correlation: Uuid::new_v4(),
-            starting: revision,
-            count,
-            stream_name,
-            direction,
-        };
+            CountOption::Subscription(_) => {
+                let msg = SubscribeTo {
+                    correlation: Uuid::new_v4(),
+                    target: SubscriptionTarget::Stream(StreamTarget {
+                        stream_name,
+                        starting: revision,
+                    }),
+                };
 
-        tracing::info!("Managed to parse read stream successfully");
-        let mut reader = match self.bus.read_stream(msg).await {
-            Ok(resp) => resp.reader,
-            Err(e) => {
-                tracing::error!("Error when reading from mikoshi: {}", e);
-                return Err(Status::unavailable(e.to_string()));
+                match self.bus.subscribe_to(msg).await {
+                    Ok(resp) => resp.reader,
+                    Err(e) => {
+                        tracing::error!("Error when subscribing: {}", e);
+                        return Err(Status::unavailable(e.to_string()));
+                    }
+                }
             }
         };
 

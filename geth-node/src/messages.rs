@@ -31,3 +31,32 @@ pub enum AppendStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
 }
+
+#[derive(Debug)]
+pub struct SubscribeTo {
+    pub correlation: Uuid,
+    pub target: SubscriptionTarget,
+}
+
+pub struct SubscriptionConfirmed {
+    pub correlation: Uuid,
+    pub reader: MikoshiStream,
+}
+
+#[derive(Debug)]
+pub enum SubscriptionTarget {
+    Stream(StreamTarget),
+    Process(ProcessTarget),
+}
+
+#[derive(Debug)]
+pub struct StreamTarget {
+    pub stream_name: String,
+    pub starting: Revision<u64>,
+}
+
+#[derive(Debug)]
+pub struct ProcessTarget {
+    pub name: String,
+    pub source_code: String,
+}

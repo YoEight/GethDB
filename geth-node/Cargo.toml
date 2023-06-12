@@ -23,6 +23,12 @@ features = ["v4"]
 version = "0.8"
 features = ["small_rng"]
 
+[dependencies.pyro-core]
+git = "https://github.com/YoEight/pyro.git"
+
+[dependencies.pyro-runtime]
+git = "https://github.com/YoEight/pyro.git"
+
 [dependencies]
 tonic = "0.8"
 prost = "0.11"

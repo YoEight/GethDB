@@ -587,6 +587,8 @@ dependencies = [
  "prost",
  "prost-derive",
  "prost-types",
+ "pyro-core",
+ "pyro-runtime",
  "rand",
  "tokio",
  "tonic",
@@ -1191,6 +1193,25 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "379119666929a1afd7a043aa6cf96fa67a6dce9af60c88095a4686dbce4c9c88"
 dependencies = [
  "prost",
+]
+
+[[package]]
+name = "pyro-core"
+version = "0.1.0"
+source = "git+https://github.com/YoEight/pyro.git#021c21bc3c8133aec5ce30c23681f13dbf89ec0e"
+dependencies = [
+ "eyre",
+]
+
+[[package]]
+name = "pyro-runtime"
+version = "0.1.0"
+source = "git+https://github.com/YoEight/pyro.git#021c21bc3c8133aec5ce30c23681f13dbf89ec0e"
+dependencies = [
+ "eyre",
+ "futures",
+ "pyro-core",
+ "tokio",
 ]
 
 [[package]]

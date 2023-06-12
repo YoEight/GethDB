@@ -4,6 +4,7 @@ use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::ChunkManager;
 
 mod storage;
+mod subscriptions;
 
 pub fn start<S>(mut mailbox: Mailbox, manager: ChunkManager<S>, index: Lsm<S>)
 where
@@ -21,6 +22,8 @@ where
                 Msg::ReadStream(msg) => {
                     storage_client.read_stream(msg).await?;
                 }
+
+                Msg::Subscribe(_) => todo!(),
             }
         }
 
