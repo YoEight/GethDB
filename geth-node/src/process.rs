@@ -10,20 +10,23 @@ pub fn start<S>(mut mailbox: Mailbox, manager: ChunkManager<S>, index: Lsm<S>)
 where
     S: Storage + Send + Sync + 'static,
 {
-    let storage_client = storage::start(manager, index);
+    let storage = storage::start(manager, index);
+    let subscriptions = subscriptions::start();
 
     tokio::spawn(async move {
         while let Some(msg) = mailbox.next().await {
             match msg {
                 Msg::AppendStream(msg) => {
-                    storage_client.append_stream(msg).await?;
+                    storage.append_stream(msg).await?;
                 }
 
                 Msg::ReadStream(msg) => {
-                    storage_client.read_stream(msg).await?;
+                    storage.read_stream(msg).await?;
                 }
 
-                Msg::Subscribe(_) => todo!(),
+                Msg::Subscribe(msg) => {
+                    subscriptions.subscribe(msg).await?;
+                }
             }
         }
 
