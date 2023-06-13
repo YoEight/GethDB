@@ -10,12 +10,13 @@ enum Msg {
     EventCommitted(Entry),
 }
 
+#[derive(Clone)]
 pub struct SubscriptionsClient {
     inner: mpsc::UnboundedSender<Msg>,
 }
 
 impl SubscriptionsClient {
-    pub async fn subscribe(&self, msg: SubscribeMsg) -> eyre::Result<()> {
+    pub fn subscribe(&self, msg: SubscribeMsg) -> eyre::Result<()> {
         if self.inner.send(Msg::Subscribe(msg)).is_err() {
             eyre::bail!("Main bus has shutdown!");
         }
@@ -23,7 +24,7 @@ impl SubscriptionsClient {
         Ok(())
     }
 
-    pub async fn event_committed(&self, event: Entry) -> eyre::Result<()> {
+    pub fn event_committed(&self, event: Entry) -> eyre::Result<()> {
         if self.inner.send(Msg::EventCommitted(event)).is_err() {
             eyre::bail!("Main bus has shutdown!");
         }
@@ -73,6 +74,10 @@ async fn service(mut mailbox: mpsc::UnboundedReceiver<Msg>) {
             Msg::EventCommitted(entry) => {
                 if let Some(subs) = registry.get(&entry.stream_name) {
                     for sub in subs {
+                        if sub.stream != entry.stream_name {
+                            continue;
+                        }
+
                         if let Err(_) = sub.sender.send(entry.clone()).await {
                             // TODO - implement unsubscription logic here.
                         }

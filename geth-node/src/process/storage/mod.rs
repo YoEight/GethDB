@@ -8,6 +8,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, ReadStreamMsg};
 use crate::process::storage::service::{index, reader, writer};
+use crate::process::subscriptions::SubscriptionsClient;
 
 enum Msg {
     ReadStream(ReadStreamMsg),
@@ -36,12 +37,16 @@ impl StorageClient {
     }
 }
 
-pub fn start<S>(manager: ChunkManager<S>, index: Lsm<S>) -> StorageClient
+pub fn start<S>(
+    manager: ChunkManager<S>,
+    index: Lsm<S>,
+    sub_client: SubscriptionsClient,
+) -> StorageClient
 where
     S: Storage + Send + Sync + 'static,
 {
     let (sender, mailbox) = mpsc::unbounded_channel();
-    let index_queue = index::start(manager.clone(), index.clone());
+    let index_queue = index::start(manager.clone(), index.clone(), sub_client);
     let writer_queue = writer::start(manager.clone(), index.clone(), index_queue);
     let reader_queue = reader::start(manager.clone(), index.clone());
 

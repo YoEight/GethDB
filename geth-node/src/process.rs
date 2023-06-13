@@ -10,8 +10,8 @@ pub fn start<S>(mut mailbox: Mailbox, manager: ChunkManager<S>, index: Lsm<S>)
 where
     S: Storage + Send + Sync + 'static,
 {
-    let storage = storage::start(manager, index);
     let subscriptions = subscriptions::start();
+    let storage = storage::start(manager, index, subscriptions.clone());
 
     tokio::spawn(async move {
         while let Some(msg) = mailbox.next().await {
@@ -25,7 +25,10 @@ where
                 }
 
                 Msg::Subscribe(msg) => {
-                    subscriptions.subscribe(msg).await?;
+                    if subscriptions.subscribe(msg).is_err() {
+                        tracing::warn!("Subscriptions service is not longer available. quitting");
+                        break;
+                    }
                 }
             }
         }
