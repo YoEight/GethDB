@@ -1,6 +1,7 @@
 mod types;
 
 use futures_util::TryStreamExt;
+use geth_common::protocol::streams::read_req::options::SubscriptionOptions;
 use geth_common::{
     protocol::streams::{
         append_req::{self, ProposedMessage},
@@ -116,6 +117,41 @@ impl Client {
                         revision_option: Some(start.into()),
                     })),
                     count_option: Some(read_req::options::CountOption::Count(u64::MAX)),
+                    filter_option: Some(read_req::options::FilterOption::NoFilter(
+                        Default::default(),
+                    )),
+                }),
+            }))
+            .await?
+            .into_inner();
+
+        Ok(ReadStream { inner: stream })
+    }
+
+    pub async fn subscribe_to_stream(
+        &mut self,
+        stream_name: impl AsRef<str>,
+        start: Revision<u64>,
+    ) -> eyre::Result<ReadStream> {
+        let stream = self
+            .inner
+            .read(Request::new(ReadReq {
+                options: Some(read_req::Options {
+                    read_direction: Direction::Forward.into(),
+                    resolve_links: false,
+                    uuid_option: Some(read_req::options::UuidOption {
+                        content: Some(read_req::options::uuid_option::Content::Structured(
+                            Default::default(),
+                        )),
+                    }),
+                    control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
+                    stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        stream_identifier: Some(stream_name.as_ref().into()),
+                        revision_option: Some(start.into()),
+                    })),
+                    count_option: Some(read_req::options::CountOption::Subscription(
+                        SubscriptionOptions {},
+                    )),
                     filter_option: Some(read_req::options::FilterOption::NoFilter(
                         Default::default(),
                     )),
