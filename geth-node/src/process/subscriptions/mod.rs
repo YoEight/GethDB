@@ -1,3 +1,5 @@
+mod programmable;
+
 use crate::bus::SubscribeMsg;
 use crate::messages::{SubscriptionConfirmed, SubscriptionTarget};
 use geth_mikoshi::{Entry, MikoshiStream};
