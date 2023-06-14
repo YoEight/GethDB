@@ -56,7 +56,17 @@ message ReadReq {
 				event_store.client.Empty end = 3;
 			}
 		}
+
+		message Programmable {
+			string name = 1;
+			string source_code = 2;
+		}
+
 		message SubscriptionOptions {
+			oneof sub_kind {
+				Programmable programmable = 1;
+				event_store.client.Empty regular = 2;
+			}
 		}
 		message Position {
 			uint64 commit_position = 1;

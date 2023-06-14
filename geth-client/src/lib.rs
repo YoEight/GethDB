@@ -1,7 +1,9 @@
 mod types;
 
 use futures_util::TryStreamExt;
-use geth_common::protocol::streams::read_req::options::SubscriptionOptions;
+use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
+use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
+use geth_common::protocol::Empty;
 use geth_common::{
     protocol::streams::{
         append_req::{self, ProposedMessage},
@@ -150,7 +152,51 @@ impl Client {
                         revision_option: Some(start.into()),
                     })),
                     count_option: Some(read_req::options::CountOption::Subscription(
-                        SubscriptionOptions {},
+                        SubscriptionOptions {
+                            sub_kind: Some(SubKind::Regular(Empty {})),
+                        },
+                    )),
+                    filter_option: Some(read_req::options::FilterOption::NoFilter(
+                        Default::default(),
+                    )),
+                }),
+            }))
+            .await?
+            .into_inner();
+
+        Ok(ReadStream { inner: stream })
+    }
+
+    pub async fn subscribe_to_process(
+        &mut self,
+        name: impl AsRef<str>,
+        source_code: impl AsRef<str>,
+    ) -> eyre::Result<ReadStream> {
+        let stream = self
+            .inner
+            .read(Request::new(ReadReq {
+                options: Some(read_req::Options {
+                    read_direction: Direction::Forward.into(),
+                    resolve_links: false,
+                    uuid_option: Some(read_req::options::UuidOption {
+                        content: Some(read_req::options::uuid_option::Content::Structured(
+                            Default::default(),
+                        )),
+                    }),
+                    control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
+                    stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        // TODO - This property will not be used, we will improve the API later.
+                        stream_identifier: Some(name.as_ref().into()),
+                        // TODO - This property will not be used, we will improve the API later.
+                        revision_option: Some(Revision::Start.into()),
+                    })),
+                    count_option: Some(read_req::options::CountOption::Subscription(
+                        SubscriptionOptions {
+                            sub_kind: Some(SubKind::Programmable(Programmable {
+                                name: name.as_ref().to_string(),
+                                source_code: source_code.as_ref().to_string(),
+                            })),
+                        },
                     )),
                     filter_option: Some(read_req::options::FilterOption::NoFilter(
                         Default::default(),

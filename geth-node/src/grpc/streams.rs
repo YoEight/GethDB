@@ -10,10 +10,11 @@ use geth_common::protocol::streams::{
 };
 
 use crate::bus::Bus;
-use crate::messages::{AppendStream, ReadStream, StreamTarget, SubscriptionTarget};
+use crate::messages::{AppendStream, ProcessTarget, ReadStream, StreamTarget, SubscriptionTarget};
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::{Direction, ExpectedRevision, Propose};
 use std::collections::HashMap;
 use uuid::Uuid;
@@ -95,13 +96,22 @@ impl Streams for StreamsImpl {
                 }
             }
 
-            CountOption::Subscription(_) => {
-                let msg = SubscribeTo {
-                    correlation: Uuid::new_v4(),
-                    target: SubscriptionTarget::Stream(StreamTarget {
+            CountOption::Subscription(opts) => {
+                let target = match opts.sub_kind.unwrap() {
+                    SubKind::Regular(_) => SubscriptionTarget::Stream(StreamTarget {
                         stream_name,
                         starting: revision,
                     }),
+
+                    SubKind::Programmable(opts) => SubscriptionTarget::Process(ProcessTarget {
+                        name: opts.name,
+                        source_code: opts.source_code,
+                    }),
+                };
+
+                let msg = SubscribeTo {
+                    correlation: Uuid::new_v4(),
+                    target,
                 };
 
                 match self.bus.subscribe_to(msg).await {

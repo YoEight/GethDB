@@ -237,6 +237,9 @@ impl Position {
     pub fn raw(&self) -> u64 {
         self.0
     }
+    pub fn end() -> Self {
+        Self(u64::MAX)
+    }
 }
 
 impl From<Position> for protocol::streams::append_resp::Position {

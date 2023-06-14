@@ -37,10 +37,12 @@ impl SubscriptionsClient {
 
 pub fn start() -> SubscriptionsClient {
     let (sender, mailbox) = mpsc::unbounded_channel();
+    let client = SubscriptionsClient { inner: sender };
 
-    tokio::spawn(service(mailbox));
+    let local_client = client.clone();
+    tokio::spawn(service(local_client, mailbox));
 
-    SubscriptionsClient { inner: sender }
+    client
 }
 
 struct Sub {
@@ -48,7 +50,7 @@ struct Sub {
     sender: mpsc::Sender<Entry>,
 }
 
-async fn service(mut mailbox: mpsc::UnboundedReceiver<Msg>) {
+async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiver<Msg>) {
     let mut registry = HashMap::<String, Vec<Sub>>::new();
     while let Some(msg) = mailbox.recv().await {
         match msg {
@@ -68,8 +70,13 @@ async fn service(mut mailbox: mpsc::UnboundedReceiver<Msg>) {
                     });
                 }
 
-                SubscriptionTarget::Process(_) => {
-                    // TODO
+                SubscriptionTarget::Process(opts) => {
+                    let reader = programmable::spawn(client.clone(), opts.name, opts.source_code);
+
+                    let _ = msg.mail.send(SubscriptionConfirmed {
+                        correlation: Uuid::new_v4(),
+                        reader,
+                    });
                 }
             },
 
