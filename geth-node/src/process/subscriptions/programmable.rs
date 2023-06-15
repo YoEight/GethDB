@@ -107,7 +107,7 @@ fn event_record_type() -> Type {
 
     props.push(Prop {
         label: Some("payload".to_string()),
-        val: event_type(),
+        val: entry_type(),
     });
 
     Type::Record(pyro_core::ast::Record { props })
@@ -152,9 +152,12 @@ fn event_record_runtime_value(record: Record) -> eyre::Result<RuntimeValue> {
 }
 
 fn entry_type() -> Type {
-    let mut entry_type = Type::named("Entry");
-    entry_type.add_constraint(Type::show());
-    entry_type
+    Type::Name {
+        parent: vec![Type::show()],
+        name: "Entry".to_string(),
+        kind: 0,
+        generic: false,
+    }
 }
 
 fn from_json_to_pyro_runtime_value(value: Value) -> eyre::Result<RuntimeValue> {

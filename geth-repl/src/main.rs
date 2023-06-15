@@ -1,6 +1,6 @@
 use directories::UserDirs;
 use std::collections::VecDeque;
-use std::{fs::File, io, path::PathBuf};
+use std::{fs, fs::File, io, path::PathBuf};
 
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
@@ -56,6 +56,9 @@ async fn main() -> eyre::Result<()> {
                         Cmd::SubscribeToStream(opts) => {
                             subscribe_to_stream(&mut state, opts).await?
                         }
+                        Cmd::SubscribeToProcess(opts) => {
+                            subscribe_to_process(&mut state, opts).await?
+                        }
                         Cmd::Mikoshi(cmd) => match cmd {
                             MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
                         },
@@ -79,6 +82,9 @@ enum Cmd {
 
     #[structopt(name = "subscribe", about = "Subscribe to a stream")]
     SubscribeToStream(SubscribeToStream),
+
+    #[structopt(name = "subscribe-process", about = "Subscribe to a process")]
+    SubscribeToProcess(SubscribeToProcess),
 
     #[structopt(name = "mikoshi", about = "Database files management")]
     Mikoshi(MikoshiCmd),
@@ -109,6 +115,15 @@ struct AppendStream {
 struct SubscribeToStream {
     #[structopt(long, short)]
     stream_name: String,
+}
+
+#[derive(StructOpt, Debug)]
+struct SubscribeToProcess {
+    #[structopt(long, short, help = "name of the process")]
+    name: String,
+
+    #[structopt(long = "file", short = "f", help = "source code of the process")]
+    code: PathBuf,
 }
 
 #[derive(StructOpt, Debug)]
@@ -302,6 +317,32 @@ async fn subscribe_to_stream(state: &mut ReplState, opts: SubscribeToStream) -> 
     }
 
     println!("ERR: You need to be connected to a node to subscribe to a stream");
+    Ok(())
+}
+
+async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -> eyre::Result<()> {
+    if let Target::Grpc(client) = &mut state.target {
+        let source_code = fs::read_to_string(opts.code)?;
+
+        let mut stream = client.subscribe_to_process(opts.name, source_code).await?;
+
+        while let Some(record) = stream.next().await? {
+            let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+            let record = serde_json::json!({
+                "stream_name": record.stream_name,
+                "id": record.id,
+                "revision": record.revision,
+                "position": record.position.raw(),
+                "data": data,
+            });
+
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+
+        return Ok(());
+    }
+
+    println!("ERR: You need to be connected to a node to subscribe to a process");
     Ok(())
 }
 

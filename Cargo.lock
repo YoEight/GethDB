@@ -1135,7 +1135,7 @@ dependencies = [
 [[package]]
 name = "pyro-core"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#e59fbe1850308c46276fefdec84e30bfcf29355e"
+source = "git+https://github.com/YoEight/pyro.git#b122b46b9579282129a8e9f87e10547490b6a4e8"
 dependencies = [
  "eyre",
 ]
@@ -1143,7 +1143,7 @@ dependencies = [
 [[package]]
 name = "pyro-runtime"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#e59fbe1850308c46276fefdec84e30bfcf29355e"
+source = "git+https://github.com/YoEight/pyro.git#b122b46b9579282129a8e9f87e10547490b6a4e8"
 dependencies = [
  "eyre",
  "futures",
@@ -1788,11 +1788,10 @@ checksum = "49874b5167b65d7193b8aba1567f5c7d93d001cafc34600cee003eda787e483f"
 
 [[package]]
 name = "want"
-version = "0.3.0"
+version = "0.3.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1ce8a968cb1cd110d136ff8b819a556d6fb6d919363c61534f6860c7eb172ba0"
+checksum = "bfa7760aed19e106de2c7c0b581b509f2f25d3dacaf737cb82ac61bc6d760b0e"
 dependencies = [
- "log",
  "try-lock",
 ]
 
