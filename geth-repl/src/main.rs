@@ -329,6 +329,7 @@ async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -
         while let Some(record) = stream.next().await? {
             let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
             let record = serde_json::json!({
+                "type": record.r#type,
                 "stream_name": record.stream_name,
                 "id": record.id,
                 "revision": record.revision,

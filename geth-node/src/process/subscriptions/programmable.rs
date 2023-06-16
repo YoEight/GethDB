@@ -262,6 +262,7 @@ impl PyroLiteral for SubServer {
 pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> MikoshiStream {
     let (send_output, mut recv_output) = unbounded_channel();
     let local_name = name.clone();
+    let inner_name = name.clone();
     let engine = Engine::builder()
         .add_type("EventRecord", event_record_type())
         .add_type("Entry", entry_type())
@@ -280,6 +281,7 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
                 mail: mailbox,
             });
 
+            let local_name_2 = inner_name.clone();
             tokio::spawn(async move {
                 let mut confirmed = if let Ok(c) = confirmed.await {
                     c
@@ -288,11 +290,13 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
                 };
 
                 while let Some(record) = confirmed.reader.next().await? {
-                    if !input.send(event_record_runtime_value(record)?).is_err() {
+                    if input.send(event_record_runtime_value(record)?).is_err() {
+                        tracing::warn!("Programmable subscription '{}' stopped to care about incoming message", local_name_2);
                         break;
                     }
                 }
 
+                tracing::info!("Programmable subscription '{}' completed", local_name_2);
                 Ok(())
             });
 
