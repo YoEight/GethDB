@@ -71,7 +71,8 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                 }
 
                 SubscriptionTarget::Process(opts) => {
-                    let reader = programmable::spawn(client.clone(), opts.name, opts.source_code);
+                    // TODO - proper error management here
+                    let reader = programmable::spawn(client.clone(), opts.name, opts.source_code).unwrap();
 
                     let _ = msg.mail.send(SubscriptionConfirmed {
                         correlation: Uuid::new_v4(),

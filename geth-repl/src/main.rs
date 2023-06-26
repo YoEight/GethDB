@@ -17,7 +17,11 @@ use uuid::Uuid;
 async fn main() -> eyre::Result<()> {
     let user_dirs = UserDirs::new().expect("to be defined");
     let history_path = PathBuf::from(user_dirs.home_dir()).join(".geth-repl");
-    let mut inputs = glyph::file_backed_inputs(Default::default(), history_path)?;
+    let options = glyph::Options::default()
+        .header(include_str!("header.txt"))
+        .author("Yo Eight")
+        .version("master");
+    let mut inputs = glyph::file_backed_inputs(options, history_path)?;
     let storage = InMemoryStorage::new();
     let manager = ChunkManager::load(storage.clone())?;
     let index = Lsm::load(LsmSettings::default(), storage.clone())?;

@@ -583,7 +583,7 @@ dependencies = [
 [[package]]
 name = "glyph"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/glyph.git?branch=master#859b10b3053ceffe2b8053753b10bb6b0981048d"
+source = "git+https://github.com/YoEight/glyph.git?branch=master#e61ae299385b3e7b3092c719a6d561028c1a94d1"
 dependencies = [
  "bytes",
  "crossterm",
@@ -1135,7 +1135,7 @@ dependencies = [
 [[package]]
 name = "pyro-core"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#7a7df5466b3cc6cbeb3746f0ea881d9a990dee7a"
+source = "git+https://github.com/YoEight/pyro.git#f94d2a602f22d499b893f0cdb11746b9103b1aef"
 dependencies = [
  "eyre",
 ]
@@ -1143,7 +1143,7 @@ dependencies = [
 [[package]]
 name = "pyro-runtime"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#7a7df5466b3cc6cbeb3746f0ea881d9a990dee7a"
+source = "git+https://github.com/YoEight/pyro.git#f94d2a602f22d499b893f0cdb11746b9103b1aef"
 dependencies = [
  "eyre",
  "futures",

@@ -5,13 +5,14 @@ use bytes::Bytes;
 use chrono::Utc;
 use geth_common::{Position, Record, Revision};
 use geth_mikoshi::{Entry, MikoshiStream};
-use pyro_core::ast::{Prop, Type};
+use pyro_core::ast::Prop;
 use pyro_core::sym::Literal;
-use pyro_runtime::{Channel, Engine, PyroLiteral, RuntimeValue, Symbol};
+use pyro_runtime::helpers::{Declared, TypeBuilder};
+use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
 use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::Arc;
-use tokio::sync::mpsc::unbounded_channel;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::{mpsc, oneshot, Mutex};
 use uuid::Uuid;
 
@@ -27,136 +28,113 @@ impl SubServer {
     }
 }
 
-struct Blob(Arc<RuntimeValue>);
+#[derive(Clone)]
+struct ProgramOutput(UnboundedSender<RuntimeValue>);
 
-impl PyroLiteral for Blob {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroType for ProgramOutput {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.constr("Client").for_all_type().done()
+    }
+}
+
+impl PyroValue for ProgramOutput {
+    fn deserialize(_value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
-        Ok(Blob(value))
+        eyre::bail!("You can't deserialize a 'ProgramOutput' client")
     }
 
-    fn r#type() -> Type {
-        Type::generic("a")
-    }
-
-    fn value(self) -> RuntimeValue {
-        self.0.as_ref().clone()
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Channel(Channel::Client(self.0)))
     }
 }
 
-fn event_type() -> Type {
-    let mut props = Vec::new();
+// struct Blob(Arc<RuntimeValue>);
+//
+// impl PyroLiteral for Blob {
+//     fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+//     where
+//         Self: Sized,
+//     {
+//         Ok(Blob(value))
+//     }
+//
+//     fn r#type() -> Type {
+//         Type::generic("a")
+//     }
+//
+//     fn value(self) -> RuntimeValue {
+//         self.0.as_ref().clone()
+//     }
+// }
 
-    props.push(Prop {
-        label: Some("id".to_string()),
-        val: Type::string(),
-    });
+struct EventRecord(Record);
 
-    props.push(Prop {
-        label: Some("stream_name".to_string()),
-        val: Type::string(),
-    });
-
-    props.push(Prop {
-        label: Some("event_type".to_string()),
-        val: Type::string(),
-    });
-
-    props.push(Prop {
-        label: Some("event_revision".to_string()),
-        val: Type::integer(),
-    });
-
-    props.push(Prop {
-        label: Some("position".to_string()),
-        val: Type::integer(),
-    });
-
-    Type::Record(pyro_core::ast::Record { props })
+impl PyroType for EventRecord {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder
+            .rec()
+            .prop::<String>("id")
+            .prop::<String>("stream_name")
+            .prop::<String>("event_type")
+            .prop::<i64>("event_revision")
+            .prop::<i64>("position")
+            .prop::<EventEntry>("payload")
+            .done()
+    }
 }
 
-fn event_record_type() -> Type {
-    let mut props = Vec::new();
+impl PyroValue for EventRecord {
+    fn deserialize(_value: Arc<RuntimeValue>) -> eyre::Result<Self> {
+        eyre::bail!("You can't deserialize an EventRecord from the Pyro runtime")
+    }
 
-    props.push(Prop {
-        label: Some("id".to_string()),
-        val: Type::string(),
-    });
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        let record = self.0;
+        let mut props = Vec::new();
 
-    props.push(Prop {
-        label: Some("stream_name".to_string()),
-        val: Type::string(),
-    });
+        props.push(Prop {
+            label: Some("id".to_string()),
+            val: RuntimeValue::string(record.id.to_string()),
+        });
 
-    props.push(Prop {
-        label: Some("event_type".to_string()),
-        val: Type::string(),
-    });
+        props.push(Prop {
+            label: Some("stream_name".to_string()),
+            val: RuntimeValue::string(record.stream_name),
+        });
 
-    props.push(Prop {
-        label: Some("event_revision".to_string()),
-        val: Type::integer(),
-    });
+        props.push(Prop {
+            label: Some("event_type".to_string()),
+            val: RuntimeValue::string(record.r#type),
+        });
 
-    props.push(Prop {
-        label: Some("position".to_string()),
-        val: Type::integer(),
-    });
+        props.push(Prop {
+            label: Some("event_revision".to_string()),
+            val: RuntimeValue::Literal(Literal::Integer(record.revision as i64)),
+        });
 
-    props.push(Prop {
-        label: Some("payload".to_string()),
-        val: entry_type(),
-    });
+        props.push(Prop {
+            label: Some("position".to_string()),
+            val: RuntimeValue::Literal(Literal::Integer(record.position.raw() as i64)),
+        });
 
-    Type::Record(pyro_core::ast::Record { props })
+        let value = serde_json::from_slice::<Value>(record.data.as_ref())?;
+
+        props.push(Prop {
+            label: Some("payload".to_string()),
+            val: from_json_to_pyro_runtime_value(value)?,
+        });
+
+        Ok(RuntimeValue::Record(pyro_core::ast::Record { props }))
+    }
 }
 
-fn event_record_runtime_value(record: Record) -> eyre::Result<RuntimeValue> {
-    let mut props = Vec::new();
+struct EventEntry;
 
-    props.push(Prop {
-        label: Some("id".to_string()),
-        val: RuntimeValue::string(record.id.to_string()),
-    });
-
-    props.push(Prop {
-        label: Some("stream_name".to_string()),
-        val: RuntimeValue::string(record.stream_name),
-    });
-
-    props.push(Prop {
-        label: Some("event_type".to_string()),
-        val: RuntimeValue::string(record.r#type),
-    });
-
-    props.push(Prop {
-        label: Some("event_revision".to_string()),
-        val: RuntimeValue::Literal(Literal::Integer(record.revision)),
-    });
-
-    props.push(Prop {
-        label: Some("position".to_string()),
-        val: RuntimeValue::Literal(Literal::Integer(record.position.raw())),
-    });
-
-    let value = serde_json::from_slice::<Value>(record.data.as_ref())?;
-
-    props.push(Prop {
-        label: Some("payload".to_string()),
-        val: from_json_to_pyro_runtime_value(value)?,
-    });
-
-    Ok(RuntimeValue::Record(pyro_core::ast::Record { props }))
-}
-
-fn entry_type() -> Type {
-    Type::Name {
-        parent: vec![Type::show()],
-        name: "Entry".to_string(),
-        kind: 0,
-        generic: false,
+impl PyroType for EventEntry {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.create("Entry").with_constraint("Show").build()
     }
 }
 
@@ -164,7 +142,7 @@ fn from_json_to_pyro_runtime_value(value: Value) -> eyre::Result<RuntimeValue> {
     match value {
         Value::Null => eyre::bail!("NULL is not supported"),
         Value::Bool(b) => Ok(RuntimeValue::Literal(Literal::Bool(b))),
-        Value::Number(n) => match n.as_u64() {
+        Value::Number(n) => match n.as_i64() {
             None => eyre::bail!("We only support u64 so far"),
             Some(n) => Ok(RuntimeValue::Literal(Literal::Integer(n))),
         },
@@ -238,8 +216,14 @@ fn from_runtime_value_to_json(value: RuntimeValue) -> eyre::Result<Value> {
     }
 }
 
-impl PyroLiteral for SubServer {
-    fn try_from_value(value: Arc<RuntimeValue>) -> eyre::Result<Self>
+impl PyroType for SubServer {
+    fn r#type(builder: TypeBuilder) -> Declared {
+        builder.constr("Server").of::<EventRecord>()
+    }
+}
+
+impl PyroValue for SubServer {
+    fn deserialize(value: Arc<RuntimeValue>) -> eyre::Result<Self>
     where
         Self: Sized,
     {
@@ -250,24 +234,25 @@ impl PyroLiteral for SubServer {
         eyre::bail!("Expected a server")
     }
 
-    fn r#type() -> Type {
-        Type::server(event_record_type())
-    }
-
-    fn value(self) -> RuntimeValue {
-        RuntimeValue::Channel(Channel::Server(self.recv))
+    fn serialize(self) -> eyre::Result<RuntimeValue> {
+        Ok(RuntimeValue::Channel(Channel::Server(self.recv)))
     }
 }
 
-pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> MikoshiStream {
+pub fn spawn(
+    client: SubscriptionsClient,
+    name: String,
+    source_code: String,
+) -> eyre::Result<MikoshiStream> {
     let (send_output, mut recv_output) = unbounded_channel();
     let local_name = name.clone();
     let inner_name = name.clone();
     let engine = Engine::builder()
-        .add_type("EventRecord", event_record_type())
-        .add_type("Entry", entry_type())
-        .add_symbol(Symbol::client("output", Type::generic("a"), send_output))
-        .add_symbol(Symbol::func("subscribe", move |stream_name: String| {
+        .stdlib(Env::stdio())
+        .register_type::<EventEntry>("Entry")
+        .register_type::<EventRecord>("EventRecord")
+        .register_value("output", ProgramOutput(send_output))
+        .register_function("subscribe", move |stream_name: String| {
             let (input, recv) = mpsc::unbounded_channel();
             let (mailbox, confirmed) = oneshot::channel();
             let _ = client.subscribe(SubscribeMsg {
@@ -290,8 +275,11 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
                 };
 
                 while let Some(record) = confirmed.reader.next().await? {
-                    if input.send(event_record_runtime_value(record)?).is_err() {
-                        tracing::warn!("Programmable subscription '{}' stopped to care about incoming message", local_name_2);
+                    if input.send(EventRecord(record).serialize()?).is_err() {
+                        tracing::warn!(
+                            "Programmable subscription '{}' stopped to care about incoming message",
+                            local_name_2
+                        );
                         break;
                     }
                 }
@@ -301,8 +289,8 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
             });
 
             SubServer::new(recv)
-        }))
-        .build();
+        })
+        .build()?;
 
     let (send_mikoshi, recv_mikoshi) = mpsc::channel(500);
 
@@ -337,8 +325,9 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
         Ok::<_, eyre::Report>(())
     });
 
+    let process = engine.compile(source_code.as_str())?;
     tokio::spawn(async move {
-        if let Err(e) = engine.run(source_code.as_str()).await {
+        if let Err(e) = process.run().await {
             tracing::error!(
                 "Programmable subscription '{}' exited with an error: {}",
                 local_name,
@@ -347,5 +336,5 @@ pub fn spawn(client: SubscriptionsClient, name: String, source_code: String) -> 
         }
     });
 
-    MikoshiStream::new(recv_mikoshi)
+    Ok(MikoshiStream::new(recv_mikoshi))
 }
