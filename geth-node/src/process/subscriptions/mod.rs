@@ -72,12 +72,20 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
 
                 SubscriptionTarget::Process(opts) => {
                     // TODO - proper error management here
-                    let reader = programmable::spawn(client.clone(), opts.name, opts.source_code).unwrap();
+                    match programmable::spawn(client.clone(), opts.name.clone(), opts.source_code) {
+                        Ok(reader) => {
+                            let _ = msg.mail.send(SubscriptionConfirmed {
+                                correlation: Uuid::new_v4(),
+                                reader,
+                            });
+                        }
 
-                    let _ = msg.mail.send(SubscriptionConfirmed {
-                        correlation: Uuid::new_v4(),
-                        reader,
-                    });
+                        Err(e) => tracing::error!(
+                            "Error when starting programmable subscription '{}': {}",
+                            opts.name,
+                            e
+                        ),
+                    }
                 }
             },
 

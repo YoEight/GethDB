@@ -1135,7 +1135,7 @@ dependencies = [
 [[package]]
 name = "pyro-core"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#f94d2a602f22d499b893f0cdb11746b9103b1aef"
+source = "git+https://github.com/YoEight/pyro.git#d0f14cabba9b030d1dcb5213322f743058bd1ed1"
 dependencies = [
  "eyre",
 ]
@@ -1143,7 +1143,7 @@ dependencies = [
 [[package]]
 name = "pyro-runtime"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/pyro.git#f94d2a602f22d499b893f0cdb11746b9103b1aef"
+source = "git+https://github.com/YoEight/pyro.git#d0f14cabba9b030d1dcb5213322f743058bd1ed1"
 dependencies = [
  "eyre",
  "futures",

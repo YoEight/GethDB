@@ -244,11 +244,24 @@ pub fn spawn(
     name: String,
     source_code: String,
 ) -> eyre::Result<MikoshiStream> {
+    let (stdout_handle, mut stdout_recv) = unbounded_channel();
+    let env = Env { stdout_handle };
+    let prog_name = name.clone();
+    tokio::spawn(async move {
+        while let Some(value) = stdout_recv.recv().await {
+            tracing::info!(
+                target = "programmable_subscriptions",
+                name = prog_name.as_str(),
+                message = value.to_string(),
+            );
+        }
+    });
+
     let (send_output, mut recv_output) = unbounded_channel();
     let local_name = name.clone();
     let inner_name = name.clone();
-    let engine = Engine::builder()
-        .stdlib(Env::stdio())
+    let engine = Engine::with_nominal_typing()
+        .stdlib(env)
         .register_type::<EventEntry>("Entry")
         .register_type::<EventRecord>("EventRecord")
         .register_value("output", ProgramOutput(send_output))
