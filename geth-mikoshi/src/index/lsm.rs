@@ -139,7 +139,13 @@ where
             (key, r.revision, r.logical_position)
         });
 
-        self.put(records)
+        self.put(records)?;
+
+        let writer_checkpoint = manager.writer_checkpoint();
+        let mut state = self.state.write().unwrap();
+        state.logical_position = writer_checkpoint;
+
+        Ok(())
     }
 
     pub fn ss_table_count(&self) -> usize {

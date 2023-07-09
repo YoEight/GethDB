@@ -265,6 +265,11 @@ where
 
         Ok(PrepareLog::get(record_bytes))
     }
+
+    pub fn writer_checkpoint(&self) -> u64 {
+        let state = self.state.read().unwrap();
+        state.writer
+    }
 }
 
 fn flush_writer_chk<S>(storage: &S, log_pos: u64) -> io::Result<()>
