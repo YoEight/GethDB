@@ -171,7 +171,7 @@ impl Client {
         &mut self,
         name: impl AsRef<str>,
         source_code: impl AsRef<str>,
-    ) -> eyre::Result<ReadStream> {
+    ) -> tonic::Result<ReadStream> {
         let stream = self
             .inner
             .read(Request::new(ReadReq {

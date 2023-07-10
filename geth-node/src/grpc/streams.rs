@@ -10,7 +10,10 @@ use geth_common::protocol::streams::{
 };
 
 use crate::bus::Bus;
-use crate::messages::{AppendStream, ProcessTarget, ReadStream, StreamTarget, SubscriptionTarget};
+use crate::messages::{
+    AppendStream, ProcessTarget, ReadStream, StreamTarget, SubscriptionRequestOutcome,
+    SubscriptionTarget,
+};
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
@@ -115,7 +118,12 @@ impl Streams for StreamsImpl {
                 };
 
                 match self.bus.subscribe_to(msg).await {
-                    Ok(resp) => resp.reader,
+                    Ok(resp) => match resp.outcome {
+                        SubscriptionRequestOutcome::Success(reader) => reader,
+                        SubscriptionRequestOutcome::Failure(e) => {
+                            return Err(Status::aborted(e.to_string()));
+                        }
+                    },
                     Err(e) => {
                         tracing::error!("Error when subscribing: {}", e);
                         return Err(Status::unavailable(e.to_string()));

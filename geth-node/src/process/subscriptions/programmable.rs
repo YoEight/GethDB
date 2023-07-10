@@ -1,5 +1,5 @@
 use crate::bus::SubscribeMsg;
-use crate::messages::{StreamTarget, SubscribeTo, SubscriptionTarget};
+use crate::messages::{StreamTarget, SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget};
 use crate::process::subscriptions::SubscriptionsClient;
 use bytes::Bytes;
 use chrono::Utc;
@@ -272,7 +272,7 @@ pub fn spawn(
                 payload: SubscribeTo {
                     correlation: Uuid::new_v4(),
                     target: SubscriptionTarget::Stream(StreamTarget {
-                        stream_name,
+                        stream_name: stream_name.clone(),
                         starting: Revision::Start,
                     }),
                 },
@@ -281,13 +281,19 @@ pub fn spawn(
 
             let local_name_2 = inner_name.clone();
             tokio::spawn(async move {
-                let mut confirmed = if let Ok(c) = confirmed.await {
-                    c
+                let mut reader = if let Ok(c) = confirmed.await {
+                    match c.outcome {
+                        SubscriptionRequestOutcome::Success(r) => r,
+                        SubscriptionRequestOutcome::Failure(e) => {
+                            tracing::error!("Programmable subscription '{}' errored when subscribing to '{}' stream: {}", local_name_2, stream_name, e);
+                            return Err(e);
+                        }
+                    }
                 } else {
                     eyre::bail!("Subscription failed in programmable subscription");
                 };
 
-                while let Some(record) = confirmed.reader.next().await? {
+                while let Some(record) = reader.next().await? {
                     if input.send(EventRecord(record).serialize()?).is_err() {
                         tracing::warn!(
                             "Programmable subscription '{}' stopped to care about incoming message",

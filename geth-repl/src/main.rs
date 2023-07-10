@@ -328,23 +328,43 @@ async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -
     if let Target::Grpc(client) = &mut state.target {
         let source_code = fs::read_to_string(opts.code)?;
 
-        let mut stream = client.subscribe_to_process(opts.name, source_code).await?;
+        let mut stream = match client.subscribe_to_process(opts.name, source_code).await {
+            Err(e) => {
+                println!("Err: {}", e.message());
+                return Ok(());
+            }
 
-        while let Some(record) = stream.next().await? {
-            let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
-            let record = serde_json::json!({
-                "type": record.r#type,
-                "stream_name": record.stream_name,
-                "id": record.id,
-                "revision": record.revision,
-                "position": record.position.raw(),
-                "data": data,
-            });
+            Ok(stream) => stream,
+        };
 
-            println!("{}", serde_json::to_string_pretty(&record)?);
+        loop {
+            match stream.next().await {
+                Err(e) => {
+                    println!("Err: {}", e);
+                    return Ok(());
+                }
+
+                Ok(msg) => {
+                    let record = if let Some(msg) = msg {
+                        msg
+                    } else {
+                        return Ok(());
+                    };
+
+                    let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+                    let record = serde_json::json!({
+                        "type": record.r#type,
+                        "stream_name": record.stream_name,
+                        "id": record.id,
+                        "revision": record.revision,
+                        "position": record.position.raw(),
+                        "data": data,
+                    });
+
+                    println!("{}", serde_json::to_string_pretty(&record)?);
+                }
+            }
         }
-
-        return Ok(());
     }
 
     println!("ERR: You need to be connected to a node to subscribe to a process");

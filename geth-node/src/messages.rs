@@ -1,3 +1,4 @@
+use eyre::Report;
 use geth_common::{
     Direction, ExpectedRevision, Propose, Revision, WriteResult, WrongExpectedRevisionError,
 };
@@ -40,7 +41,12 @@ pub struct SubscribeTo {
 
 pub struct SubscriptionConfirmed {
     pub correlation: Uuid,
-    pub reader: MikoshiStream,
+    pub outcome: SubscriptionRequestOutcome,
+}
+
+pub enum SubscriptionRequestOutcome {
+    Success(MikoshiStream),
+    Failure(Report),
 }
 
 #[derive(Debug)]

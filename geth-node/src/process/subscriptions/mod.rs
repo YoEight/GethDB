@@ -1,7 +1,7 @@
 mod programmable;
 
 use crate::bus::SubscribeMsg;
-use crate::messages::{SubscriptionConfirmed, SubscriptionTarget};
+use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
 use geth_mikoshi::{Entry, MikoshiStream};
 use std::collections::HashMap;
 use tokio::sync::mpsc;
@@ -66,7 +66,7 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
 
                     let _ = msg.mail.send(SubscriptionConfirmed {
                         correlation: Uuid::new_v4(),
-                        reader: MikoshiStream::new(reader),
+                        outcome: SubscriptionRequestOutcome::Success(MikoshiStream::new(reader)),
                     });
                 }
 
@@ -76,15 +76,26 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                         Ok(reader) => {
                             let _ = msg.mail.send(SubscriptionConfirmed {
                                 correlation: Uuid::new_v4(),
-                                reader,
+                                outcome: SubscriptionRequestOutcome::Success(reader),
                             });
                         }
 
-                        Err(e) => tracing::error!(
-                            "Error when starting programmable subscription '{}': {}",
-                            opts.name,
-                            e
-                        ),
+                        Err(e) => {
+                            tracing::error!(
+                                "Error when starting programmable subscription '{}': {}",
+                                opts.name,
+                                e
+                            );
+
+                            let _ = msg.mail.send(SubscriptionConfirmed {
+                                correlation: Uuid::new_v4(),
+                                outcome: SubscriptionRequestOutcome::Failure(eyre::eyre!(
+                                    "Error when starting programmable subscription '{}': {}",
+                                    opts.name,
+                                    e
+                                )),
+                            });
+                        }
                     }
                 }
             },
