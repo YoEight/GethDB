@@ -30,7 +30,7 @@ git = "https://github.com/YoEight/pyro.git"
 git = "https://github.com/YoEight/pyro.git"
 
 [dependencies]
-tonic = "0.8"
+tonic = "0.9"
 prost = "0.11"
 prost-types = "0.11"
 prost-derive = "0.11"
@@ -45,4 +45,4 @@ chrono = "0.4"
 serde_json = "1"
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.9"

@@ -13,7 +13,7 @@ features = ["v4"]
 
 [dependencies]
 tokio = "1.20"
-tonic = "0.8"
+tonic = "0.9"
 prost = "0.11"
 prost-types = "0.11"
 prost-derive = "0.11"
@@ -22,4 +22,4 @@ eyre = "0.6"
 futures-util = "0.3"
 
 [build-dependencies]
-tonic-build = "0.8"
+tonic-build = "0.9"
