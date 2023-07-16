@@ -58,7 +58,7 @@ impl ChunkInfo {
             Err(_) => {
                 return Err(nom::Err::Failure(nom::error::Error::new(
                     seq_str,
-                    nom::error::ErrorKind::ParseTo,
+                    nom::error::ErrorKind::Fail,
                 )))
             }
         };
@@ -71,7 +71,7 @@ impl ChunkInfo {
             Err(_) => {
                 return Err(nom::Err::Failure(nom::error::Error::new(
                     ver_str,
-                    nom::error::ErrorKind::ParseTo,
+                    nom::error::ErrorKind::Fail,
                 )))
             }
         };
