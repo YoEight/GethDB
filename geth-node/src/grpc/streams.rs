@@ -189,7 +189,7 @@ impl Streams for StreamsImpl {
         let mut reader = request.into_inner();
         let mut events = Vec::new();
 
-        let (stream_name, expected) =
+        let (tenant_id, stream_name, expected) =
             if let Some(options) = reader.try_next().await?.and_then(parse_append_options) {
                 options
             } else {
@@ -207,6 +207,7 @@ impl Streams for StreamsImpl {
             .bus
             .append_stream(AppendStream {
                 correlation: Uuid::new_v4(),
+                tenant_id,
                 stream_name,
                 events,
                 expected,
@@ -260,13 +261,18 @@ impl Streams for StreamsImpl {
     }
 }
 
-fn parse_append_options(req: AppendReq) -> Option<(String, ExpectedRevision)> {
+fn parse_append_options(req: AppendReq) -> Option<(String, String, ExpectedRevision)> {
     if let append_req::Content::Options(options) = req.content? {
         let expected_revision = options.expected_stream_revision?.into();
         let ident = options.stream_identifier?;
         let stream_name = ident.try_into().ok()?;
+        let mut tenant_id = options.tenant_id;
 
-        return Some((stream_name, expected_revision));
+        if tenant_id.is_empty() {
+            tenant_id = "default".to_string();
+        }
+
+        return Some((tenant_id, stream_name, expected_revision));
     }
 
     None

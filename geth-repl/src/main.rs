@@ -51,7 +51,7 @@ async fn main() -> eyre::Result<()> {
                         Cmd::Exit => break,
 
                         Cmd::Connect => {
-                            let client = Client::new("http://[::1]:2113").await?;
+                            let client = Client::builder().build("http://[::1]:2113").await?;
                             state.target = Target::Grpc(client);
                         }
 

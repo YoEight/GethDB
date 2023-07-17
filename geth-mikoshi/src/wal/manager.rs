@@ -131,6 +131,7 @@ where
 
     pub fn append(
         &self,
+        tenant_id: String,
         stream_name: String,
         mut revision: u64,
         events: Vec<Propose>,
@@ -163,6 +164,7 @@ where
                 transaction_position,
                 transaction_offset: offset as u32,
                 revision,
+                tenant_id: tenant_id.clone(),
                 event_stream_id: stream_name.clone(),
                 event_id: propose.id,
                 correlation_id,

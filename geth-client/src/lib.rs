@@ -16,6 +16,7 @@ use geth_common::{
     WrongExpectedRevisionError,
 };
 use std::collections::HashMap;
+use std::sync::Arc;
 use tonic::{
     codegen::StdError,
     transport::{self, Channel, Endpoint},
@@ -23,20 +24,40 @@ use tonic::{
 };
 use uuid::Uuid;
 
-#[derive(Clone)]
-pub struct Client {
-    inner: StreamsClient<Channel>,
+#[derive(Default)]
+pub struct ClientBuilder {
+    tenant_id: Option<String>,
 }
 
-impl Client {
-    pub async fn new<D>(dest: D) -> Result<Self, transport::Error>
+impl ClientBuilder {
+    pub fn tenant_id(mut self, tenant_id: impl AsRef<str>) -> Self {
+        self.tenant_id = Some(tenant_id.as_ref().to_string());
+        self
+    }
+
+    pub async fn build<D>(self, dest: D) -> Result<Client, transport::Error>
     where
         D: TryInto<Endpoint>,
         D::Error: Into<StdError>,
     {
         let inner = StreamsClient::connect(dest).await?;
 
-        Ok(Self { inner })
+        Ok(Client {
+            tenant_id: Arc::new(self.tenant_id.unwrap_or_default()),
+            inner,
+        })
+    }
+}
+
+#[derive(Clone)]
+pub struct Client {
+    tenant_id: Arc<String>,
+    inner: StreamsClient<Channel>,
+}
+
+impl Client {
+    pub fn builder() -> ClientBuilder {
+        ClientBuilder::default()
     }
 
     pub async fn append_stream(
@@ -49,6 +70,7 @@ impl Client {
 
         msgs.push(AppendReq {
             content: Some(append_req::Content::Options(append_req::Options {
+                tenant_id: self.tenant_id.to_string(),
                 stream_identifier: Some(stream_name.as_ref().into()),
                 expected_stream_revision: Some(expected.into()),
             })),
@@ -115,6 +137,7 @@ impl Client {
                     }),
                     control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
                     stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        tenant_id: self.tenant_id.to_string(),
                         stream_identifier: Some(stream_name.as_ref().into()),
                         revision_option: Some(start.into()),
                     })),
@@ -148,6 +171,7 @@ impl Client {
                     }),
                     control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
                     stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        tenant_id: self.tenant_id.to_string(),
                         stream_identifier: Some(stream_name.as_ref().into()),
                         revision_option: Some(start.into()),
                     })),
@@ -185,6 +209,7 @@ impl Client {
                     }),
                     control_option: Some(read_req::options::ControlOption { compatibility: 1 }),
                     stream_option: Some(read_req::options::StreamOption::Stream(StreamOptions {
+                        tenant_id: self.tenant_id.to_string(),
                         // TODO - This property will not be used, we will improve the API later.
                         stream_identifier: Some(name.as_ref().into()),
                         // TODO - This property will not be used, we will improve the API later.

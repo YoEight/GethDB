@@ -21,6 +21,7 @@ pub struct PrepareLog {
     pub transaction_position: u64,
     pub transaction_offset: u32,
     pub revision: u64,
+    pub tenant_id: String,
     pub event_stream_id: String,
     pub event_id: Uuid,
     pub correlation_id: Uuid,
@@ -41,6 +42,8 @@ impl PrepareLog {
             + 8 // transaction position
             + 4 // transaction offset
             + 8 // expected version 
+            + variable_string_length_bytes_size(self.tenant_id.len())
+            + self.tenant_id.len()
             + variable_string_length_bytes_size(self.event_stream_id.len())
             + self.event_stream_id.len()
             + 16 // event id
@@ -61,6 +64,7 @@ impl PrepareLog {
         let transaction_position = src.get_u64_le();
         let transaction_offset = src.get_u32_le();
         let expected_version = src.get_u64_le();
+        let tenant_id = get_string(&mut src);
         let event_stream_id = get_string(&mut src);
         let event_id = Uuid::from_u128(src.get_u128_le());
         let correlation_id = Uuid::from_u128(src.get_u128_le());
@@ -77,6 +81,7 @@ impl PrepareLog {
             transaction_offset,
             transaction_position,
             revision: expected_version,
+            tenant_id,
             event_stream_id,
             event_id,
             correlation_id,
@@ -93,6 +98,7 @@ impl PrepareLog {
         buffer.put_u64_le(self.transaction_position);
         buffer.put_u32_le(self.transaction_offset);
         buffer.put_u64_le(self.revision);
+        put_string(&self.tenant_id, buffer);
         put_string(&self.event_stream_id, buffer);
         buffer.put_u128_le(self.event_id.as_u128());
         buffer.put_u128_le(self.correlation_id.as_u128());

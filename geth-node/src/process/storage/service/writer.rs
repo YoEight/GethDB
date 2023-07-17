@@ -72,9 +72,12 @@ where
 
         let starting_revision = current_revision.next_revision();
 
-        let result = self
-            .manager
-            .append(params.stream_name, starting_revision, params.events)?;
+        let result = self.manager.append(
+            params.tenant_id,
+            params.stream_name,
+            starting_revision,
+            params.events,
+        )?;
 
         Ok(AppendStreamCompleted::Success(result))
     }

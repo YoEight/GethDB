@@ -22,6 +22,7 @@ pub struct ReadStreamCompleted {
 #[derive(Debug)]
 pub struct AppendStream {
     pub correlation: Uuid,
+    pub tenant_id: String,
     pub stream_name: String,
     pub events: Vec<Propose>,
     pub expected: ExpectedRevision,
