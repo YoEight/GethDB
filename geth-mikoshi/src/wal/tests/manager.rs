@@ -37,7 +37,12 @@ where
         .into(),
     };
 
-    let result = manager.append("foobar".to_string(), 0, vec![propose.clone()])?;
+    let result = manager.append(
+        "".to_string(),
+        "foobar".to_string(),
+        0,
+        vec![propose.clone()],
+    )?;
 
     assert_eq!(result.position.0, 0);
     assert!(result.position.0 < result.next_logical_position);

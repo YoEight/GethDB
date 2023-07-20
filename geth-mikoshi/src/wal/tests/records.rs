@@ -12,6 +12,7 @@ fn test_prepare_log_serialization() {
         transaction_position: 34,
         transaction_offset: 50,
         revision: 42,
+        tenant_id: "toto".to_string(),
         event_stream_id: "foobar".to_string(),
         event_id: Uuid::new_v4(),
         correlation_id: Uuid::new_v4(),

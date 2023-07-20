@@ -60,6 +60,10 @@ impl Client {
         ClientBuilder::default()
     }
 
+    pub fn tenant_id(&self) -> &str {
+        self.tenant_id.as_ref()
+    }
+
     pub async fn append_stream(
         &mut self,
         stream_name: impl AsRef<str>,

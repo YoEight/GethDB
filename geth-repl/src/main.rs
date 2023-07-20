@@ -257,7 +257,7 @@ where
     let next_revision = index
         .highest_revision(stream_key)?
         .map_or_else(|| 0, |x| x + 1);
-    let result = manager.append(stream_name, next_revision, proposes)?;
+    let result = manager.append("".to_string(), stream_name, next_revision, proposes)?;
 
     let records = manager.prepare_logs(result.position.0).map(|record| {
         let key = mikoshi_hash(&record.event_stream_id);
