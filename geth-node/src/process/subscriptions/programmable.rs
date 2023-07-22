@@ -14,6 +14,7 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 struct SubServer {
@@ -239,11 +240,17 @@ impl PyroValue for SubServer {
     }
 }
 
+pub struct Programmable {
+    pub handle: JoinHandle<()>,
+    pub stream: MikoshiStream,
+}
+
 pub fn spawn(
     client: SubscriptionsClient,
+    id: Uuid,
     name: String,
     source_code: String,
-) -> eyre::Result<MikoshiStream> {
+) -> eyre::Result<Programmable> {
     let (stdout_handle, mut stdout_recv) = unbounded_channel();
     let env = Env { stdout_handle };
     let prog_name = name.clone();
@@ -272,6 +279,7 @@ pub fn spawn(
                 payload: SubscribeTo {
                     correlation: Uuid::new_v4(),
                     target: SubscriptionTarget::Stream(StreamTarget {
+                        parent: Some(id),
                         stream_name: stream_name.clone(),
                         starting: Revision::Start,
                     }),
@@ -345,7 +353,7 @@ pub fn spawn(
     });
 
     let process = engine.compile(source_code.as_str())?;
-    tokio::spawn(async move {
+    let handle = tokio::spawn(async move {
         if let Err(e) = process.run().await {
             tracing::error!(
                 "Programmable subscription '{}' exited with an error: {}",
@@ -355,5 +363,8 @@ pub fn spawn(
         }
     });
 
-    Ok(MikoshiStream::new(recv_mikoshi))
+    Ok(Programmable {
+        handle,
+        stream: MikoshiStream::new(recv_mikoshi),
+    })
 }

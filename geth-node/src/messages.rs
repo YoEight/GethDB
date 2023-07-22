@@ -57,12 +57,14 @@ pub enum SubscriptionTarget {
 
 #[derive(Debug)]
 pub struct StreamTarget {
+    pub parent: Option<Uuid>,
     pub stream_name: String,
     pub starting: Revision<u64>,
 }
 
 #[derive(Debug)]
 pub struct ProcessTarget {
+    pub id: Uuid,
     pub name: String,
     pub source_code: String,
 }

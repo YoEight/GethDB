@@ -102,11 +102,13 @@ impl Streams for StreamsImpl {
             CountOption::Subscription(opts) => {
                 let target = match opts.sub_kind.unwrap() {
                     SubKind::Regular(_) => SubscriptionTarget::Stream(StreamTarget {
+                        parent: None,
                         stream_name,
                         starting: revision,
                     }),
 
                     SubKind::Programmable(opts) => SubscriptionTarget::Process(ProcessTarget {
+                        id: Uuid::new_v4(),
                         name: opts.name,
                         source_code: opts.source_code,
                     }),
