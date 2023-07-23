@@ -290,6 +290,7 @@ impl Streams for StreamsImpl {
                     Ok(Response::new(ProgStatsResp {
                         id: Some(id.into()),
                         name: stats.name,
+                        source_code: stats.source_code,
                         pushed_events: stats.pushed_events as u64,
                         started: Some(started),
                         subscriptions: stats.subscriptions,

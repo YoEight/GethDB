@@ -109,14 +109,18 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                         client.clone(),
                         opts.id,
                         opts.name.clone(),
-                        opts.source_code,
+                        opts.source_code.clone(),
                     ) {
                         Ok(prog) => {
                             programmables.insert(
                                 opts.id,
                                 ProgrammableProcess {
                                     id: opts.id,
-                                    stats: ProgrammableStats::new(opts.id, opts.name.clone()),
+                                    stats: ProgrammableStats::new(
+                                        opts.id,
+                                        opts.name.clone(),
+                                        opts.source_code,
+                                    ),
                                     handle: prog.handle,
                                 },
                             );

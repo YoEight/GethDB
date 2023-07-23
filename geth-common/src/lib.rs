@@ -487,16 +487,18 @@ pub struct WriteResult {
 pub struct ProgrammableStats {
     pub id: Uuid,
     pub name: String,
+    pub source_code: String,
     pub subscriptions: Vec<String>,
     pub pushed_events: usize,
     pub started: DateTime<Utc>,
 }
 
 impl ProgrammableStats {
-    pub fn new(id: Uuid, name: String) -> Self {
+    pub fn new(id: Uuid, name: String, source_code: String) -> Self {
         Self {
             id,
             name,
+            source_code,
             subscriptions: vec![],
             pushed_events: 0,
             started: Utc::now(),

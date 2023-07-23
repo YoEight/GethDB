@@ -327,7 +327,8 @@ message ProgStatsReq {
 message ProgStatsResp {
 	event_store.client.UUID id = 1;
 	string name = 2;
-	uint64 pushed_events = 3;
-	google.protobuf.Timestamp started = 4;
-	repeated string subscriptions = 5;
+	string source_code = 3;
+	uint64 pushed_events = 4;
+	google.protobuf.Timestamp started = 5;
+	repeated string subscriptions = 6;
 }
