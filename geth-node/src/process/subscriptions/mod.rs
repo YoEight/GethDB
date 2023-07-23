@@ -1,41 +1,24 @@
 mod programmable;
 
-use crate::bus::SubscribeMsg;
+use crate::bus::{GetProgrammableSubscriptionStatsMsg, SubscribeMsg};
 use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
-use chrono::{DateTime, Utc};
+use geth_common::ProgrammableStats;
 use geth_mikoshi::{Entry, MikoshiStream};
 use std::collections::HashMap;
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 enum Msg {
     Subscribe(SubscribeMsg),
     EventCommitted(Entry),
+    GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgrammableStats>>),
 }
 
 struct ProgrammableProcess {
     id: Uuid,
     stats: ProgrammableStats,
     handle: JoinHandle<()>,
-}
-
-struct ProgrammableStats {
-    id: Uuid,
-    subscriptions: Vec<String>,
-    pushed_events: usize,
-    started: DateTime<Utc>,
-}
-
-impl ProgrammableStats {
-    pub fn new(id: Uuid) -> Self {
-        Self {
-            id,
-            subscriptions: vec![],
-            pushed_events: 0,
-            started: Utc::now(),
-        }
-    }
 }
 
 #[derive(Clone)]
@@ -46,7 +29,7 @@ pub struct SubscriptionsClient {
 impl SubscriptionsClient {
     pub fn subscribe(&self, msg: SubscribeMsg) -> eyre::Result<()> {
         if self.inner.send(Msg::Subscribe(msg)).is_err() {
-            eyre::bail!("Main bus has shutdown!");
+            eyre::bail!("Subscription service process has shutdown!");
         }
 
         Ok(())
@@ -54,7 +37,22 @@ impl SubscriptionsClient {
 
     pub fn event_committed(&self, event: Entry) -> eyre::Result<()> {
         if self.inner.send(Msg::EventCommitted(event)).is_err() {
-            eyre::bail!("Main bus has shutdown!");
+            eyre::bail!("Subscription service process has shutdown!");
+        }
+
+        Ok(())
+    }
+
+    pub async fn get_programmable_subscription_stats(
+        &self,
+        msg: GetProgrammableSubscriptionStatsMsg,
+    ) -> eyre::Result<()> {
+        if self
+            .inner
+            .send(Msg::GetProgrammableSubStats(msg.id, msg.mail))
+            .is_err()
+        {
+            eyre::bail!("Subscription service process has shutdown!");
         }
 
         Ok(())
@@ -118,7 +116,7 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                                 opts.id,
                                 ProgrammableProcess {
                                     id: opts.id,
-                                    stats: ProgrammableStats::new(opts.id),
+                                    stats: ProgrammableStats::new(opts.id, opts.name.clone()),
                                     handle: prog.handle,
                                 },
                             );
@@ -167,6 +165,12 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                         }
                     }
                 }
+            }
+
+            Msg::GetProgrammableSubStats(id, mailbox) => {
+                let stats = programmables.get(&id).map(|p| p.stats.clone());
+
+                let _ = mailbox.send(stats);
             }
         }
     }

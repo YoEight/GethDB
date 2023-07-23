@@ -2,6 +2,7 @@ use std::{fmt::Display, string::FromUtf8Error};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
+use chrono::{DateTime, Utc};
 use protocol::streams::append_resp;
 use thiserror::Error;
 use uuid::Uuid;
@@ -480,4 +481,25 @@ pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
     pub position: Position,
     pub next_logical_position: u64,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgrammableStats {
+    pub id: Uuid,
+    pub name: String,
+    pub subscriptions: Vec<String>,
+    pub pushed_events: usize,
+    pub started: DateTime<Utc>,
+}
+
+impl ProgrammableStats {
+    pub fn new(id: Uuid, name: String) -> Self {
+        Self {
+            id,
+            name,
+            subscriptions: vec![],
+            pushed_events: 0,
+            started: Utc::now(),
+        }
+    }
 }

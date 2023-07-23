@@ -5,8 +5,8 @@ use tonic::Streaming;
 
 use geth_common::protocol::streams::{
     append_req, append_resp, read_resp, server::Streams, AppendReq, AppendResp, BatchAppendReq,
-    BatchAppendResp, CountOption, DeleteReq, DeleteResp, ReadEvent, ReadReq, ReadResp,
-    RecordedEvent, StreamOption, Success, TombstoneReq, TombstoneResp,
+    BatchAppendResp, CountOption, DeleteReq, DeleteResp, ProgStatsReq, ProgStatsResp, ReadEvent,
+    ReadReq, ReadResp, RecordedEvent, StreamOption, Success, TombstoneReq, TombstoneResp,
 };
 
 use crate::bus::Bus;
@@ -19,6 +19,7 @@ use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::{Direction, ExpectedRevision, Propose};
+use prost_types::Timestamp;
 use std::collections::HashMap;
 use uuid::Uuid;
 
@@ -259,6 +260,48 @@ impl Streams for StreamsImpl {
         _request: Request<Streaming<BatchAppendReq>>,
     ) -> Result<Response<Self::BatchAppendStream>, Status> {
         todo!()
+    }
+
+    async fn get_programmable_subscription_stats(
+        &self,
+        request: Request<ProgStatsReq>,
+    ) -> Result<Response<ProgStatsResp>, Status> {
+        let id: Uuid = if let Some(id) = request.into_inner().id {
+            match id.try_into() {
+                Ok(id) => id,
+                Err(e) => {
+                    return Err(Status::invalid_argument(format!(
+                        "id is an invalid UUID: {}",
+                        e
+                    )))
+                }
+            }
+        } else {
+            return Err(Status::invalid_argument("id must be defined"));
+        };
+
+        match self.bus.get_programmable_subscription_stats(id).await {
+            Err(_) => Err(Status::unavailable("Server is down")),
+            Ok(stats) => {
+                if let Some(stats) = stats {
+                    let mut started = Timestamp::default();
+                    started.seconds = stats.started.timestamp();
+
+                    Ok(Response::new(ProgStatsResp {
+                        id: Some(id.into()),
+                        name: stats.name,
+                        pushed_events: stats.pushed_events as u64,
+                        started: Some(started),
+                        subscriptions: stats.subscriptions,
+                    }))
+                } else {
+                    Err(Status::not_found(format!(
+                        "Programmable subscription with id '{}' is not found",
+                        id
+                    )))
+                }
+            }
+        }
     }
 }
 

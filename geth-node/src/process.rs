@@ -30,6 +30,17 @@ where
                         break;
                     }
                 }
+
+                Msg::GetProgrammableSubscriptionStats(msg) => {
+                    if subscriptions
+                        .get_programmable_subscription_stats(msg)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!("Subscriptions service is not longer available. quitting");
+                        break;
+                    }
+                }
             }
         }
 

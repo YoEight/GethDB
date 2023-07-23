@@ -1,8 +1,10 @@
 use eyre::bail;
+use geth_common::ProgrammableStats;
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
 };
+use uuid::Uuid;
 
 use crate::messages::{
     AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted, SubscribeTo,
@@ -13,6 +15,7 @@ pub enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
     Subscribe(SubscribeMsg),
+    GetProgrammableSubscriptionStats(GetProgrammableSubscriptionStatsMsg),
 }
 
 pub struct ReadStreamMsg {
@@ -28,6 +31,11 @@ pub struct AppendStreamMsg {
 pub struct SubscribeMsg {
     pub payload: SubscribeTo,
     pub mail: oneshot::Sender<SubscriptionConfirmed>,
+}
+
+pub struct GetProgrammableSubscriptionStatsMsg {
+    pub id: Uuid,
+    pub mail: oneshot::Sender<Option<ProgrammableStats>>,
 }
 
 #[derive(Clone)]
@@ -86,6 +94,29 @@ impl Bus {
                 payload: msg,
                 mail: sender,
             }))
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn get_programmable_subscription_stats(
+        &self,
+        id: Uuid,
+    ) -> eyre::Result<Option<ProgrammableStats>> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .inner
+            .send(Msg::GetProgrammableSubscriptionStats(
+                GetProgrammableSubscriptionStatsMsg { id, mail: sender },
+            ))
             .await
             .is_err()
         {

@@ -509,6 +509,7 @@ version = "0.1.0"
 dependencies = [
  "byteorder",
  "bytes",
+ "chrono",
  "prost",
  "prost-derive",
  "prost-types",
