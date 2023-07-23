@@ -16,6 +16,7 @@ pub enum Msg {
     AppendStream(AppendStreamMsg),
     Subscribe(SubscribeMsg),
     GetProgrammableSubscriptionStats(GetProgrammableSubscriptionStatsMsg),
+    KillProgrammableSubscription(KillProgrammableSubscriptionMsg),
 }
 
 pub struct ReadStreamMsg {
@@ -36,6 +37,11 @@ pub struct SubscribeMsg {
 pub struct GetProgrammableSubscriptionStatsMsg {
     pub id: Uuid,
     pub mail: oneshot::Sender<Option<ProgrammableStats>>,
+}
+
+pub struct KillProgrammableSubscriptionMsg {
+    pub id: Uuid,
+    pub mail: oneshot::Sender<()>,
 }
 
 #[derive(Clone)]
@@ -116,6 +122,26 @@ impl Bus {
             .inner
             .send(Msg::GetProgrammableSubscriptionStats(
                 GetProgrammableSubscriptionStatsMsg { id, mail: sender },
+            ))
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn kill_programmable_subscription(&self, id: Uuid) -> eyre::Result<()> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .inner
+            .send(Msg::KillProgrammableSubscription(
+                KillProgrammableSubscriptionMsg { id, mail: sender },
             ))
             .await
             .is_err()

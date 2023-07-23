@@ -15,6 +15,7 @@ service Streams {
 	rpc Tombstone (TombstoneReq) returns (TombstoneResp);
 	rpc BatchAppend (stream BatchAppendReq) returns (stream BatchAppendResp);
 	rpc GetProgrammableSubscriptionStats(ProgStatsReq) returns (ProgStatsResp);
+	rpc KillProgrammableSubscription(KillProgReq) returns (KillProgResp);
 }
 
 message ReadReq {
@@ -331,4 +332,12 @@ message ProgStatsResp {
 	uint64 pushed_events = 4;
 	google.protobuf.Timestamp started = 5;
 	repeated string subscriptions = 6;
+}
+
+message KillProgReq {
+	event_store.client.UUID id = 1;
+}
+
+message KillProgResp {
+	event_store.client.UUID id = 1;
 }

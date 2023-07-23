@@ -1,6 +1,8 @@
 mod programmable;
 
-use crate::bus::{GetProgrammableSubscriptionStatsMsg, SubscribeMsg};
+use crate::bus::{
+    GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
+};
 use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
 use geth_common::ProgrammableStats;
 use geth_mikoshi::{Entry, MikoshiStream};
@@ -13,10 +15,10 @@ enum Msg {
     Subscribe(SubscribeMsg),
     EventCommitted(Entry),
     GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgrammableStats>>),
+    KillProgrammableSub(Uuid, oneshot::Sender<()>),
 }
 
 struct ProgrammableProcess {
-    id: Uuid,
     stats: ProgrammableStats,
     handle: JoinHandle<()>,
 }
@@ -50,6 +52,21 @@ impl SubscriptionsClient {
         if self
             .inner
             .send(Msg::GetProgrammableSubStats(msg.id, msg.mail))
+            .is_err()
+        {
+            eyre::bail!("Subscription service process has shutdown!");
+        }
+
+        Ok(())
+    }
+
+    pub async fn kill_programmable_subscription(
+        &self,
+        msg: KillProgrammableSubscriptionMsg,
+    ) -> eyre::Result<()> {
+        if self
+            .inner
+            .send(Msg::KillProgrammableSub(msg.id, msg.mail))
             .is_err()
         {
             eyre::bail!("Subscription service process has shutdown!");
@@ -115,7 +132,6 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                             programmables.insert(
                                 opts.id,
                                 ProgrammableProcess {
-                                    id: opts.id,
                                     stats: ProgrammableStats::new(
                                         opts.id,
                                         opts.name.clone(),
@@ -175,6 +191,13 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                 let stats = programmables.get(&id).map(|p| p.stats.clone());
 
                 let _ = mailbox.send(stats);
+            }
+            Msg::KillProgrammableSub(id, mailbox) => {
+                if let Some(process) = programmables.remove(&id) {
+                    process.handle.abort();
+                }
+
+                let _ = mailbox.send(());
             }
         }
     }

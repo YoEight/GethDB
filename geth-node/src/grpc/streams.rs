@@ -5,8 +5,9 @@ use tonic::Streaming;
 
 use geth_common::protocol::streams::{
     append_req, append_resp, read_resp, server::Streams, AppendReq, AppendResp, BatchAppendReq,
-    BatchAppendResp, CountOption, DeleteReq, DeleteResp, ProgStatsReq, ProgStatsResp, ReadEvent,
-    ReadReq, ReadResp, RecordedEvent, StreamOption, Success, TombstoneReq, TombstoneResp,
+    BatchAppendResp, CountOption, DeleteReq, DeleteResp, KillProgReq, KillProgResp, ProgStatsReq,
+    ProgStatsResp, ReadEvent, ReadReq, ReadResp, RecordedEvent, StreamOption, Success,
+    TombstoneReq, TombstoneResp,
 };
 
 use crate::bus::Bus;
@@ -302,6 +303,33 @@ impl Streams for StreamsImpl {
                     )))
                 }
             }
+        }
+    }
+
+    async fn kill_programmable_subscription(
+        &self,
+        request: Request<KillProgReq>,
+    ) -> Result<Response<KillProgResp>, Status> {
+        let id: Uuid = if let Some(id) = request.into_inner().id {
+            match id.try_into() {
+                Ok(id) => id,
+                Err(e) => {
+                    return Err(Status::invalid_argument(format!(
+                        "id is an invalid UUID: {}",
+                        e
+                    )))
+                }
+            }
+        } else {
+            return Err(Status::invalid_argument("id must be defined"));
+        };
+
+        if let Err(_) = self.bus.kill_programmable_subscription(id).await {
+            Err(Status::unavailable("Server is down"))
+        } else {
+            Ok(Response::new(KillProgResp {
+                id: Some(id.into()),
+            }))
         }
     }
 }
