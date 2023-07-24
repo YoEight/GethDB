@@ -1,8 +1,10 @@
 mod types;
 
+use chrono::{TimeZone, Utc};
 use futures_util::TryStreamExt;
 use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
+use geth_common::protocol::streams::ProgStatsReq;
 use geth_common::protocol::Empty;
 use geth_common::{
     protocol::streams::{
@@ -12,8 +14,8 @@ use geth_common::{
         read_req::{self, options::StreamOptions},
         read_resp, AppendReq, ReadReq, ReadResp,
     },
-    Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
-    WrongExpectedRevisionError,
+    Direction, ExpectedRevision, Position, ProgrammableStats, Propose, Record, Revision,
+    WriteResult, WrongExpectedRevisionError,
 };
 use std::collections::HashMap;
 use tonic::{
@@ -207,6 +209,32 @@ impl Client {
             .into_inner();
 
         Ok(ReadStream { inner: stream })
+    }
+
+    pub async fn get_programmable_subscription_stats(
+        &mut self,
+        id: Uuid,
+    ) -> tonic::Result<ProgrammableStats> {
+        let stats = self
+            .inner
+            .get_programmable_subscription_stats(Request::new(ProgStatsReq {
+                id: Some(id.into()),
+            }))
+            .await?
+            .into_inner();
+
+        let started = Utc
+            .timestamp_opt(stats.started.unwrap().seconds, 0)
+            .unwrap();
+
+        Ok(ProgrammableStats {
+            id: stats.id.unwrap().try_into().unwrap(),
+            name: stats.name,
+            source_code: stats.source_code,
+            subscriptions: stats.subscriptions,
+            pushed_events: stats.pushed_events as usize,
+            started,
+        })
     }
 }
 
