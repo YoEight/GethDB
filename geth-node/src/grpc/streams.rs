@@ -3,11 +3,15 @@ use tonic::Response;
 use tonic::Status;
 use tonic::Streaming;
 
-use geth_common::protocol::streams::{
-    append_req, append_resp, read_resp, server::Streams, AppendReq, AppendResp, BatchAppendReq,
-    BatchAppendResp, CountOption, DeleteReq, DeleteResp, KillProgReq, KillProgResp, ProgStatsReq,
-    ProgStatsResp, ReadEvent, ReadReq, ReadResp, RecordedEvent, StreamOption, Success,
-    TombstoneReq, TombstoneResp,
+use geth_common::protocol::{
+    streams::{
+        append_req, append_resp, list_progs_resp::ProgrammableSubscriptionSummary, read_resp,
+        server::Streams, AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, CountOption,
+        DeleteReq, DeleteResp, KillProgReq, KillProgResp, ListProgsResp, ProgStatsReq,
+        ProgStatsResp, ReadEvent, ReadReq, ReadResp, RecordedEvent, StreamOption, Success,
+        TombstoneReq, TombstoneResp,
+    },
+    Empty,
 };
 
 use crate::bus::Bus;
@@ -330,6 +334,30 @@ impl Streams for StreamsImpl {
             Ok(Response::new(KillProgResp {
                 id: Some(id.into()),
             }))
+        }
+    }
+
+    async fn list_programmable_subscriptions(
+        &self,
+        _request: Request<Empty>,
+    ) -> Result<Response<ListProgsResp>, Status> {
+        match self.bus.list_programmable_subscriptions().await {
+            Err(_) => Err(Status::unavailable("Server is down")),
+            Ok(progs) => Ok(Response::new(ListProgsResp {
+                summaries: progs
+                    .into_iter()
+                    .map(|s| {
+                        let mut started = Timestamp::default();
+                        started.seconds = s.started.timestamp();
+
+                        ProgrammableSubscriptionSummary {
+                            id: Some(s.id.into()),
+                            name: s.name.clone(),
+                            started: Some(started),
+                        }
+                    })
+                    .collect(),
+            })),
         }
     }
 }

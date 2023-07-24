@@ -1,5 +1,5 @@
 use eyre::bail;
-use geth_common::ProgrammableStats;
+use geth_common::{ProgrammableStats, ProgrammableSummary};
 use tokio::sync::{
     mpsc::{self, Receiver, Sender},
     oneshot,
@@ -17,6 +17,7 @@ pub enum Msg {
     Subscribe(SubscribeMsg),
     GetProgrammableSubscriptionStats(GetProgrammableSubscriptionStatsMsg),
     KillProgrammableSubscription(KillProgrammableSubscriptionMsg),
+    ListProgrammableSubscriptions(ListProgrammableSubscriptionsMsg),
 }
 
 pub struct ReadStreamMsg {
@@ -42,6 +43,10 @@ pub struct GetProgrammableSubscriptionStatsMsg {
 pub struct KillProgrammableSubscriptionMsg {
     pub id: Uuid,
     pub mail: oneshot::Sender<()>,
+}
+
+pub struct ListProgrammableSubscriptionsMsg {
+    pub mail: oneshot::Sender<Vec<ProgrammableSummary>>,
 }
 
 #[derive(Clone)]
@@ -142,6 +147,26 @@ impl Bus {
             .inner
             .send(Msg::KillProgrammableSubscription(
                 KillProgrammableSubscriptionMsg { id, mail: sender },
+            ))
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn list_programmable_subscriptions(&self) -> eyre::Result<Vec<ProgrammableSummary>> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .inner
+            .send(Msg::ListProgrammableSubscriptions(
+                ListProgrammableSubscriptionsMsg { mail: sender },
             ))
             .await
             .is_err()

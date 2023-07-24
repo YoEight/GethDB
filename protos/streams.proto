@@ -16,6 +16,7 @@ service Streams {
 	rpc BatchAppend (stream BatchAppendReq) returns (stream BatchAppendResp);
 	rpc GetProgrammableSubscriptionStats(ProgStatsReq) returns (ProgStatsResp);
 	rpc KillProgrammableSubscription(KillProgReq) returns (KillProgResp);
+	rpc ListProgrammableSubscriptions(event_store.client.Empty) returns (ListProgsResp);
 }
 
 message ReadReq {
@@ -340,4 +341,14 @@ message KillProgReq {
 
 message KillProgResp {
 	event_store.client.UUID id = 1;
+}
+
+message ListProgsResp {
+	repeated ProgrammableSubscriptionSummary summaries = 1;
+
+	message ProgrammableSubscriptionSummary {
+		event_store.client.UUID id = 1;
+		string name = 2;
+		google.protobuf.Timestamp started = 3;
+	}
 }

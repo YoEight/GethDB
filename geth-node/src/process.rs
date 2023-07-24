@@ -41,9 +41,21 @@ where
                         break;
                     }
                 }
+
                 Msg::KillProgrammableSubscription(msg) => {
                     if subscriptions
                         .kill_programmable_subscription(msg)
+                        .await
+                        .is_err()
+                    {
+                        tracing::warn!("Subscriptions service is not longer available. quitting");
+                        break;
+                    }
+                }
+
+                Msg::ListProgrammableSubscriptions(msg) => {
+                    if subscriptions
+                        .list_programmable_subscriptions(msg.mail)
                         .await
                         .is_err()
                     {

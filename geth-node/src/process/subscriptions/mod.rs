@@ -4,7 +4,7 @@ use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
 use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
-use geth_common::ProgrammableStats;
+use geth_common::{ProgrammableStats, ProgrammableSummary};
 use geth_mikoshi::{Entry, MikoshiStream};
 use std::collections::HashMap;
 use tokio::sync::{mpsc, oneshot};
@@ -16,6 +16,7 @@ enum Msg {
     EventCommitted(Entry),
     GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgrammableStats>>),
     KillProgrammableSub(Uuid, oneshot::Sender<()>),
+    ListProgrammableSubs(oneshot::Sender<Vec<ProgrammableSummary>>),
 }
 
 struct ProgrammableProcess {
@@ -69,6 +70,17 @@ impl SubscriptionsClient {
             .send(Msg::KillProgrammableSub(msg.id, msg.mail))
             .is_err()
         {
+            eyre::bail!("Subscription service process has shutdown!");
+        }
+
+        Ok(())
+    }
+
+    pub async fn list_programmable_subscriptions(
+        &self,
+        mailbox: oneshot::Sender<Vec<ProgrammableSummary>>,
+    ) -> eyre::Result<()> {
+        if self.inner.send(Msg::ListProgrammableSubs(mailbox)).is_err() {
             eyre::bail!("Subscription service process has shutdown!");
         }
 
@@ -198,6 +210,20 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                 }
 
                 let _ = mailbox.send(());
+            }
+
+            Msg::ListProgrammableSubs(mailbox) => {
+                let mut summaries = Vec::with_capacity(programmables.len());
+
+                for process in programmables.values() {
+                    summaries.push(ProgrammableSummary {
+                        id: process.stats.id,
+                        name: process.stats.name.clone(),
+                        started: process.stats.started,
+                    });
+                }
+
+                let _ = mailbox.send(summaries);
             }
         }
     }

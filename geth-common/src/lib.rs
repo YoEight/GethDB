@@ -505,3 +505,10 @@ impl ProgrammableStats {
         }
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct ProgrammableSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub started: DateTime<Utc>,
+}
