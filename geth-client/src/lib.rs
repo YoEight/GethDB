@@ -4,7 +4,7 @@ use chrono::{TimeZone, Utc};
 use futures_util::TryStreamExt;
 use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
-use geth_common::protocol::streams::ProgStatsReq;
+use geth_common::protocol::streams::{KillProgReq, ProgStatsReq};
 use geth_common::protocol::Empty;
 use geth_common::{
     protocol::streams::{
@@ -14,8 +14,8 @@ use geth_common::{
         read_req::{self, options::StreamOptions},
         read_resp, AppendReq, ReadReq, ReadResp,
     },
-    Direction, ExpectedRevision, Position, ProgrammableStats, Propose, Record, Revision,
-    WriteResult, WrongExpectedRevisionError,
+    Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary, Propose, Record,
+    Revision, WriteResult, WrongExpectedRevisionError,
 };
 use std::collections::HashMap;
 use tonic::{
@@ -235,6 +235,41 @@ impl Client {
             pushed_events: stats.pushed_events as usize,
             started,
         })
+    }
+
+    pub async fn kill_programmable_subscription(&mut self, id: Uuid) -> tonic::Result<()> {
+        self.inner
+            .kill_programmable_subscription(Request::new(KillProgReq {
+                id: Some(id.into()),
+            }))
+            .await?;
+
+        Ok(())
+    }
+
+    pub async fn list_programmable_subscriptions(
+        &mut self,
+    ) -> tonic::Result<Vec<ProgrammableSummary>> {
+        let summaries_grpc = self
+            .inner
+            .list_programmable_subscriptions(Request::new(Empty {}))
+            .await?
+            .into_inner()
+            .summaries;
+
+        let mut summaries = Vec::with_capacity(summaries_grpc.len());
+
+        for summary in summaries_grpc {
+            summaries.push(ProgrammableSummary {
+                id: summary.id.unwrap().try_into().unwrap(),
+                name: summary.name,
+                started: Utc
+                    .timestamp_opt(summary.started.unwrap().seconds, 0)
+                    .unwrap(),
+            });
+        }
+
+        Ok(summaries)
     }
 }
 
