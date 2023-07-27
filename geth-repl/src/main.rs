@@ -66,6 +66,15 @@ async fn main() -> eyre::Result<()> {
                         Cmd::Mikoshi(cmd) => match cmd {
                             MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
                         },
+
+                        Cmd::ListProcesses => list_programmable_subscriptions(&mut state).await?,
+
+                        Cmd::ProcessStats(opts) => {
+                            get_programmable_subscription_stats(&mut state, opts).await?
+                        }
+                        Cmd::KillProcess(opts) => {
+                            kill_programmable_subscription(&mut state, opts).await?
+                        }
                     },
                 }
             }
@@ -87,8 +96,23 @@ enum Cmd {
     #[structopt(name = "subscribe", about = "Subscribe to a stream")]
     SubscribeToStream(SubscribeToStream),
 
-    #[structopt(name = "subscribe-process", about = "Subscribe to a process")]
+    #[structopt(
+        name = "subscribe-process",
+        about = "Subscribe to a programmable subscription"
+    )]
     SubscribeToProcess(SubscribeToProcess),
+
+    #[structopt(name = "list-processes", about = "List all programmable subscriptions")]
+    ListProcesses,
+
+    #[structopt(
+        name = "process-stats",
+        about = "Get a programmable subscription stats"
+    )]
+    ProcessStats(ProcessStats),
+
+    #[structopt(name = "kill-process", about = "Kill a process")]
+    KillProcess(KillProcess),
 
     #[structopt(name = "mikoshi", about = "Database files management")]
     Mikoshi(MikoshiCmd),
@@ -140,6 +164,18 @@ enum MikoshiCmd {
 struct MikoshiRoot {
     #[structopt(long, short)]
     directory: Option<String>,
+}
+
+#[derive(StructOpt, Debug)]
+struct KillProcess {
+    #[structopt(long)]
+    id: String,
+}
+
+#[derive(StructOpt, Debug)]
+struct ProcessStats {
+    #[structopt(long)]
+    id: String,
 }
 
 enum Target {
@@ -368,6 +404,91 @@ async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -
     }
 
     println!("ERR: You need to be connected to a node to subscribe to a process");
+    Ok(())
+}
+
+async fn list_programmable_subscriptions(state: &mut ReplState) -> eyre::Result<()> {
+    if let Target::Grpc(client) = &mut state.target {
+        let summaries = client.list_programmable_subscriptions().await?;
+
+        for summary in summaries {
+            let summary = serde_json::json!({
+                "id": summary.id,
+                "name": summary.name,
+                "started": summary.started,
+            });
+
+            println!("{}", serde_json::to_string_pretty(&summary)?);
+        }
+
+        return Ok(());
+    }
+
+    println!("ERR: You need to be connected to a node to list programmable subscriptions");
+    Ok(())
+}
+
+async fn kill_programmable_subscription(
+    state: &mut ReplState,
+    opts: KillProcess,
+) -> eyre::Result<()> {
+    let id = match opts.id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return Ok(());
+        }
+    };
+
+    if let Target::Grpc(client) = &mut state.target {
+        client.kill_programmable_subscription(id).await?;
+        return Ok(());
+    }
+
+    println!("ERR: You need to be connected to a node to kill a programmable subscription");
+    Ok(())
+}
+
+async fn get_programmable_subscription_stats(
+    state: &mut ReplState,
+    opts: ProcessStats,
+) -> eyre::Result<()> {
+    let id = match opts.id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return Ok(());
+        }
+    };
+
+    if let Target::Grpc(client) = &mut state.target {
+        let stats = client.get_programmable_subscription_stats(id).await?;
+        let source_code = stats.source_code;
+
+        let stats = serde_json::json!({
+            "id": stats.id,
+            "name": stats.name,
+            "started": stats.started,
+            "subscriptions": stats.subscriptions,
+            "pushed_events": stats.pushed_events,
+        });
+
+        println!("{}", serde_json::to_string_pretty(&stats)?);
+        println!("Source code:");
+        println!("{}", source_code);
+
+        return Ok(());
+    }
+
+    println!("ERR: You need to be connected to a node to get a programmable subscription's stats");
     Ok(())
 }
 
