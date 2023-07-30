@@ -46,7 +46,26 @@ async fn main() -> eyre::Result<()> {
             }
 
             Input::Command(cmd) => match cmd {
-                Cli::Offline(_) => {}
+                Cli::Offline(cmd) => match cmd.command {
+                    OfflineCommands::Connect { host, port } => {
+                        let host = host.unwrap_or_else(|| "localhost".to_string());
+                        let port = port.unwrap_or(2_113);
+
+                        match Client::new(format!("http://{}:{}", host, port)).await {
+                            Err(e) => println!("ERR: error when connecting to {}:{}: {}", host, port, e),
+                            Ok(client) => {
+                                repl_state = NewReplState::Online(OnlineState {
+                                    host,
+                                    port,
+                                    client,
+                                });
+                            }
+                        }
+                    }
+
+                    _ => unreachable!()
+                }
+
                 Cli::Online(_) => {}
 
                 // Cmd::Exit => break,
