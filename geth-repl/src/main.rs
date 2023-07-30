@@ -7,7 +7,7 @@ use std::{fs, fs::File, io, path::PathBuf};
 
 use crate::cli::{
     AppendStream, Cli, KillProcess, Offline, OfflineCommands, Online, OnlineCommands, ProcessStats,
-    ReadStream, SubscribeToProgram, SubscribeToStream,
+    ReadStream, SubscribeCommands, SubscribeToProgram, SubscribeToStream,
 };
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
@@ -66,7 +66,56 @@ async fn main() -> eyre::Result<()> {
                     _ => unreachable!()
                 }
 
-                Cli::Online(_) => {}
+                Cli::Online(cmd) => match cmd.command {
+                    OnlineCommands::Read(args) => {
+                        let state = repl_state.online();
+                        let result = state.client
+                            .read_stream(args.stream, Revision::Start, Direction::Forward)
+                            .await?;
+
+                        let mut reading = Reading::Stream(result);
+
+                        reading.display().await?;
+                    }
+
+                    OnlineCommands::Subscribe(cmd) => {
+                        let state = repl_state.online();
+                        let stream = match cmd.command {
+                            SubscribeCommands::Stream(opts) => {
+                                state.client.subscribe_to_stream(opts.stream, Revision::Start).await
+                            }
+                            SubscribeCommands::Program(opts) => {
+                                let source_code = match fs::read_to_string(opts.path.as_path()) {
+                                    Err(e) => {
+                                        println!("ERR: error when reading file {:?}: {}", opts.path, e);
+                                        continue;
+                                    }
+
+                                    Ok(string) => string,
+                                };
+
+                                state.client.subscribe_to_process(opts.name, source_code).await
+                            }
+                        };
+
+                        match stream {
+                            Err(e) => {
+                                println!("ERR: Error when subscribing: {}", e)
+                            }
+
+                            Ok(stream) => {
+                                let mut reading = Reading::Stream(stream);
+                                reading.display().await?;
+                            }
+                        }
+                    }
+
+                    OnlineCommands::Disconnect => {
+                        repl_state = NewReplState::Offline;
+                    }
+
+                    OnlineCommands::Exit => unreachable!(),
+                }
 
                 // Cmd::Exit => break,
                 // 
@@ -238,6 +287,14 @@ impl NewReplState {
             }
         }
     }
+
+    fn online(&mut self) -> &mut OnlineState {
+        if let NewReplState::Online(state) = self {
+            return state;
+        }
+
+        unreachable!()
+    }
 }
 
 struct OnlineState {
@@ -386,7 +443,7 @@ where
 async fn subscribe_to_stream(state: &mut ReplState, opts: SubscribeToStream) -> eyre::Result<()> {
     if let Target::Grpc(client) = &mut state.target {
         let mut stream = client
-            .subscribe_to_stream(opts.stream_name, Revision::Start)
+            .subscribe_to_stream(opts.stream, Revision::Start)
             .await?;
 
         while let Some(record) = stream.next().await? {
@@ -553,37 +610,54 @@ impl Reading {
             Reading::Stream(stream) => stream.next().await,
         }
     }
+
+    async fn display(&mut self) -> eyre::Result<()> {
+        while let Some(record) = self.next().await? {
+            let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+            let record = serde_json::json!({
+                "stream_name": record.stream_name,
+                "id": record.id,
+                "revision": record.revision,
+                "position": record.position.raw(),
+                "data": data,
+            });
+
+            println!("{}", serde_json::to_string_pretty(&record)?);
+        }
+
+        Ok(())
+    }
 }
 
-async fn read_stream(state: &mut ReplState, args: ReadStream) -> eyre::Result<()> {
-    let mut reading = match &mut state.target {
-        Target::InMem(in_mem) => {
-            Reading::Sync(storage_read_stream(&in_mem.index, &in_mem.manager, args)?)
-        }
+async fn read_stream(state: &mut OnlineState, args: ReadStream) -> eyre::Result<()> {
+    // let mut reading = match &mut state.target {
+    //     Target::InMem(in_mem) => {
+    //         Reading::Sync(storage_read_stream(&in_mem.index, &in_mem.manager, args)?)
+    //     }
+    //
+    //     Target::FS(fs) => Reading::Sync(storage_read_stream(&fs.index, &fs.manager, args)?),
+    //
+    //     Target::Grpc(client) => {
+    //         let result = client
+    //             .read_stream(args.stream, Revision::Start, Direction::Forward)
+    //             .await?;
+    //
+    //         Reading::Stream(result)
+    //     }
+    // };
 
-        Target::FS(fs) => Reading::Sync(storage_read_stream(&fs.index, &fs.manager, args)?),
-
-        Target::Grpc(client) => {
-            let result = client
-                .read_stream(args.stream, Revision::Start, Direction::Forward)
-                .await?;
-
-            Reading::Stream(result)
-        }
-    };
-
-    while let Some(record) = reading.next().await? {
-        let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
-        let record = serde_json::json!({
-            "stream_name": record.stream_name,
-            "id": record.id,
-            "revision": record.revision,
-            "position": record.position.raw(),
-            "data": data,
-        });
-
-        println!("{}", serde_json::to_string_pretty(&record)?);
-    }
+    // while let Some(record) = reading.next().await? {
+    //     let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+    //     let record = serde_json::json!({
+    //         "stream_name": record.stream_name,
+    //         "id": record.id,
+    //         "revision": record.revision,
+    //         "position": record.position.raw(),
+    //         "data": data,
+    //     });
+    //
+    //     println!("{}", serde_json::to_string_pretty(&record)?);
+    // }
 
     Ok(())
 }

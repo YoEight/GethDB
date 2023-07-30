@@ -63,28 +63,32 @@ pub enum SubscribeCommands {
     Stream(SubscribeToStream),
 
     #[command(arg_required_else_help = true)]
-    /// Path to programmable subscription script.
     Program(SubscribeToProgram),
 }
 
 #[derive(Args, Debug)]
 pub struct SubscribeToStream {
-    pub stream_name: String,
+    // Stream's name
+    pub stream: String,
 }
 
 #[derive(Args, Debug)]
 pub struct SubscribeToProgram {
     #[arg(long)]
+    /// Programmable subscription's name.
     pub name: String,
 
+    /// Path to programmable subscription script.
     pub path: PathBuf,
 }
 
 #[derive(Args, Debug)]
 pub struct AppendStream {
+    // Stream's name
+    #[arg(long)]
     pub stream: String,
 
-    #[arg(long)]
+    /// Path to json file.
     pub json: PathBuf,
 }
 
