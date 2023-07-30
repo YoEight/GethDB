@@ -1,7 +1,14 @@
+mod cli;
+
 use directories::UserDirs;
+use glyph::{FileBackedInputs, Input};
 use std::collections::VecDeque;
 use std::{fs, fs::File, io, path::PathBuf};
 
+use crate::cli::{
+    AppendStream, Cli, KillProcess, Offline, OfflineCommands, Online, OnlineCommands, ProcessStats,
+    ReadStream, SubscribeToProgram, SubscribeToStream,
+};
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -10,7 +17,6 @@ use geth_mikoshi::storage::{FileSystemStorage, InMemoryStorage, Storage};
 use geth_mikoshi::wal::ChunkManager;
 use geth_mikoshi::IteratorIO;
 use serde::Deserialize;
-use structopt::StructOpt;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -29,154 +35,141 @@ async fn main() -> eyre::Result<()> {
         target: Target::InMem(InMemory { index, manager }),
     };
 
-    while let Some(input) = inputs.next_input()? {
-        match input {
-            glyph::Input::Exit => break,
+    let mut repl_state = NewReplState::Offline;
 
-            glyph::Input::String(s) => {
+    while let Some(input) = repl_state.next_input(&mut inputs)? {
+        match input {
+            Input::Exit => break,
+
+            Input::String(s) => {
                 println!(">> {}", s);
             }
 
-            glyph::Input::Command { name, params } => {
-                let mut cmd = vec![":".to_string(), name];
+            Input::Command(cmd) => match cmd {
+                Cli::Offline(_) => {}
+                Cli::Online(_) => {}
 
-                cmd.extend(params);
-
-                match Cmd::from_iter_safe(&cmd) {
-                    Err(e) => {
-                        println!("{}", e);
-                    }
-
-                    Ok(cmd) => match cmd {
-                        Cmd::Exit => break,
-
-                        Cmd::Connect => {
-                            let client = Client::new("http://[::1]:2113").await?;
-                            state.target = Target::Grpc(client);
-                        }
-
-                        Cmd::ReadStream(opts) => read_stream(&mut state, opts).await?,
-                        Cmd::AppendStream(opts) => append_stream(&mut state, opts).await?,
-                        Cmd::SubscribeToStream(opts) => {
-                            subscribe_to_stream(&mut state, opts).await?
-                        }
-                        Cmd::SubscribeToProcess(opts) => {
-                            subscribe_to_process(&mut state, opts).await?
-                        }
-                        Cmd::Mikoshi(cmd) => match cmd {
-                            MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
-                        },
-
-                        Cmd::ListProcesses => list_programmable_subscriptions(&mut state).await?,
-
-                        Cmd::ProcessStats(opts) => {
-                            get_programmable_subscription_stats(&mut state, opts).await?
-                        }
-                        Cmd::KillProcess(opts) => {
-                            kill_programmable_subscription(&mut state, opts).await?
-                        }
-                    },
-                }
-            }
+                // Cmd::Exit => break,
+                // 
+                // Cmd::Connect => {
+                //     let client = Client::new("http://[::1]:2113").await?;
+                //     state.target = Target::Grpc(client);
+                // }
+                // 
+                // Cmd::ReadStream(opts) => read_stream(&mut state, opts).await?,
+                // Cmd::AppendStream(opts) => append_stream(&mut state, opts).await?,
+                // Cmd::SubscribeToStream(opts) => subscribe_to_stream(&mut state, opts).await?,
+                // Cmd::SubscribeToProcess(opts) => subscribe_to_process(&mut state, opts).await?,
+                // Cmd::Mikoshi(cmd) => match cmd {
+                //     MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
+                // },
+                // 
+                // Cmd::ListProcesses => list_programmable_subscriptions(&mut state).await?,
+                // 
+                // Cmd::ProcessStats(opts) => {
+                //     get_programmable_subscription_stats(&mut state, opts).await?
+                // }
+                // Cmd::KillProcess(opts) => kill_programmable_subscription(&mut state, opts).await?,
+            },
         }
     }
 
     Ok(())
 }
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = ":")]
-enum Cmd {
-    #[structopt(name = "read", about = "Read a stream")]
-    ReadStream(ReadStream),
-
-    #[structopt(name = "append", about = "Append a stream")]
-    AppendStream(AppendStream),
-
-    #[structopt(name = "subscribe", about = "Subscribe to a stream")]
-    SubscribeToStream(SubscribeToStream),
-
-    #[structopt(
-        name = "subscribe-process",
-        about = "Subscribe to a programmable subscription"
-    )]
-    SubscribeToProcess(SubscribeToProcess),
-
-    #[structopt(name = "list-processes", about = "List all programmable subscriptions")]
-    ListProcesses,
-
-    #[structopt(
-        name = "process-stats",
-        about = "Get a programmable subscription stats"
-    )]
-    ProcessStats(ProcessStats),
-
-    #[structopt(name = "kill-process", about = "Kill a process")]
-    KillProcess(KillProcess),
-
-    #[structopt(name = "mikoshi", about = "Database files management")]
-    Mikoshi(MikoshiCmd),
-
-    #[structopt(name = "connect", about = "Connect to a GethDB node")]
-    Connect,
-
-    #[structopt(about = "Exit the application")]
-    Exit,
-}
-
-#[derive(StructOpt, Debug)]
-struct ReadStream {
-    #[structopt(long, short)]
-    stream_name: String,
-}
-
-#[derive(StructOpt, Debug)]
-struct AppendStream {
-    #[structopt(long, short)]
-    stream_name: String,
-
-    #[structopt(long, short = "f")]
-    json_file: PathBuf,
-}
-
-#[derive(StructOpt, Debug)]
-struct SubscribeToStream {
-    #[structopt(long, short)]
-    stream_name: String,
-}
-
-#[derive(StructOpt, Debug)]
-struct SubscribeToProcess {
-    #[structopt(long, short, help = "name of the process")]
-    name: String,
-
-    #[structopt(long = "file", short = "f", help = "source code of the process")]
-    code: PathBuf,
-}
-
-#[derive(StructOpt, Debug)]
-enum MikoshiCmd {
-    #[structopt(name = "root", about = "database root folder")]
-    Root(MikoshiRoot),
-}
-
-#[derive(StructOpt, Debug)]
-struct MikoshiRoot {
-    #[structopt(long, short)]
-    directory: Option<String>,
-}
-
-#[derive(StructOpt, Debug)]
-struct KillProcess {
-    #[structopt(long)]
-    id: String,
-}
-
-#[derive(StructOpt, Debug)]
-struct ProcessStats {
-    #[structopt(long)]
-    id: String,
-}
+// #[derive(StructOpt, Debug)]
+// #[structopt(name = ":")]
+// enum Cmd {
+//     #[structopt(name = "read", about = "Read a stream")]
+//     ReadStream(ReadStream),
+//
+//     #[structopt(name = "append", about = "Append a stream")]
+//     AppendStream(AppendStream),
+//
+//     #[structopt(name = "subscribe", about = "Subscribe to a stream")]
+//     SubscribeToStream(SubscribeToStream),
+//
+//     #[structopt(
+//         name = "subscribe-process",
+//         about = "Subscribe to a programmable subscription"
+//     )]
+//     SubscribeToProcess(SubscribeToProcess),
+//
+//     #[structopt(name = "list-processes", about = "List all programmable subscriptions")]
+//     ListProcesses,
+//
+//     #[structopt(
+//         name = "process-stats",
+//         about = "Get a programmable subscription stats"
+//     )]
+//     ProcessStats(ProcessStats),
+//
+//     #[structopt(name = "kill-process", about = "Kill a process")]
+//     KillProcess(KillProcess),
+//
+//     #[structopt(name = "mikoshi", about = "Database files management")]
+//     Mikoshi(MikoshiCmd),
+//
+//     #[structopt(name = "connect", about = "Connect to a GethDB node")]
+//     Connect,
+//
+//     #[structopt(about = "Exit the application")]
+//     Exit,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct ReadStream {
+//     #[structopt(long, short)]
+//     stream_name: String,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct AppendStream {
+//     #[structopt(long, short)]
+//     stream_name: String,
+//
+//     #[structopt(long, short = "f")]
+//     json_file: PathBuf,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct SubscribeToStream {
+//     #[structopt(long, short)]
+//     stream_name: String,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct SubscribeToProcess {
+//     #[structopt(long, short, help = "name of the process")]
+//     name: String,
+//
+//     #[structopt(long = "file", short = "f", help = "source code of the process")]
+//     code: PathBuf,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// enum MikoshiCmd {
+//     #[structopt(name = "root", about = "database root folder")]
+//     Root(MikoshiRoot),
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct MikoshiRoot {
+//     #[structopt(long, short)]
+//     directory: Option<String>,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct KillProcess {
+//     #[structopt(long)]
+//     id: String,
+// }
+//
+// #[derive(StructOpt, Debug)]
+// struct ProcessStats {
+//     #[structopt(long)]
+//     id: String,
+// }
 
 enum Target {
     InMem(InMemory),
@@ -195,6 +188,45 @@ struct FileSystem {
     manager: ChunkManager<FileSystemStorage>,
 }
 
+enum NewReplState {
+    Offline,
+    Online(OnlineState),
+}
+
+impl NewReplState {
+    fn next_input(&self, input: &mut FileBackedInputs) -> io::Result<Option<Input<Cli>>> {
+        match self {
+            NewReplState::Offline => {
+                let cmd = input.next_input_with_parser::<Offline>()?;
+
+                Ok(cmd.map(|i| {
+                    i.flat_map(|c| match c.command {
+                        OfflineCommands::Exit => Input::Exit,
+                        other => Input::Command(Cli::Offline(Offline { command: other })),
+                    })
+                }))
+            }
+
+            NewReplState::Online(_) => {
+                let cmd = input.next_input_with_parser::<Online>()?;
+
+                Ok(cmd.map(|i| {
+                    i.flat_map(|c| match c.command {
+                        OnlineCommands::Exit => Input::Exit,
+                        other => Input::Command(Cli::Online(Online { command: other })),
+                    })
+                }))
+            }
+        }
+    }
+}
+
+struct OnlineState {
+    host: String,
+    port: u16,
+    client: Client,
+}
+
 struct ReplState {
     target: Target,
 }
@@ -205,49 +237,49 @@ struct JsonEvent {
     payload: serde_json::Value,
 }
 
-fn mikoshi_root(
-    user_dirs: &UserDirs,
-    state: &mut ReplState,
-    args: MikoshiRoot,
-) -> eyre::Result<()> {
-    match args.directory {
-        None => match &state.target {
-            Target::InMem(_) => println!(">> <in-memory>"),
-            Target::FS(fs) => println!(">> Folder: {:?}", fs.storage.root()),
-            Target::Grpc(_) => println!(">> <gRPC>"),
-        },
-
-        Some(dir) => {
-            let mut path_buf = PathBuf::new();
-            for (idx, part) in dir.split(std::path::MAIN_SEPARATOR).enumerate() {
-                if idx == 0 && part == "~" {
-                    path_buf.push(user_dirs.home_dir());
-                } else {
-                    path_buf.push(part);
-                }
-            }
-
-            let new_storage = FileSystemStorage::new(path_buf)?;
-            let new_index = Lsm::load(LsmSettings::default(), new_storage.clone())?;
-            let new_manager = ChunkManager::load(new_storage.clone())?;
-
-            new_index.rebuild(&new_manager)?;
-
-            state.target = Target::FS(FileSystem {
-                storage: new_storage,
-                index: new_index,
-                manager: new_manager,
-            });
-
-            println!(">> Mikoshi backend root directory was updated successfully");
-        }
-    }
-
-    Ok(())
-}
+// fn mikoshi_root(
+//     user_dirs: &UserDirs,
+//     state: &mut ReplState,
+//     args: MikoshiRoot,
+// ) -> eyre::Result<()> {
+//     match args.directory {
+//         None => match &state.target {
+//             Target::InMem(_) => println!(">> <in-memory>"),
+//             Target::FS(fs) => println!(">> Folder: {:?}", fs.storage.root()),
+//             Target::Grpc(_) => println!(">> <gRPC>"),
+//         },
+//
+//         Some(dir) => {
+//             let mut path_buf = PathBuf::new();
+//             for (idx, part) in dir.split(std::path::MAIN_SEPARATOR).enumerate() {
+//                 if idx == 0 && part == "~" {
+//                     path_buf.push(user_dirs.home_dir());
+//                 } else {
+//                     path_buf.push(part);
+//                 }
+//             }
+//
+//             let new_storage = FileSystemStorage::new(path_buf)?;
+//             let new_index = Lsm::load(LsmSettings::default(), new_storage.clone())?;
+//             let new_manager = ChunkManager::load(new_storage.clone())?;
+//
+//             new_index.rebuild(&new_manager)?;
+//
+//             state.target = Target::FS(FileSystem {
+//                 storage: new_storage,
+//                 index: new_index,
+//                 manager: new_manager,
+//             });
+//
+//             println!(">> Mikoshi backend root directory was updated successfully");
+//         }
+//     }
+//
+//     Ok(())
+// }
 
 async fn append_stream(state: &mut ReplState, args: AppendStream) -> eyre::Result<()> {
-    let file = File::open(args.json_file)?;
+    let file = File::open(args.json)?;
     let events = serde_json::from_reader::<_, Vec<JsonEvent>>(file)?;
     let mut proposes = Vec::new();
 
@@ -261,16 +293,14 @@ async fn append_stream(state: &mut ReplState, args: AppendStream) -> eyre::Resul
 
     let result = match &mut state.target {
         Target::InMem(in_mem) => {
-            storage_append_stream(&in_mem.index, &in_mem.manager, args.stream_name, proposes)?
+            storage_append_stream(&in_mem.index, &in_mem.manager, args.stream, proposes)?
         }
 
-        Target::FS(fs) => {
-            storage_append_stream(&fs.index, &fs.manager, args.stream_name, proposes)?
-        }
+        Target::FS(fs) => storage_append_stream(&fs.index, &fs.manager, args.stream, proposes)?,
 
         Target::Grpc(client) => {
             client
-                .append_stream(&args.stream_name, proposes, ExpectedRevision::Any)
+                .append_stream(&args.stream, proposes, ExpectedRevision::Any)
                 .await?
         }
     };
@@ -314,7 +344,7 @@ fn storage_read_stream<S>(
 where
     S: Storage + Send + Sync + 'static,
 {
-    let stream_key = mikoshi_hash(&args.stream_name);
+    let stream_key = mikoshi_hash(&args.stream);
     let mut entries = index.scan(stream_key, Direction::Forward, Revision::Start, usize::MAX);
     let mut records = VecDeque::new();
 
@@ -360,9 +390,9 @@ async fn subscribe_to_stream(state: &mut ReplState, opts: SubscribeToStream) -> 
     Ok(())
 }
 
-async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -> eyre::Result<()> {
+async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProgram) -> eyre::Result<()> {
     if let Target::Grpc(client) = &mut state.target {
-        let source_code = fs::read_to_string(opts.code)?;
+        let source_code = fs::read_to_string(opts.path)?;
 
         let mut stream = match client.subscribe_to_process(opts.name, source_code).await {
             Err(e) => {
@@ -516,7 +546,7 @@ async fn read_stream(state: &mut ReplState, args: ReadStream) -> eyre::Result<()
 
         Target::Grpc(client) => {
             let result = client
-                .read_stream(args.stream_name, Revision::Start, Direction::Forward)
+                .read_stream(args.stream, Revision::Start, Direction::Forward)
                 .await?;
 
             Reading::Stream(result)
