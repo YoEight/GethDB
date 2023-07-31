@@ -6,8 +6,9 @@ use std::collections::VecDeque;
 use std::{fs, fs::File, io, path::PathBuf};
 
 use crate::cli::{
-    AppendStream, Cli, KillProcess, Offline, OfflineCommands, Online, OnlineCommands, ProcessStats,
-    ReadStream, SubscribeCommands, SubscribeToProgram, SubscribeToStream,
+    AppendStream, Cli, KillProcess, Offline, OfflineCommands, Online, OnlineCommands,
+    ProcessCommands, ProcessStats, ReadStream, SubscribeCommands, SubscribeToProgram,
+    SubscribeToStream,
 };
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
@@ -52,24 +53,24 @@ async fn main() -> eyre::Result<()> {
                         let port = port.unwrap_or(2_113);
 
                         match Client::new(format!("http://{}:{}", host, port)).await {
-                            Err(e) => println!("ERR: error when connecting to {}:{}: {}", host, port, e),
+                            Err(e) => {
+                                println!("ERR: error when connecting to {}:{}: {}", host, port, e)
+                            }
                             Ok(client) => {
-                                repl_state = NewReplState::Online(OnlineState {
-                                    host,
-                                    port,
-                                    client,
-                                });
+                                repl_state =
+                                    NewReplState::Online(OnlineState { host, port, client });
                             }
                         }
                     }
 
-                    _ => unreachable!()
-                }
+                    _ => unreachable!(),
+                },
 
                 Cli::Online(cmd) => match cmd.command {
                     OnlineCommands::Read(args) => {
                         let state = repl_state.online();
-                        let result = state.client
+                        let result = state
+                            .client
                             .read_stream(args.stream, Revision::Start, Direction::Forward)
                             .await?;
 
@@ -82,19 +83,29 @@ async fn main() -> eyre::Result<()> {
                         let state = repl_state.online();
                         let stream = match cmd.command {
                             SubscribeCommands::Stream(opts) => {
-                                state.client.subscribe_to_stream(opts.stream, Revision::Start).await
+                                state
+                                    .client
+                                    .subscribe_to_stream(opts.stream, Revision::Start)
+                                    .await
                             }
+
                             SubscribeCommands::Program(opts) => {
                                 let source_code = match fs::read_to_string(opts.path.as_path()) {
                                     Err(e) => {
-                                        println!("ERR: error when reading file {:?}: {}", opts.path, e);
+                                        println!(
+                                            "ERR: error when reading file {:?}: {}",
+                                            opts.path, e
+                                        );
                                         continue;
                                     }
 
                                     Ok(string) => string,
                                 };
 
-                                state.client.subscribe_to_process(opts.name, source_code).await
+                                state
+                                    .client
+                                    .subscribe_to_process(opts.name, source_code)
+                                    .await
                             }
                         };
 
@@ -114,30 +125,25 @@ async fn main() -> eyre::Result<()> {
                         repl_state = NewReplState::Offline;
                     }
 
-                    OnlineCommands::Exit => unreachable!(),
-                }
+                    OnlineCommands::Process(cmd) => {
+                        let state = repl_state.online();
+                        match cmd.commands {
+                            ProcessCommands::Kill { id } => {
+                                kill_programmable_subscription(state, id).await;
+                            }
 
-                // Cmd::Exit => break,
-                // 
-                // Cmd::Connect => {
-                //     let client = Client::new("http://[::1]:2113").await?;
-                //     state.target = Target::Grpc(client);
-                // }
-                // 
-                // Cmd::ReadStream(opts) => read_stream(&mut state, opts).await?,
-                // Cmd::AppendStream(opts) => append_stream(&mut state, opts).await?,
-                // Cmd::SubscribeToStream(opts) => subscribe_to_stream(&mut state, opts).await?,
-                // Cmd::SubscribeToProcess(opts) => subscribe_to_process(&mut state, opts).await?,
-                // Cmd::Mikoshi(cmd) => match cmd {
-                //     MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
-                // },
-                // 
-                // Cmd::ListProcesses => list_programmable_subscriptions(&mut state).await?,
-                // 
-                // Cmd::ProcessStats(opts) => {
-                //     get_programmable_subscription_stats(&mut state, opts).await?
-                // }
-                // Cmd::KillProcess(opts) => kill_programmable_subscription(&mut state, opts).await?,
+                            ProcessCommands::Stats { id } => {
+                                get_programmable_subscription_stats(state, id).await;
+                            }
+
+                            ProcessCommands::List => {
+                                list_programmable_subscriptions(state).await;
+                            }
+                        }
+                    }
+
+                    OnlineCommands::Exit => unreachable!(),
+                },
             },
         }
     }
@@ -513,89 +519,80 @@ async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProgram) -
     Ok(())
 }
 
-async fn list_programmable_subscriptions(state: &mut ReplState) -> eyre::Result<()> {
-    if let Target::Grpc(client) = &mut state.target {
-        let summaries = client.list_programmable_subscriptions().await?;
-
-        for summary in summaries {
-            let summary = serde_json::json!({
-                "id": summary.id,
-                "name": summary.name,
-                "started": summary.started,
-            });
-
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-
-        return Ok(());
-    }
-
-    println!("ERR: You need to be connected to a node to list programmable subscriptions");
-    Ok(())
-}
-
-async fn kill_programmable_subscription(
-    state: &mut ReplState,
-    opts: KillProcess,
-) -> eyre::Result<()> {
-    let id = match opts.id.parse::<Uuid>() {
-        Ok(id) => id,
+async fn list_programmable_subscriptions(state: &mut OnlineState) {
+    let summaries = match state.client.list_programmable_subscriptions().await {
         Err(e) => {
-            println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
-                e
-            );
-
-            return Ok(());
+            println!("Err: Error when listing programmable subscriptions: {}", e);
+            return;
         }
+
+        Ok(s) => s,
     };
 
-    if let Target::Grpc(client) = &mut state.target {
-        client.kill_programmable_subscription(id).await?;
-        return Ok(());
-    }
-
-    println!("ERR: You need to be connected to a node to kill a programmable subscription");
-    Ok(())
-}
-
-async fn get_programmable_subscription_stats(
-    state: &mut ReplState,
-    opts: ProcessStats,
-) -> eyre::Result<()> {
-    let id = match opts.id.parse::<Uuid>() {
-        Ok(id) => id,
-        Err(e) => {
-            println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
-                e
-            );
-
-            return Ok(());
-        }
-    };
-
-    if let Target::Grpc(client) = &mut state.target {
-        let stats = client.get_programmable_subscription_stats(id).await?;
-        let source_code = stats.source_code;
-
-        let stats = serde_json::json!({
-            "id": stats.id,
-            "name": stats.name,
-            "started": stats.started,
-            "subscriptions": stats.subscriptions,
-            "pushed_events": stats.pushed_events,
+    for summary in summaries {
+        let summary = serde_json::json!({
+            "id": summary.id,
+            "name": summary.name,
+            "started": summary.started,
         });
 
-        println!("{}", serde_json::to_string_pretty(&stats)?);
-        println!("Source code:");
-        println!("{}", source_code);
-
-        return Ok(());
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
     }
+}
 
-    println!("ERR: You need to be connected to a node to get a programmable subscription's stats");
-    Ok(())
+async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
+    let id = match id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return;
+        }
+    };
+
+    if let Err(e) = state.client.kill_programmable_subscription(id).await {
+        println!("Err: Error when killing programmable subscription: {}", e);
+    }
+}
+
+async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String) {
+    let id = match id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return;
+        }
+    };
+
+    let stats = match state.client.get_programmable_subscription_stats(id).await {
+        Err(e) => {
+            println!("Err: Error when getting programmable subscription: {}", e);
+            return;
+        }
+
+        Ok(stats) => stats,
+    };
+
+    let source_code = stats.source_code;
+
+    let stats = serde_json::json!({
+        "id": stats.id,
+        "name": stats.name,
+        "started": stats.started,
+        "subscriptions": stats.subscriptions,
+        "pushed_events": stats.pushed_events,
+    });
+
+    println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+    println!("Source code:");
+    println!("{}", source_code);
 }
 
 enum Reading {

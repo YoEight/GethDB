@@ -41,11 +41,14 @@ pub enum OnlineCommands {
     /// Read a stream
     Read(ReadStream),
 
-    /// Subscription command
+    /// Subscription commands
     Subscribe(Subscribe),
 
     /// Disconnect from the current GethDB node
     Disconnect,
+
+    /// Process commands
+    Process(Process),
 
     /// Exit shell.
     Exit,
@@ -95,6 +98,19 @@ pub struct AppendStream {
 #[derive(Args, Debug)]
 pub struct ReadStream {
     pub stream: String,
+}
+
+#[derive(Args, Debug)]
+pub struct Process {
+    #[command(subcommand)]
+    pub commands: ProcessCommands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum ProcessCommands {
+    Kill { id: String },
+    Stats { id: String },
+    List,
 }
 
 #[derive(Args, Debug)]
