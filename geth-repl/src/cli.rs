@@ -4,6 +4,7 @@ use std::path::PathBuf;
 pub enum Cli {
     Offline(Offline),
     Online(Online),
+    Mikoshi(Mikoshi),
 }
 
 #[derive(Parser, Debug)]
@@ -31,6 +32,10 @@ pub enum OfflineCommands {
         port: Option<u16>,
     },
 
+    #[command(arg_required_else_help = true)]
+    /// Use a Mikoshi directory
+    Mikoshi { directory: PathBuf },
+
     /// Exit shell.
     Exit,
 }
@@ -40,6 +45,10 @@ pub enum OnlineCommands {
     #[command(arg_required_else_help = true)]
     /// Read a stream
     Read(ReadStream),
+
+    #[command(arg_required_else_help = true)]
+    /// Append a stream
+    Append(AppendStream),
 
     /// Subscription commands
     Subscribe(Subscribe),
@@ -121,4 +130,24 @@ pub struct KillProcess {
 #[derive(Args, Debug)]
 pub struct ProcessStats {
     pub id: String,
+}
+
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Mikoshi {
+    #[command(subcommand)]
+    pub commands: MikoshiCommands,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum MikoshiCommands {
+    #[command(arg_required_else_help = true)]
+    /// Read a stream
+    Read(ReadStream),
+
+    /// Append a stream
+    Append(AppendStream),
+
+    /// Leave Mikoshi directory
+    Leave,
 }

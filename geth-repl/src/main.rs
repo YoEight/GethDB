@@ -1,4 +1,5 @@
 mod cli;
+mod utils;
 
 use directories::UserDirs;
 use glyph::{FileBackedInputs, Input};
@@ -6,10 +7,11 @@ use std::collections::VecDeque;
 use std::{fs, fs::File, io, path::PathBuf};
 
 use crate::cli::{
-    AppendStream, Cli, KillProcess, Offline, OfflineCommands, Online, OnlineCommands,
+    AppendStream, Cli, KillProcess, Mikoshi, Offline, OfflineCommands, Online, OnlineCommands,
     ProcessCommands, ProcessStats, ReadStream, SubscribeCommands, SubscribeToProgram,
     SubscribeToStream,
 };
+use crate::utils::expand_path;
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -61,6 +63,51 @@ async fn main() -> eyre::Result<()> {
                                     NewReplState::Online(OnlineState { host, port, client });
                             }
                         }
+                    }
+
+                    OfflineCommands::Mikoshi { directory } => {
+                        let directory = expand_path(directory);
+                        let storage = match FileSystemStorage::new(directory.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading {:?} as a GethDB root directory: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+                            Ok(s) => s,
+                        };
+
+                        let index = match Lsm::load(LsmSettings::default(), storage.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading index data structure in {:?}: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+
+                            Ok(i) => i,
+                        };
+
+                        let manager = match ChunkManager::load(storage.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading chunk manager in {:?}: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+
+                            Ok(m) => m,
+                        };
+
+                        repl_state = NewReplState::Mikoshi(MikoshiState {
+                            directory,
+                            storage,
+                            index,
+                            manager,
+                        });
                     }
 
                     _ => unreachable!(),
@@ -142,8 +189,11 @@ async fn main() -> eyre::Result<()> {
                         }
                     }
 
+                    OnlineCommands::Append(_) => {}
                     OnlineCommands::Exit => unreachable!(),
                 },
+
+                Cli::Mikoshi(_) => {}
             },
         }
     }
@@ -265,6 +315,7 @@ struct FileSystem {
 enum NewReplState {
     Offline,
     Online(OnlineState),
+    Mikoshi(MikoshiState),
 }
 
 impl NewReplState {
@@ -291,11 +342,25 @@ impl NewReplState {
                     })
                 }))
             }
+
+            NewReplState::Mikoshi(_) => {
+                let cmd = input.next_input_with_parser::<Mikoshi>()?;
+
+                Ok(cmd.map(|i| i.map(Cli::Mikoshi)))
+            }
         }
     }
 
     fn online(&mut self) -> &mut OnlineState {
         if let NewReplState::Online(state) = self {
+            return state;
+        }
+
+        unreachable!()
+    }
+
+    fn mikoshi(&mut self) -> &mut MikoshiState {
+        if let NewReplState::Mikoshi(state) = self {
             return state;
         }
 
@@ -307,6 +372,13 @@ struct OnlineState {
     host: String,
     port: u16,
     client: Client,
+}
+
+struct MikoshiState {
+    directory: PathBuf,
+    storage: FileSystemStorage,
+    index: Lsm<FileSystemStorage>,
+    manager: ChunkManager<FileSystemStorage>,
 }
 
 struct ReplState {
