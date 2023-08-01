@@ -122,16 +122,6 @@ pub enum ProcessCommands {
     List,
 }
 
-#[derive(Args, Debug)]
-pub struct KillProcess {
-    pub id: String,
-}
-
-#[derive(Args, Debug)]
-pub struct ProcessStats {
-    pub id: String,
-}
-
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Mikoshi {
