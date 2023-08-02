@@ -2,7 +2,7 @@ mod cli;
 mod utils;
 
 use directories::UserDirs;
-use glyph::{FileBackedInputs, Input};
+use glyph::{FileBackedInputs, Input, PromptOptions};
 use std::collections::VecDeque;
 use std::path::Path;
 use std::{fs, fs::File, io, path::PathBuf};
@@ -29,9 +29,10 @@ async fn main() -> eyre::Result<()> {
     let options = glyph::Options::default()
         .header(include_str!("header.txt"))
         .author("Yo Eight")
-        .version("master");
+        .version("master")
+        .disable_free_expression();
     let mut inputs = glyph::file_backed_inputs(options, history_path)?;
-    let mut repl_state = NewReplState::Offline;
+    let mut repl_state = ReplState::Offline;
 
     while let Some(input) = repl_state.next_input(&mut inputs)? {
         match input {
@@ -52,8 +53,7 @@ async fn main() -> eyre::Result<()> {
                                 println!("ERR: error when connecting to {}:{}: {}", host, port, e)
                             }
                             Ok(client) => {
-                                repl_state =
-                                    NewReplState::Online(OnlineState { host, port, client });
+                                repl_state = ReplState::Online(OnlineState { host, port, client });
                             }
                         }
                     }
@@ -95,9 +95,8 @@ async fn main() -> eyre::Result<()> {
                             Ok(m) => m,
                         };
 
-                        repl_state = NewReplState::Mikoshi(MikoshiState {
+                        repl_state = ReplState::Mikoshi(MikoshiState {
                             directory,
-                            storage,
                             index,
                             manager,
                         });
@@ -162,7 +161,7 @@ async fn main() -> eyre::Result<()> {
                     }
 
                     OnlineCommands::Disconnect => {
-                        repl_state = NewReplState::Offline;
+                        repl_state = ReplState::Offline;
                     }
 
                     OnlineCommands::Process(cmd) => {
@@ -282,7 +281,7 @@ async fn main() -> eyre::Result<()> {
                         }
 
                         MikoshiCommands::Leave => {
-                            repl_state = NewReplState::Offline;
+                            repl_state = ReplState::Offline;
                         }
                     }
                 }
@@ -293,17 +292,19 @@ async fn main() -> eyre::Result<()> {
     Ok(())
 }
 
-enum NewReplState {
+enum ReplState {
     Offline,
     Online(OnlineState),
     Mikoshi(MikoshiState),
 }
 
-impl NewReplState {
+impl ReplState {
     fn next_input(&self, input: &mut FileBackedInputs) -> io::Result<Option<Input<Cli>>> {
         match self {
-            NewReplState::Offline => {
-                let cmd = input.next_input_with_parser::<Offline>()?;
+            ReplState::Offline => {
+                let cmd = input.next_input_with_parser_and_options::<Offline>(
+                    &PromptOptions::default().prompt("offline"),
+                )?;
 
                 Ok(cmd.map(|i| {
                     i.flat_map(|c| match c.command {
@@ -313,8 +314,11 @@ impl NewReplState {
                 }))
             }
 
-            NewReplState::Online(_) => {
-                let cmd = input.next_input_with_parser::<Online>()?;
+            ReplState::Online(state) => {
+                let prompt = format!("online {}:{}", state.host, state.port);
+                let cmd = input.next_input_with_parser_and_options::<Online>(
+                    &PromptOptions::default().prompt(prompt),
+                )?;
 
                 Ok(cmd.map(|i| {
                     i.flat_map(|c| match c.command {
@@ -324,8 +328,11 @@ impl NewReplState {
                 }))
             }
 
-            NewReplState::Mikoshi(_) => {
-                let cmd = input.next_input_with_parser::<Mikoshi>()?;
+            ReplState::Mikoshi(state) => {
+                let prompt = format!("db_directory {:?}", state.directory);
+                let cmd = input.next_input_with_parser_and_options::<Mikoshi>(
+                    &PromptOptions::default().prompt(prompt),
+                )?;
 
                 Ok(cmd.map(|i| i.map(Cli::Mikoshi)))
             }
@@ -333,7 +340,7 @@ impl NewReplState {
     }
 
     fn online(&mut self) -> &mut OnlineState {
-        if let NewReplState::Online(state) = self {
+        if let ReplState::Online(state) = self {
             return state;
         }
 
@@ -341,7 +348,7 @@ impl NewReplState {
     }
 
     fn mikoshi(&mut self) -> &mut MikoshiState {
-        if let NewReplState::Mikoshi(state) = self {
+        if let ReplState::Mikoshi(state) = self {
             return state;
         }
 
@@ -357,7 +364,6 @@ struct OnlineState {
 
 struct MikoshiState {
     directory: PathBuf,
-    storage: FileSystemStorage,
     index: Lsm<FileSystemStorage>,
     manager: ChunkManager<FileSystemStorage>,
 }
