@@ -136,7 +136,7 @@ impl Client {
         &mut self,
         stream_name: impl AsRef<str>,
         start: Revision<u64>,
-    ) -> eyre::Result<ReadStream> {
+    ) -> tonic::Result<ReadStream> {
         let stream = self
             .inner
             .read(Request::new(ReadReq {

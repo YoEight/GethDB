@@ -1,16 +1,25 @@
+mod cli;
+mod utils;
+
 use directories::UserDirs;
+use glyph::{FileBackedInputs, Input, PromptOptions};
 use std::collections::VecDeque;
+use std::path::Path;
 use std::{fs, fs::File, io, path::PathBuf};
 
+use crate::cli::{
+    Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,
+    ProcessCommands, ReadStream, SubscribeCommands,
+};
+use crate::utils::expand_path;
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::{Lsm, LsmSettings};
-use geth_mikoshi::storage::{FileSystemStorage, InMemoryStorage, Storage};
+use geth_mikoshi::storage::{FileSystemStorage, Storage};
 use geth_mikoshi::wal::ChunkManager;
 use geth_mikoshi::IteratorIO;
 use serde::Deserialize;
-use structopt::StructOpt;
 use uuid::Uuid;
 
 #[tokio::main]
@@ -20,183 +29,343 @@ async fn main() -> eyre::Result<()> {
     let options = glyph::Options::default()
         .header(include_str!("header.txt"))
         .author("Yo Eight")
-        .version("master");
+        .version("master")
+        .disable_free_expression();
     let mut inputs = glyph::file_backed_inputs(options, history_path)?;
-    let storage = InMemoryStorage::new();
-    let manager = ChunkManager::load(storage.clone())?;
-    let index = Lsm::load(LsmSettings::default(), storage.clone())?;
-    let mut state = ReplState {
-        target: Target::InMem(InMemory { index, manager }),
-    };
+    let mut repl_state = ReplState::Offline;
 
-    while let Some(input) = inputs.next_input()? {
+    while let Some(input) = repl_state.next_input(&mut inputs)? {
         match input {
-            glyph::Input::Exit => break,
+            Input::Exit => break,
 
-            glyph::Input::String(s) => {
+            Input::String(s) => {
                 println!(">> {}", s);
             }
 
-            glyph::Input::Command { name, params } => {
-                let mut cmd = vec![":".to_string(), name];
+            Input::Command(cmd) => match cmd {
+                Cli::Offline(cmd) => match cmd.command {
+                    OfflineCommands::Connect { host, port } => {
+                        let host = host.unwrap_or_else(|| "localhost".to_string());
+                        let port = port.unwrap_or(2_113);
 
-                cmd.extend(params);
-
-                match Cmd::from_iter_safe(&cmd) {
-                    Err(e) => {
-                        println!("{}", e);
+                        match Client::new(format!("http://{}:{}", host, port)).await {
+                            Err(e) => {
+                                println!("ERR: error when connecting to {}:{}: {}", host, port, e)
+                            }
+                            Ok(client) => {
+                                repl_state = ReplState::Online(OnlineState { host, port, client });
+                            }
+                        }
                     }
 
-                    Ok(cmd) => match cmd {
-                        Cmd::Exit => break,
+                    OfflineCommands::Mikoshi { directory } => {
+                        let directory = expand_path(directory);
+                        let storage = match FileSystemStorage::new(directory.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading {:?} as a GethDB root directory: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+                            Ok(s) => s,
+                        };
 
-                        Cmd::Connect => {
-                            let client = Client::new("http://[::1]:2113").await?;
-                            state.target = Target::Grpc(client);
+                        let index = match Lsm::load(LsmSettings::default(), storage.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading index data structure in {:?}: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+
+                            Ok(i) => i,
+                        };
+
+                        let manager = match ChunkManager::load(storage.clone()) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading chunk manager in {:?}: {}",
+                                    directory, e
+                                );
+                                continue;
+                            }
+
+                            Ok(m) => m,
+                        };
+
+                        repl_state = ReplState::Mikoshi(MikoshiState {
+                            directory,
+                            index,
+                            manager,
+                        });
+                    }
+
+                    _ => unreachable!(),
+                },
+
+                Cli::Online(cmd) => match cmd.command {
+                    OnlineCommands::Read(args) => {
+                        let state = repl_state.online();
+                        let result = state
+                            .client
+                            .read_stream(args.stream, Revision::Start, Direction::Forward)
+                            .await?;
+
+                        let mut reading = Reading::Stream(result);
+
+                        reading.display().await?;
+                    }
+
+                    OnlineCommands::Subscribe(cmd) => {
+                        let state = repl_state.online();
+                        let stream = match cmd.command {
+                            SubscribeCommands::Stream(opts) => {
+                                state
+                                    .client
+                                    .subscribe_to_stream(opts.stream, Revision::Start)
+                                    .await
+                            }
+
+                            SubscribeCommands::Program(opts) => {
+                                let source_code = match fs::read_to_string(opts.path.as_path()) {
+                                    Err(e) => {
+                                        println!(
+                                            "ERR: error when reading file {:?}: {}",
+                                            opts.path, e
+                                        );
+                                        continue;
+                                    }
+
+                                    Ok(string) => string,
+                                };
+
+                                state
+                                    .client
+                                    .subscribe_to_process(opts.name, source_code)
+                                    .await
+                            }
+                        };
+
+                        match stream {
+                            Err(e) => {
+                                println!("ERR: Error when subscribing: {}", e)
+                            }
+
+                            Ok(stream) => {
+                                let mut reading = Reading::Stream(stream);
+                                reading.display().await?;
+                            }
+                        }
+                    }
+
+                    OnlineCommands::Disconnect => {
+                        repl_state = ReplState::Offline;
+                    }
+
+                    OnlineCommands::Process(cmd) => {
+                        let state = repl_state.online();
+                        match cmd.commands {
+                            ProcessCommands::Kill { id } => {
+                                kill_programmable_subscription(state, id).await;
+                            }
+
+                            ProcessCommands::Stats { id } => {
+                                get_programmable_subscription_stats(state, id).await;
+                            }
+
+                            ProcessCommands::List => {
+                                list_programmable_subscriptions(state).await;
+                            }
+                        }
+                    }
+
+                    OnlineCommands::Append(opts) => {
+                        let state = repl_state.online();
+                        let proposes = match load_events_from_file(&opts.json) {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when loading events from file {:?}: {}",
+                                    opts.json, e
+                                );
+                                continue;
+                            }
+                            Ok(es) => es,
+                        };
+
+                        match state
+                            .client
+                            .append_stream(&opts.stream, proposes, ExpectedRevision::Any)
+                            .await
+                        {
+                            Err(e) => {
+                                println!(
+                                    "ERR: Error when appending events to stream {}: {}",
+                                    opts.stream, e
+                                );
+                            }
+
+                            Ok(result) => {
+                                println!(
+                                    "{}",
+                                    serde_json::to_string_pretty(&serde_json::json!({
+                                        "position": result.position.raw(),
+                                        "next_expected_version": result.next_expected_version.raw(),
+                                        "next_logical_position": result.next_logical_position,
+                                    }))
+                                    .unwrap()
+                                );
+                            }
+                        }
+                    }
+
+                    OnlineCommands::Exit => unreachable!(),
+                },
+
+                Cli::Mikoshi(cmd) => {
+                    match cmd.commands {
+                        MikoshiCommands::Read(args) => {
+                            let state = repl_state.mikoshi();
+                            match storage_read_stream(&state.index, &state.manager, args) {
+                                Err(e) => {
+                                    println!("ERR: Error when reading directly events from GethDB files: {}", e);
+                                    continue;
+                                }
+
+                                Ok(events) => {
+                                    let mut reading = Reading::Sync(events);
+                                    reading.display().await?;
+                                }
+                            }
                         }
 
-                        Cmd::ReadStream(opts) => read_stream(&mut state, opts).await?,
-                        Cmd::AppendStream(opts) => append_stream(&mut state, opts).await?,
-                        Cmd::SubscribeToStream(opts) => {
-                            subscribe_to_stream(&mut state, opts).await?
-                        }
-                        Cmd::SubscribeToProcess(opts) => {
-                            subscribe_to_process(&mut state, opts).await?
-                        }
-                        Cmd::Mikoshi(cmd) => match cmd {
-                            MikoshiCmd::Root(args) => mikoshi_root(&user_dirs, &mut state, args)?,
-                        },
+                        MikoshiCommands::Append(args) => {
+                            let state = repl_state.mikoshi();
+                            let proposes = match load_events_from_file(args.json.as_path()) {
+                                Err(e) => {
+                                    println!(
+                                        "ERR: Error when loading events from file {:?}: {}",
+                                        args.json, e
+                                    );
+                                    continue;
+                                }
+                                Ok(es) => es,
+                            };
 
-                        Cmd::ListProcesses => list_programmable_subscriptions(&mut state).await?,
+                            match storage_append_stream(
+                                &state.index,
+                                &state.manager,
+                                args.stream.clone(),
+                                proposes,
+                            ) {
+                                Err(e) => {
+                                    println!(
+                                        "ERR: Error when appending events to stream {}: {}",
+                                        args.stream, e
+                                    );
+                                }
 
-                        Cmd::ProcessStats(opts) => {
-                            get_programmable_subscription_stats(&mut state, opts).await?
+                                Ok(result) => {
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&serde_json::json!({
+                                        "position": result.position.raw(),
+                                        "next_expected_version": result.next_expected_version.raw(),
+                                        "next_logical_position": result.next_logical_position,
+                                    }))
+                                            .unwrap()
+                                    );
+                                }
+                            };
                         }
-                        Cmd::KillProcess(opts) => {
-                            kill_programmable_subscription(&mut state, opts).await?
+
+                        MikoshiCommands::Leave => {
+                            repl_state = ReplState::Offline;
                         }
-                    },
+                    }
                 }
-            }
+            },
         }
     }
 
     Ok(())
 }
 
-#[derive(StructOpt, Debug)]
-#[structopt(name = ":")]
-enum Cmd {
-    #[structopt(name = "read", about = "Read a stream")]
-    ReadStream(ReadStream),
-
-    #[structopt(name = "append", about = "Append a stream")]
-    AppendStream(AppendStream),
-
-    #[structopt(name = "subscribe", about = "Subscribe to a stream")]
-    SubscribeToStream(SubscribeToStream),
-
-    #[structopt(
-        name = "subscribe-process",
-        about = "Subscribe to a programmable subscription"
-    )]
-    SubscribeToProcess(SubscribeToProcess),
-
-    #[structopt(name = "list-processes", about = "List all programmable subscriptions")]
-    ListProcesses,
-
-    #[structopt(
-        name = "process-stats",
-        about = "Get a programmable subscription stats"
-    )]
-    ProcessStats(ProcessStats),
-
-    #[structopt(name = "kill-process", about = "Kill a process")]
-    KillProcess(KillProcess),
-
-    #[structopt(name = "mikoshi", about = "Database files management")]
-    Mikoshi(MikoshiCmd),
-
-    #[structopt(name = "connect", about = "Connect to a GethDB node")]
-    Connect,
-
-    #[structopt(about = "Exit the application")]
-    Exit,
+enum ReplState {
+    Offline,
+    Online(OnlineState),
+    Mikoshi(MikoshiState),
 }
 
-#[derive(StructOpt, Debug)]
-struct ReadStream {
-    #[structopt(long, short)]
-    stream_name: String,
+impl ReplState {
+    fn next_input(&self, input: &mut FileBackedInputs) -> io::Result<Option<Input<Cli>>> {
+        match self {
+            ReplState::Offline => {
+                let cmd = input.next_input_with_parser_and_options::<Offline>(
+                    &PromptOptions::default().prompt("offline"),
+                )?;
+
+                Ok(cmd.map(|i| {
+                    i.flat_map(|c| match c.command {
+                        OfflineCommands::Exit => Input::Exit,
+                        other => Input::Command(Cli::Offline(Offline { command: other })),
+                    })
+                }))
+            }
+
+            ReplState::Online(state) => {
+                let prompt = format!("online {}:{}", state.host, state.port);
+                let cmd = input.next_input_with_parser_and_options::<Online>(
+                    &PromptOptions::default().prompt(prompt),
+                )?;
+
+                Ok(cmd.map(|i| {
+                    i.flat_map(|c| match c.command {
+                        OnlineCommands::Exit => Input::Exit,
+                        other => Input::Command(Cli::Online(Online { command: other })),
+                    })
+                }))
+            }
+
+            ReplState::Mikoshi(state) => {
+                let prompt = format!("db_directory {:?}", state.directory);
+                let cmd = input.next_input_with_parser_and_options::<Mikoshi>(
+                    &PromptOptions::default().prompt(prompt),
+                )?;
+
+                Ok(cmd.map(|i| i.map(Cli::Mikoshi)))
+            }
+        }
+    }
+
+    fn online(&mut self) -> &mut OnlineState {
+        if let ReplState::Online(state) = self {
+            return state;
+        }
+
+        unreachable!()
+    }
+
+    fn mikoshi(&mut self) -> &mut MikoshiState {
+        if let ReplState::Mikoshi(state) = self {
+            return state;
+        }
+
+        unreachable!()
+    }
 }
 
-#[derive(StructOpt, Debug)]
-struct AppendStream {
-    #[structopt(long, short)]
-    stream_name: String,
-
-    #[structopt(long, short = "f")]
-    json_file: PathBuf,
+struct OnlineState {
+    host: String,
+    port: u16,
+    client: Client,
 }
 
-#[derive(StructOpt, Debug)]
-struct SubscribeToStream {
-    #[structopt(long, short)]
-    stream_name: String,
-}
-
-#[derive(StructOpt, Debug)]
-struct SubscribeToProcess {
-    #[structopt(long, short, help = "name of the process")]
-    name: String,
-
-    #[structopt(long = "file", short = "f", help = "source code of the process")]
-    code: PathBuf,
-}
-
-#[derive(StructOpt, Debug)]
-enum MikoshiCmd {
-    #[structopt(name = "root", about = "database root folder")]
-    Root(MikoshiRoot),
-}
-
-#[derive(StructOpt, Debug)]
-struct MikoshiRoot {
-    #[structopt(long, short)]
-    directory: Option<String>,
-}
-
-#[derive(StructOpt, Debug)]
-struct KillProcess {
-    #[structopt(long)]
-    id: String,
-}
-
-#[derive(StructOpt, Debug)]
-struct ProcessStats {
-    #[structopt(long)]
-    id: String,
-}
-
-enum Target {
-    InMem(InMemory),
-    FS(FileSystem),
-    Grpc(Client),
-}
-
-struct InMemory {
-    index: Lsm<InMemoryStorage>,
-    manager: ChunkManager<InMemoryStorage>,
-}
-
-struct FileSystem {
-    storage: FileSystemStorage,
+struct MikoshiState {
+    directory: PathBuf,
     index: Lsm<FileSystemStorage>,
     manager: ChunkManager<FileSystemStorage>,
-}
-
-struct ReplState {
-    target: Target,
 }
 
 #[derive(Deserialize)]
@@ -205,49 +374,8 @@ struct JsonEvent {
     payload: serde_json::Value,
 }
 
-fn mikoshi_root(
-    user_dirs: &UserDirs,
-    state: &mut ReplState,
-    args: MikoshiRoot,
-) -> eyre::Result<()> {
-    match args.directory {
-        None => match &state.target {
-            Target::InMem(_) => println!(">> <in-memory>"),
-            Target::FS(fs) => println!(">> Folder: {:?}", fs.storage.root()),
-            Target::Grpc(_) => println!(">> <gRPC>"),
-        },
-
-        Some(dir) => {
-            let mut path_buf = PathBuf::new();
-            for (idx, part) in dir.split(std::path::MAIN_SEPARATOR).enumerate() {
-                if idx == 0 && part == "~" {
-                    path_buf.push(user_dirs.home_dir());
-                } else {
-                    path_buf.push(part);
-                }
-            }
-
-            let new_storage = FileSystemStorage::new(path_buf)?;
-            let new_index = Lsm::load(LsmSettings::default(), new_storage.clone())?;
-            let new_manager = ChunkManager::load(new_storage.clone())?;
-
-            new_index.rebuild(&new_manager)?;
-
-            state.target = Target::FS(FileSystem {
-                storage: new_storage,
-                index: new_index,
-                manager: new_manager,
-            });
-
-            println!(">> Mikoshi backend root directory was updated successfully");
-        }
-    }
-
-    Ok(())
-}
-
-async fn append_stream(state: &mut ReplState, args: AppendStream) -> eyre::Result<()> {
-    let file = File::open(args.json_file)?;
+fn load_events_from_file(path: impl AsRef<Path>) -> eyre::Result<Vec<Propose>> {
+    let file = File::open(path)?;
     let events = serde_json::from_reader::<_, Vec<JsonEvent>>(file)?;
     let mut proposes = Vec::new();
 
@@ -259,25 +387,7 @@ async fn append_stream(state: &mut ReplState, args: AppendStream) -> eyre::Resul
         });
     }
 
-    let result = match &mut state.target {
-        Target::InMem(in_mem) => {
-            storage_append_stream(&in_mem.index, &in_mem.manager, args.stream_name, proposes)?
-        }
-
-        Target::FS(fs) => {
-            storage_append_stream(&fs.index, &fs.manager, args.stream_name, proposes)?
-        }
-
-        Target::Grpc(client) => {
-            client
-                .append_stream(&args.stream_name, proposes, ExpectedRevision::Any)
-                .await?
-        }
-    };
-
-    println!(">> {:?}", result);
-
-    Ok(())
+    Ok(proposes)
 }
 
 fn storage_append_stream<S>(
@@ -314,7 +424,7 @@ fn storage_read_stream<S>(
 where
     S: Storage + Send + Sync + 'static,
 {
-    let stream_key = mikoshi_hash(&args.stream_name);
+    let stream_key = mikoshi_hash(&args.stream);
     let mut entries = index.scan(stream_key, Direction::Forward, Revision::Start, usize::MAX);
     let mut records = VecDeque::new();
 
@@ -334,162 +444,80 @@ where
     Ok(records)
 }
 
-async fn subscribe_to_stream(state: &mut ReplState, opts: SubscribeToStream) -> eyre::Result<()> {
-    if let Target::Grpc(client) = &mut state.target {
-        let mut stream = client
-            .subscribe_to_stream(opts.stream_name, Revision::Start)
-            .await?;
-
-        while let Some(record) = stream.next().await? {
-            let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
-            let record = serde_json::json!({
-                "stream_name": record.stream_name,
-                "id": record.id,
-                "revision": record.revision,
-                "position": record.position.raw(),
-                "data": data,
-            });
-
-            println!("{}", serde_json::to_string_pretty(&record)?);
-        }
-
-        return Ok(());
-    }
-
-    println!("ERR: You need to be connected to a node to subscribe to a stream");
-    Ok(())
-}
-
-async fn subscribe_to_process(state: &mut ReplState, opts: SubscribeToProcess) -> eyre::Result<()> {
-    if let Target::Grpc(client) = &mut state.target {
-        let source_code = fs::read_to_string(opts.code)?;
-
-        let mut stream = match client.subscribe_to_process(opts.name, source_code).await {
-            Err(e) => {
-                println!("Err: {}", e.message());
-                return Ok(());
-            }
-
-            Ok(stream) => stream,
-        };
-
-        loop {
-            match stream.next().await {
-                Err(e) => {
-                    println!("Err: {}", e);
-                    return Ok(());
-                }
-
-                Ok(msg) => {
-                    let record = if let Some(msg) = msg {
-                        msg
-                    } else {
-                        return Ok(());
-                    };
-
-                    let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
-                    let record = serde_json::json!({
-                        "type": record.r#type,
-                        "stream_name": record.stream_name,
-                        "id": record.id,
-                        "revision": record.revision,
-                        "position": record.position.raw(),
-                        "data": data,
-                    });
-
-                    println!("{}", serde_json::to_string_pretty(&record)?);
-                }
-            }
-        }
-    }
-
-    println!("ERR: You need to be connected to a node to subscribe to a process");
-    Ok(())
-}
-
-async fn list_programmable_subscriptions(state: &mut ReplState) -> eyre::Result<()> {
-    if let Target::Grpc(client) = &mut state.target {
-        let summaries = client.list_programmable_subscriptions().await?;
-
-        for summary in summaries {
-            let summary = serde_json::json!({
-                "id": summary.id,
-                "name": summary.name,
-                "started": summary.started,
-            });
-
-            println!("{}", serde_json::to_string_pretty(&summary)?);
-        }
-
-        return Ok(());
-    }
-
-    println!("ERR: You need to be connected to a node to list programmable subscriptions");
-    Ok(())
-}
-
-async fn kill_programmable_subscription(
-    state: &mut ReplState,
-    opts: KillProcess,
-) -> eyre::Result<()> {
-    let id = match opts.id.parse::<Uuid>() {
-        Ok(id) => id,
+async fn list_programmable_subscriptions(state: &mut OnlineState) {
+    let summaries = match state.client.list_programmable_subscriptions().await {
         Err(e) => {
-            println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
-                e
-            );
-
-            return Ok(());
+            println!("Err: Error when listing programmable subscriptions: {}", e);
+            return;
         }
+
+        Ok(s) => s,
     };
 
-    if let Target::Grpc(client) = &mut state.target {
-        client.kill_programmable_subscription(id).await?;
-        return Ok(());
-    }
-
-    println!("ERR: You need to be connected to a node to kill a programmable subscription");
-    Ok(())
-}
-
-async fn get_programmable_subscription_stats(
-    state: &mut ReplState,
-    opts: ProcessStats,
-) -> eyre::Result<()> {
-    let id = match opts.id.parse::<Uuid>() {
-        Ok(id) => id,
-        Err(e) => {
-            println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
-                e
-            );
-
-            return Ok(());
-        }
-    };
-
-    if let Target::Grpc(client) = &mut state.target {
-        let stats = client.get_programmable_subscription_stats(id).await?;
-        let source_code = stats.source_code;
-
-        let stats = serde_json::json!({
-            "id": stats.id,
-            "name": stats.name,
-            "started": stats.started,
-            "subscriptions": stats.subscriptions,
-            "pushed_events": stats.pushed_events,
+    for summary in summaries {
+        let summary = serde_json::json!({
+            "id": summary.id,
+            "name": summary.name,
+            "started": summary.started,
         });
 
-        println!("{}", serde_json::to_string_pretty(&stats)?);
-        println!("Source code:");
-        println!("{}", source_code);
-
-        return Ok(());
+        println!("{}", serde_json::to_string_pretty(&summary).unwrap());
     }
+}
 
-    println!("ERR: You need to be connected to a node to get a programmable subscription's stats");
-    Ok(())
+async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
+    let id = match id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return;
+        }
+    };
+
+    if let Err(e) = state.client.kill_programmable_subscription(id).await {
+        println!("Err: Error when killing programmable subscription: {}", e);
+    }
+}
+
+async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String) {
+    let id = match id.parse::<Uuid>() {
+        Ok(id) => id,
+        Err(e) => {
+            println!(
+                "Err: provided programmable subscription id is not a valid UUID: {}",
+                e
+            );
+
+            return;
+        }
+    };
+
+    let stats = match state.client.get_programmable_subscription_stats(id).await {
+        Err(e) => {
+            println!("Err: Error when getting programmable subscription: {}", e);
+            return;
+        }
+
+        Ok(stats) => stats,
+    };
+
+    let source_code = stats.source_code;
+
+    let stats = serde_json::json!({
+        "id": stats.id,
+        "name": stats.name,
+        "started": stats.started,
+        "subscriptions": stats.subscriptions,
+        "pushed_events": stats.pushed_events,
+    });
+
+    println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+    println!("Source code:");
+    println!("{}", source_code);
 }
 
 enum Reading {
@@ -504,37 +532,21 @@ impl Reading {
             Reading::Stream(stream) => stream.next().await,
         }
     }
-}
 
-async fn read_stream(state: &mut ReplState, args: ReadStream) -> eyre::Result<()> {
-    let mut reading = match &mut state.target {
-        Target::InMem(in_mem) => {
-            Reading::Sync(storage_read_stream(&in_mem.index, &in_mem.manager, args)?)
+    async fn display(&mut self) -> eyre::Result<()> {
+        while let Some(record) = self.next().await? {
+            let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
+            let record = serde_json::json!({
+                "stream_name": record.stream_name,
+                "id": record.id,
+                "revision": record.revision,
+                "position": record.position.raw(),
+                "data": data,
+            });
+
+            println!("{}", serde_json::to_string_pretty(&record)?);
         }
 
-        Target::FS(fs) => Reading::Sync(storage_read_stream(&fs.index, &fs.manager, args)?),
-
-        Target::Grpc(client) => {
-            let result = client
-                .read_stream(args.stream_name, Revision::Start, Direction::Forward)
-                .await?;
-
-            Reading::Stream(result)
-        }
-    };
-
-    while let Some(record) = reading.next().await? {
-        let data = serde_json::from_slice::<serde_json::Value>(&record.data)?;
-        let record = serde_json::json!({
-            "stream_name": record.stream_name,
-            "id": record.id,
-            "revision": record.revision,
-            "position": record.position.raw(),
-            "data": data,
-        });
-
-        println!("{}", serde_json::to_string_pretty(&record)?);
+        Ok(())
     }
-
-    Ok(())
 }
