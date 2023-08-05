@@ -12,8 +12,6 @@ service Streams {
 	rpc Read (ReadReq) returns (stream ReadResp);
 	rpc Append (stream AppendReq) returns (AppendResp);
 	rpc Delete (DeleteReq) returns (DeleteResp);
-	rpc Tombstone (TombstoneReq) returns (TombstoneResp);
-	rpc BatchAppend (stream BatchAppendReq) returns (stream BatchAppendResp);
 	rpc GetProgrammableSubscriptionStats(ProgStatsReq) returns (ProgStatsResp);
 	rpc KillProgrammableSubscription(KillProgReq) returns (KillProgResp);
 	rpc ListProgrammableSubscriptions(event_store.client.Empty) returns (ListProgsResp);

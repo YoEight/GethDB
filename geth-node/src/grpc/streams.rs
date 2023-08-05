@@ -6,10 +6,9 @@ use tonic::Streaming;
 use geth_common::protocol::{
     streams::{
         append_req, append_resp, list_progs_resp::ProgrammableSubscriptionSummary, read_resp,
-        server::Streams, AppendReq, AppendResp, BatchAppendReq, BatchAppendResp, CountOption,
-        DeleteReq, DeleteResp, KillProgReq, KillProgResp, ListProgsResp, ProgStatsReq,
-        ProgStatsResp, ReadEvent, ReadReq, ReadResp, RecordedEvent, StreamOption, Success,
-        TombstoneReq, TombstoneResp,
+        server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp, KillProgReq,
+        KillProgResp, ListProgsResp, ProgStatsReq, ProgStatsResp, ReadEvent, ReadReq, ReadResp,
+        RecordedEvent, StreamOption, Success,
     },
     Empty,
 };
@@ -248,22 +247,6 @@ impl Streams for StreamsImpl {
     }
 
     async fn delete(&self, _request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
-        todo!()
-    }
-
-    async fn tombstone(
-        &self,
-        _request: Request<TombstoneReq>,
-    ) -> Result<Response<TombstoneResp>, Status> {
-        todo!()
-    }
-
-    type BatchAppendStream = BoxStream<'static, Result<BatchAppendResp, Status>>;
-
-    async fn batch_append(
-        &self,
-        _request: Request<Streaming<BatchAppendReq>>,
-    ) -> Result<Response<Self::BatchAppendStream>, Status> {
         todo!()
     }
 
