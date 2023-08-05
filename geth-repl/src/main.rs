@@ -95,6 +95,11 @@ async fn main() -> eyre::Result<()> {
                             Ok(m) => m,
                         };
 
+                        if let Err(e) = index.rebuild(&manager) {
+                            println!("ERR: Error when rebuilding index: {}", e);
+                            continue;
+                        }
+
                         repl_state = ReplState::Mikoshi(MikoshiState {
                             directory,
                             index,
