@@ -4,6 +4,7 @@ use tonic::Status;
 use tonic::Streaming;
 
 use geth_common::protocol::{
+    self,
     streams::{
         append_req, append_resp, list_progs_resp::ProgrammableSubscriptionSummary, read_resp,
         server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp, KillProgReq,
@@ -254,19 +255,7 @@ impl Streams for StreamsImpl {
         &self,
         request: Request<ProgStatsReq>,
     ) -> Result<Response<ProgStatsResp>, Status> {
-        let id: Uuid = if let Some(id) = request.into_inner().id {
-            match id.try_into() {
-                Ok(id) => id,
-                Err(e) => {
-                    return Err(Status::invalid_argument(format!(
-                        "id is an invalid UUID: {}",
-                        e
-                    )))
-                }
-            }
-        } else {
-            return Err(Status::invalid_argument("id must be defined"));
-        };
+        let id = parse_required_uuid("id", request.into_inner().id)?;
 
         match self.bus.get_programmable_subscription_stats(id).await {
             Err(_) => Err(Status::unavailable("Server is down")),
@@ -297,19 +286,7 @@ impl Streams for StreamsImpl {
         &self,
         request: Request<KillProgReq>,
     ) -> Result<Response<KillProgResp>, Status> {
-        let id: Uuid = if let Some(id) = request.into_inner().id {
-            match id.try_into() {
-                Ok(id) => id,
-                Err(e) => {
-                    return Err(Status::invalid_argument(format!(
-                        "id is an invalid UUID: {}",
-                        e
-                    )))
-                }
-            }
-        } else {
-            return Err(Status::invalid_argument("id must be defined"));
-        };
+        let id = parse_required_uuid("id", request.into_inner().id)?;
 
         if let Err(_) = self.bus.kill_programmable_subscription(id).await {
             Err(Status::unavailable("Server is down"))
@@ -367,4 +344,27 @@ fn parse_propose(req: AppendReq) -> Option<Propose> {
     }
 
     None
+}
+
+fn parse_required_uuid(field_name: &str, grpc_uuid: Option<protocol::Uuid>) -> tonic::Result<Uuid> {
+    if let Some(grpc_uuid) = grpc_uuid {
+        parse_uuid(grpc_uuid)
+    } else {
+        return Err(Status::invalid_argument(format!(
+            "{} must be defined",
+            field_name
+        )));
+    }
+}
+
+fn parse_uuid(grpc_uuid: protocol::Uuid) -> tonic::Result<Uuid> {
+    match grpc_uuid.try_into() {
+        Ok(id) => Ok(id),
+        Err(e) => {
+            return Err(Status::invalid_argument(format!(
+                "id is an invalid UUID: {}",
+                e
+            )))
+        }
+    }
 }
