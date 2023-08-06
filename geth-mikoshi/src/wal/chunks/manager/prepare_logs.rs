@@ -1,5 +1,5 @@
 use crate::storage::Storage;
-use crate::wal::record::PrepareLog;
+use crate::wal::chunks::record::PrepareLog;
 use crate::wal::ChunkManager;
 use crate::IteratorIO;
 use std::io;

@@ -2,11 +2,11 @@ mod prepare_logs;
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::{FileCategory, FileId, Storage};
-use crate::wal::chunk::{Chunk, ChunkInfo};
-use crate::wal::footer::{ChunkFooter, FooterFlags};
-use crate::wal::header::ChunkHeader;
-use crate::wal::manager::prepare_logs::PrepareLogs;
-use crate::wal::record::{PrepareFlags, PrepareLog};
+use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
+use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
+use crate::wal::chunks::header::ChunkHeader;
+use crate::wal::chunks::manager::prepare_logs::PrepareLogs;
+use crate::wal::chunks::record::{PrepareFlags, PrepareLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use chrono::Utc;
 use geth_common::{ExpectedRevision, Position, Propose, WriteResult};

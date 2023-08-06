@@ -1,7 +1,7 @@
 use crate::constants::{CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::FileId;
-use crate::wal::footer::ChunkFooter;
-use crate::wal::header::ChunkHeader;
+use crate::wal::chunks::footer::ChunkFooter;
+use crate::wal::chunks::header::ChunkHeader;
 use nom::bytes::complete::{tag, take_till1};
 use nom::IResult;
 use std::cmp::Ordering;

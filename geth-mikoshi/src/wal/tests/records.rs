@@ -1,4 +1,4 @@
-use crate::wal::record::{PrepareFlags, PrepareLog};
+use crate::wal::chunks::record::{PrepareFlags, PrepareLog};
 use bytes::{Bytes, BytesMut};
 use chrono::Utc;
 use uuid::Uuid;
