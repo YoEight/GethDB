@@ -133,4 +133,12 @@ impl Chunk {
     pub fn contains_log_position(&self, log_position: u64) -> bool {
         log_position >= self.start_position() && log_position < self.end_position()
     }
+
+    pub fn remaining_space_from(&self, log_position: u64) -> u64 {
+        if self.end_position() <= log_position {
+            0
+        } else {
+            self.end_position() - log_position
+        }
+    }
 }
