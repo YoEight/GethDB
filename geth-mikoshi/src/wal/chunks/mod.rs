@@ -5,7 +5,7 @@ use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
 use crate::wal::chunks::manager::Chunks;
 use crate::wal::{LogEntry, LogEntryType, LogReceipt, WriteAheadLog};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use std::collections::BTreeMap;
 use std::io;
 
@@ -129,16 +129,14 @@ where
 {
     fn append(&mut self, r#type: LogEntryType, payload: Bytes) -> io::Result<LogReceipt> {
         let mut starting_position = self.writer;
+        let mut entry = LogEntry {
+            position: starting_position,
+            r#type,
+            payload,
+        };
+
         let mut chunk: Chunk = self.ongoing_chunk();
-        let record_size = payload.len() + 1;
-
-        self.buffer.put_u64_le(record_size as u64);
-        self.buffer.put_u8(r#type.raw());
-        self.buffer.put(payload);
-        self.buffer.put_u64_le(record_size as u64);
-
-        let log_entry = self.buffer.split().freeze();
-        let projected_next_logical_position = log_entry.len() as u64 + starting_position;
+        let projected_next_logical_position = entry.size() + starting_position;
 
         // Chunk is full and we need to flush previous data we accumulated. We also create a new
         // chunk for next writes.
@@ -165,10 +163,12 @@ where
             chunk = self.new_chunk();
         }
 
-        let next_logical_position = log_entry.len() as u64 + starting_position;
+        entry.position = starting_position;
+        let next_logical_position = entry.size() as u64 + starting_position;
         let local_offset = chunk.raw_position(starting_position);
+        entry.put(&mut self.buffer);
         self.storage
-            .write_to(chunk.file_id(), local_offset, log_entry)?;
+            .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
 
         self.writer = next_logical_position;
         flush_writer_chk(&self.storage, self.writer)?;

@@ -1,6 +1,8 @@
 mod constants;
+pub mod domain;
 pub mod hashing;
 pub mod index;
+pub mod marshalling;
 pub mod storage;
 pub mod wal;
 
