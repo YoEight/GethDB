@@ -1,10 +1,13 @@
 pub mod chunks;
+pub mod data_events;
 #[cfg(test)]
 mod tests;
 
+use crate::wal::data_events::DataEvents;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 pub use chunks::manager::ChunkManager;
 use std::io;
+use std::sync::{Arc, RwLock};
 
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub enum LogEntryType {
@@ -37,9 +40,54 @@ pub trait LogRecord {
     fn size(&self) -> usize;
 }
 
+pub struct WALRef<A> {
+    inner: Arc<RwLock<A>>,
+}
+
+impl<A> Clone for WALRef<A> {
+    fn clone(&self) -> Self {
+        Self {
+            inner: self.inner.clone(),
+        }
+    }
+}
+
+impl<WAL: WriteAheadLog> WALRef<WAL> {
+    pub fn new(inner: WAL) -> Self {
+        Self {
+            inner: Arc::new(RwLock::new(inner)),
+        }
+    }
+
+    pub fn append<A: LogRecord>(&self, record: A) -> io::Result<LogReceipt> {
+        let mut inner = self.inner.write().unwrap();
+        inner.append(record)
+    }
+
+    pub fn read_at(&self, position: u64) -> io::Result<LogEntry> {
+        let inner = self.inner.read().unwrap();
+        inner.read_at(position)
+    }
+
+    pub fn data_events(&self, from: u64) -> DataEvents<WAL> {
+        let to = {
+            let inner = self.inner.read().unwrap();
+            inner.write_position()
+        };
+
+        DataEvents::new(self.clone(), from, to)
+    }
+
+    pub fn write_position(&self) -> u64 {
+        let inner = self.inner.read().unwrap();
+        inner.write_position()
+    }
+}
+
 pub trait WriteAheadLog {
     fn append<A: LogRecord>(&mut self, record: A) -> io::Result<LogReceipt>;
-    fn read_at(&mut self, position: u64) -> io::Result<LogEntry>;
+    fn read_at(&self, position: u64) -> io::Result<LogEntry>;
+    fn write_position(&self) -> u64;
 }
 
 pub struct LogEntry {
@@ -49,33 +97,33 @@ pub struct LogEntry {
 }
 
 impl LogEntry {
-    pub fn size(&self) -> u64 {
+    pub fn size(&self) -> u32 {
         let entry_size = 8 // position
                 + 1 // type
                 + self.payload.len();
 
-        8 + entry_size as u64 + 8
+        4 + entry_size as u32 + 4
     }
 
     pub fn put(&self, buffer: &mut BytesMut) {
         let size = self.size();
 
-        buffer.put_u64_le(size);
+        buffer.put_u32_le(size);
         buffer.put_u64_le(self.position);
         buffer.put_u8(self.r#type.raw());
         buffer.put(self.payload.clone());
-        buffer.put_u64_le(size);
+        buffer.put_u32_le(size);
     }
 
     pub fn get(mut src: Bytes) -> Self {
-        let size = src.get_u64_le();
+        let size = src.get_u32_le();
         let position = src.get_u64_le();
         let r#type = LogEntryType::from_raw(src.get_u8());
-        let payload = src.copy_to_bytes((size - 8 - 8 - 1 - 8) as usize);
+        let payload = src.copy_to_bytes((size - 4 - 8 - 1 - 4) as usize);
 
         assert_eq!(
             size,
-            src.get_u64_le(),
+            src.get_u32_le(),
             "We are testing the log entry has a valid frame"
         );
 
@@ -84,6 +132,10 @@ impl LogEntry {
             r#type,
             payload,
         }
+    }
+
+    pub fn unmarshall<A: LogRecord>(&self) -> A {
+        A::get(self.payload.clone())
     }
 }
 

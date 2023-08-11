@@ -4,7 +4,7 @@ use std::sync::mpsc;
 
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
 use geth_mikoshi::domain::StreamEventAppended;
-use geth_mikoshi::wal::WriteAheadLog;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
 use crate::{
@@ -50,16 +50,16 @@ fn optimistic_concurrency_check(
     }
 }
 pub struct StorageWriterService<WAL, S> {
-    wal: WAL,
+    wal: WALRef<WAL>,
     index: Lsm<S>,
 }
 
 impl<WAL, S> StorageWriterService<WAL, S>
 where
-    WAL: WriteAheadLog + Send + Sync + 'static,
+    WAL: WriteAheadLog,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WAL, index: Lsm<S>) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
         Self { wal, index }
     }
 
@@ -103,13 +103,13 @@ where
         Ok(AppendStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
             position: Position(position),
-            next_logical_position: 0,
+            next_logical_position,
         }))
     }
 }
 
 pub fn start<WAL, S>(
-    wal: WAL,
+    wal: WALRef<WAL>,
     index: Lsm<S>,
     index_queue: mpsc::Sender<u64>,
 ) -> mpsc::Sender<AppendStreamMsg>
@@ -131,7 +131,7 @@ fn process<WAL, S>(
     queue: mpsc::Receiver<AppendStreamMsg>,
 ) -> io::Result<()>
 where
-    WAL: WriteAheadLog + Send + Sync + 'static,
+    WAL: WriteAheadLog + Send + Sync,
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {

@@ -140,7 +140,7 @@ where
         };
 
         let mut chunk: Chunk = self.ongoing_chunk();
-        let projected_next_logical_position = entry.size() + starting_position;
+        let projected_next_logical_position = entry.size() as u64 + starting_position;
 
         // Chunk is full and we need to flush previous data we accumulated. We also create a new
         // chunk for next writes.
@@ -183,7 +183,7 @@ where
         })
     }
 
-    fn read_at(&mut self, position: u64) -> io::Result<LogEntry> {
+    fn read_at(&self, position: u64) -> io::Result<LogEntry> {
         let chunk = if let Some(chunk) = self.find_chunk(position) {
             chunk
         } else {
@@ -210,5 +210,9 @@ where
             r#type,
             payload: record_bytes,
         })
+    }
+
+    fn write_position(&self) -> u64 {
+        self.writer
     }
 }

@@ -4,28 +4,30 @@ use std::sync::mpsc;
 use uuid::Uuid;
 
 use geth_common::Position;
+use geth_mikoshi::domain::StreamEventAppended;
+use geth_mikoshi::wal::{LogEntryType, WALRef, WriteAheadLog};
 use geth_mikoshi::{
     hashing::mikoshi_hash,
     index::{IteratorIO, Lsm},
     storage::Storage,
-    wal::ChunkManager,
     Entry, MikoshiStream,
 };
 
 use crate::bus::ReadStreamMsg;
 use crate::messages::{ReadStream, ReadStreamCompleted};
 
-pub struct StorageReaderService<S> {
-    manager: ChunkManager<S>,
+pub struct StorageReaderService<WAL, S> {
+    wal: WALRef<WAL>,
     index: Lsm<S>,
 }
 
-impl<S> StorageReaderService<S>
+impl<WAL, S> StorageReaderService<WAL, S>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(manager: ChunkManager<S>, index: Lsm<S>) -> Self {
-        Self { manager, index }
+    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
+        Self { wal, index }
     }
 
     pub fn read(&mut self, params: ReadStream) -> io::Result<ReadStreamCompleted> {
@@ -34,21 +36,26 @@ where
             .index
             .scan(key, params.direction, params.starting, params.count);
 
-        let manager = self.manager.clone();
+        let wal = self.wal.clone();
         let (read_stream, read_queue) = tokio::sync::mpsc::channel(500);
         let stream = MikoshiStream::new(read_queue);
 
         tokio::task::spawn_blocking(move || {
             while let Some(entry) = iter.next()? {
-                let record = manager.read_at(entry.position)?;
+                let record = wal.read_at(entry.position)?;
+                if record.r#type != LogEntryType::UserData {
+                    continue;
+                }
+
+                let event = record.unmarshall::<StreamEventAppended>();
                 let entry = Entry {
-                    id: record.event_id,
-                    r#type: record.event_type,
-                    stream_name: record.event_stream_id,
-                    revision: record.revision,
-                    data: record.data,
-                    position: Position(entry.position),
-                    created: Utc.timestamp_opt(record.created, 0).unwrap(),
+                    id: event.event_id,
+                    r#type: event.event_type,
+                    stream_name: event.event_stream_id,
+                    revision: event.revision,
+                    data: event.data,
+                    position: Position(record.position),
+                    created: Utc.timestamp_opt(event.created, 0).unwrap(),
                 };
 
                 // if failing means that we don't need to read form the transaction log.
@@ -67,23 +74,25 @@ where
     }
 }
 
-pub fn start<S>(manager: ChunkManager<S>, index: Lsm<S>) -> mpsc::Sender<ReadStreamMsg>
+pub fn start<WAL, S>(wal: WALRef<WAL>, index: Lsm<S>) -> mpsc::Sender<ReadStreamMsg>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let (sender, recv) = mpsc::channel();
-    let service = StorageReaderService::new(manager, index);
+    let service = StorageReaderService::new(wal, index);
 
     tokio::task::spawn_blocking(|| process(service, recv));
 
     sender
 }
 
-fn process<S>(
-    mut service: StorageReaderService<S>,
+fn process<WAL, S>(
+    mut service: StorageReaderService<WAL, S>,
     queue: mpsc::Receiver<ReadStreamMsg>,
 ) -> io::Result<()>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
