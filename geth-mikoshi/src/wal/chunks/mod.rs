@@ -4,7 +4,7 @@ use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
 use crate::wal::chunks::manager::Chunks;
-use crate::wal::{LogEntry, LogEntryType, LogReceipt, WriteAheadLog};
+use crate::wal::{LogEntry, LogEntryType, LogReceipt, LogRecord, WriteAheadLog};
 use bytes::{Buf, Bytes, BytesMut};
 use std::collections::BTreeMap;
 use std::io;
@@ -127,12 +127,16 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append(&mut self, r#type: LogEntryType, payload: Bytes) -> io::Result<LogReceipt> {
+    fn append<A: LogRecord>(&mut self, record: A) -> io::Result<LogReceipt> {
         let mut starting_position = self.writer;
+        let r#type = A::r#type();
+
+        record.put(&mut self.buffer);
+
         let mut entry = LogEntry {
             position: starting_position,
             r#type,
-            payload,
+            payload: self.buffer.split().freeze(),
         };
 
         let mut chunk: Chunk = self.ongoing_chunk();

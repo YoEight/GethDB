@@ -30,8 +30,15 @@ impl LogEntryType {
     }
 }
 
+pub trait LogRecord {
+    fn get(bytes: Bytes) -> Self;
+    fn put(&self, buffer: &mut BytesMut);
+    fn r#type() -> LogEntryType;
+    fn size(&self) -> usize;
+}
+
 pub trait WriteAheadLog {
-    fn append(&mut self, r#type: LogEntryType, payload: Bytes) -> io::Result<LogReceipt>;
+    fn append<A: LogRecord>(&mut self, record: A) -> io::Result<LogReceipt>;
     fn read_at(&mut self, position: u64) -> io::Result<LogEntry>;
 }
 

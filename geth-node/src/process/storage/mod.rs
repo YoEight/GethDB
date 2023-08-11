@@ -3,7 +3,7 @@ mod service;
 use eyre::bail;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::ChunkManager;
+use geth_mikoshi::wal::{ChunkManager, WriteAheadLog};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, ReadStreamMsg};
@@ -37,17 +37,14 @@ impl StorageClient {
     }
 }
 
-pub fn start<S>(
-    manager: ChunkManager<S>,
-    index: Lsm<S>,
-    sub_client: SubscriptionsClient,
-) -> StorageClient
+pub fn start<WAL, S>(wal: WAL, index: Lsm<S>, sub_client: SubscriptionsClient) -> StorageClient
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let (sender, mailbox) = mpsc::unbounded_channel();
     let index_queue = index::start(manager.clone(), index.clone(), sub_client);
-    let writer_queue = writer::start(manager.clone(), index.clone(), index_queue);
+    let writer_queue = writer::start(wal, index.clone(), index_queue);
     let reader_queue = reader::start(manager.clone(), index.clone());
 
     tokio::spawn(service(mailbox, reader_queue, writer_queue));

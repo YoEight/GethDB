@@ -1,8 +1,11 @@
+use chrono::Utc;
 use std::io;
 use std::sync::mpsc;
 
-use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
-use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage, wal::ChunkManager};
+use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_mikoshi::domain::StreamEventAppended;
+use geth_mikoshi::wal::WriteAheadLog;
+use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
 use crate::{
     bus::AppendStreamMsg,
@@ -46,17 +49,18 @@ fn optimistic_concurrency_check(
         }),
     }
 }
-pub struct StorageWriterService<S> {
-    manager: ChunkManager<S>,
+pub struct StorageWriterService<WAL, S> {
+    wal: WAL,
     index: Lsm<S>,
 }
 
-impl<S> StorageWriterService<S>
+impl<WAL, S> StorageWriterService<WAL, S>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(manager: ChunkManager<S>, index: Lsm<S>) -> Self {
-        Self { manager, index }
+    pub fn new(wal: WAL, index: Lsm<S>) -> Self {
+        Self { wal, index }
     }
 
     pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
@@ -70,38 +74,64 @@ where
             return Ok(AppendStreamCompleted::Failure(e));
         }
 
-        let starting_revision = current_revision.next_revision();
+        let created = Utc::now().timestamp();
+        let mut revision = current_revision.next_revision();
+        let mut next_logical_position = 0u64;
+        let mut position = 0u64;
 
-        let result = self
-            .manager
-            .append(params.stream_name, starting_revision, params.events)?;
+        // TODO - implement a version where we don't have to flush the writer checkpoint on every write.
+        for (idx, event) in params.events.into_iter().enumerate() {
+            let event = StreamEventAppended {
+                revision,
+                event_stream_id: params.stream_name.clone(),
+                event_id: event.id,
+                created,
+                event_type: event.r#type,
+                data: event.data,
+                metadata: Default::default(),
+            };
 
-        Ok(AppendStreamCompleted::Success(result))
+            let receipt = self.wal.append(event)?;
+            next_logical_position = receipt.next_position;
+            revision += 1;
+
+            if idx == 0 {
+                position = receipt.position;
+            }
+        }
+
+        Ok(AppendStreamCompleted::Success(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(revision),
+            position: Position(position),
+            next_logical_position: 0,
+        }))
     }
 }
 
-pub fn start<S>(
-    manager: ChunkManager<S>,
+pub fn start<WAL, S>(
+    wal: WAL,
     index: Lsm<S>,
     index_queue: mpsc::Sender<u64>,
 ) -> mpsc::Sender<AppendStreamMsg>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let (sender, recv) = mpsc::channel();
-    let service = StorageWriterService::new(manager, index);
+    let service = StorageWriterService::new(wal, index);
 
     tokio::task::spawn_blocking(|| process(service, index_queue, recv));
 
     sender
 }
 
-fn process<S>(
-    mut service: StorageWriterService<S>,
+fn process<WAL, S>(
+    mut service: StorageWriterService<WAL, S>,
     index_queue: mpsc::Sender<u64>,
     queue: mpsc::Receiver<AppendStreamMsg>,
 ) -> io::Result<()>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
