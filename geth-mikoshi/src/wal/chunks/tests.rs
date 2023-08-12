@@ -17,17 +17,21 @@ fn test_wal_chunk_iso() -> eyre::Result<()> {
     let mut wal = ChunkBasedWAL::load(storage)?;
     let data = serde_json::to_vec(&Foobar { value: 42 })?;
     let event_id = Uuid::new_v4();
+    let transaction_id = Uuid::new_v4();
+    let transaction_offset = 0;
     let created = Utc::now().timestamp();
 
-    wal.append(StreamEventAppended {
+    wal.append(&[StreamEventAppended {
         revision: 3,
         event_stream_id: "foobar".to_string(),
+        transaction_id,
+        transaction_offset,
         event_id,
         created,
         event_type: "created".to_string(),
         data: data.into(),
         metadata: Default::default(),
-    })?;
+    }])?;
 
     let entry = wal.read_at(0)?;
 
@@ -37,6 +41,8 @@ fn test_wal_chunk_iso() -> eyre::Result<()> {
 
     assert_eq!(3, event.revision);
     assert_eq!("foobar", event.event_stream_id);
+    assert_eq!(transaction_offset, event.transaction_offset);
+    assert_eq!(transaction_id, event.transaction_id);
     assert_eq!(event_id, event.event_id);
     assert_eq!(created, event.created);
     assert_eq!("created", event.event_type);

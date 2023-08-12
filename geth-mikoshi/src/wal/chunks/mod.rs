@@ -130,59 +130,62 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append<A: LogRecord>(&mut self, record: A) -> io::Result<LogReceipt> {
+    fn append<A: LogRecord>(&mut self, records: &[A]) -> io::Result<LogReceipt> {
         let mut starting_position = self.writer;
         let r#type = A::r#type();
 
-        record.put(&mut self.buffer);
+        for record in records {
+            record.put(&mut self.buffer);
 
-        let mut entry = LogEntry {
-            position: starting_position,
-            r#type,
-            payload: self.buffer.split().freeze(),
-        };
-
-        let mut chunk: Chunk = self.ongoing_chunk();
-        let projected_next_logical_position = entry.size() as u64 + starting_position;
-
-        // Chunk is full and we need to flush previous data we accumulated. We also create a new
-        // chunk for next writes.
-        if !chunk.contains_log_position(projected_next_logical_position) {
-            let physical_data_size =
-                chunk.raw_position(starting_position) as usize - CHUNK_HEADER_SIZE;
-            let footer = ChunkFooter {
-                flags: FooterFlags::IS_COMPLETED,
-                physical_data_size,
-                logical_data_size: physical_data_size,
-                hash: Default::default(),
+            let mut entry = LogEntry {
+                position: starting_position,
+                r#type,
+                payload: self.buffer.split().freeze(),
             };
 
-            footer.put(&mut self.buffer);
-            self.ongoing_chunk_mut().footer = Some(footer);
+            let mut chunk: Chunk = self.ongoing_chunk();
+            let projected_next_logical_position = entry.size() as u64 + starting_position;
 
-            self.storage.write_to(
-                chunk.file_id(),
-                (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
-                self.buffer.split().freeze(),
-            )?;
+            // Chunk is full and we need to flush previous data we accumulated. We also create a new
+            // chunk for next writes.
+            if !chunk.contains_log_position(projected_next_logical_position) {
+                let physical_data_size =
+                    chunk.raw_position(starting_position) as usize - CHUNK_HEADER_SIZE;
+                let footer = ChunkFooter {
+                    flags: FooterFlags::IS_COMPLETED,
+                    physical_data_size,
+                    logical_data_size: physical_data_size,
+                    hash: Default::default(),
+                };
 
-            starting_position += chunk.remaining_space_from(starting_position);
-            chunk = self.new_chunk();
+                footer.put(&mut self.buffer);
+                self.ongoing_chunk_mut().footer = Some(footer);
+
+                self.storage.write_to(
+                    chunk.file_id(),
+                    (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
+                    self.buffer.split().freeze(),
+                )?;
+
+                starting_position += chunk.remaining_space_from(starting_position);
+                chunk = self.new_chunk();
+            }
+
+            entry.position = starting_position;
+            let next_logical_position = entry.size() as u64 + starting_position;
+            let local_offset = chunk.raw_position(starting_position);
+            entry.put(&mut self.buffer);
+            self.storage
+                .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
+
+            self.writer = next_logical_position;
         }
 
-        entry.position = starting_position;
-        let next_logical_position = entry.size() as u64 + starting_position;
-        let local_offset = chunk.raw_position(starting_position);
-        entry.put(&mut self.buffer);
-        self.storage
-            .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
-
-        self.writer = next_logical_position;
         flush_writer_chk(&self.storage, self.writer)?;
 
         Ok(LogReceipt {
             position: starting_position,
-            next_position: next_logical_position,
+            next_position: self.writer,
         })
     }
 

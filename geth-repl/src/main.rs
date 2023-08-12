@@ -420,42 +420,41 @@ where
     let mut revision = index
         .highest_revision(stream_key)?
         .map_or_else(|| 0, |x| x + 1);
-    let mut result = WriteResult {
-        next_expected_version: ExpectedRevision::NoStream,
-        position: Position(0),
-        next_logical_position: 0,
-    };
 
-    for (idx, event) in proposes.into_iter().enumerate() {
-        let event = StreamEventAppended {
+    let transaction_id = Uuid::new_v4();
+    let mut transaction_offset = 0;
+    let mut events = Vec::with_capacity(proposes.len());
+
+    for event in proposes {
+        events.push(StreamEventAppended {
             revision,
             event_stream_id: stream_name.clone(),
+            transaction_id,
+            transaction_offset,
             event_id: event.id,
             created,
             event_type: event.r#type,
             data: event.data,
             metadata: Default::default(),
-        };
+        });
 
-        let receipt = wal.append(event)?;
-
-        if idx == 0 {
-            result.position = Position(receipt.position);
-        }
-
-        result.next_logical_position = receipt.next_position;
         revision += 1;
+        transaction_offset += 1;
     }
 
-    result.next_expected_version = ExpectedRevision::Revision(revision);
+    let receipt = wal.append(events.as_slice())?;
+    let position = receipt.position;
+    let result = WriteResult {
+        next_expected_version: ExpectedRevision::Revision(revision),
+        position: Position(position),
+        next_logical_position: receipt.next_position,
+    };
 
-    let records = wal
-        .data_events(result.position.0)
-        .map(|(position, record)| {
-            let key = mikoshi_hash(&record.event_stream_id);
+    let records = wal.data_events(position).map(|(position, record)| {
+        let key = mikoshi_hash(&record.event_stream_id);
 
-            (key, record.revision, position)
-        });
+        (key, record.revision, position)
+    });
 
     index.put(records)?;
 

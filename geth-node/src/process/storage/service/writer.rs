@@ -1,6 +1,7 @@
 use chrono::Utc;
 use std::io;
 use std::sync::mpsc;
+use uuid::Uuid;
 
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
 use geth_mikoshi::domain::StreamEventAppended;
@@ -76,34 +77,33 @@ where
 
         let created = Utc::now().timestamp();
         let mut revision = current_revision.next_revision();
-        let mut next_logical_position = 0u64;
-        let mut position = 0u64;
+        let transaction_id = Uuid::new_v4();
+        let mut transaction_offset = 0u16;
+        let mut events = Vec::with_capacity(params.events.len());
 
-        // TODO - implement a version where we don't have to flush the writer checkpoint on every write.
-        for (idx, event) in params.events.into_iter().enumerate() {
-            let event = StreamEventAppended {
+        for event in params.events {
+            events.push(StreamEventAppended {
                 revision,
                 event_stream_id: params.stream_name.clone(),
+                transaction_id,
+                transaction_offset,
                 event_id: event.id,
                 created,
                 event_type: event.r#type,
                 data: event.data,
                 metadata: Default::default(),
-            };
+            });
 
-            let receipt = self.wal.append(event)?;
-            next_logical_position = receipt.next_position;
             revision += 1;
-
-            if idx == 0 {
-                position = receipt.position;
-            }
+            transaction_offset += 1;
         }
+
+        let receipt = self.wal.append(events.as_slice())?;
 
         Ok(AppendStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
-            position: Position(position),
-            next_logical_position,
+            position: Position(receipt.position),
+            next_logical_position: receipt.next_position,
         }))
     }
 }
