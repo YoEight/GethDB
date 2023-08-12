@@ -86,7 +86,11 @@ where
             continue;
         }
 
-        service.chase(checkpoint)?;
+        if let Err(e) = service.chase(checkpoint) {
+            tracing::error!("Error when running the index chasing process: {}", e);
+            break;
+        }
+
         checkpoint = msg;
     }
 

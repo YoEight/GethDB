@@ -4,7 +4,7 @@ use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
 use crate::wal::chunks::manager::Chunks;
-use crate::wal::{LogEntry, LogEntryType, LogReceipt, LogRecord, WriteAheadLog};
+use crate::wal::{LogEntry, LogReceipt, LogRecord, WriteAheadLog};
 use bytes::{Buf, Bytes, BytesMut};
 use std::collections::BTreeMap;
 use std::io;
@@ -14,6 +14,9 @@ mod footer;
 mod header;
 pub mod manager;
 pub mod record;
+
+#[cfg(test)]
+mod tests;
 
 pub struct ChunkBasedWAL<S> {
     buffer: BytesMut,
@@ -199,17 +202,21 @@ where
             .read_from(chunk.file_id(), local_offset, 4)?
             .get_u32_le() as usize;
 
-        let mut record_bytes =
+        let record_bytes =
             self.storage
                 .read_from(chunk.file_id(), local_offset + 4, record_size)?;
 
-        let r#type = LogEntryType::from_raw(record_bytes.get_u8());
+        let post_record_size = self
+            .storage
+            .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
+            .get_u32_le() as usize;
 
-        Ok(LogEntry {
-            position,
-            r#type,
-            payload: record_bytes,
-        })
+        assert_eq!(
+            record_size, post_record_size,
+            "pre and post record size don't match!"
+        );
+
+        Ok(LogEntry::get(record_bytes))
     }
 
     fn write_position(&self) -> u64 {

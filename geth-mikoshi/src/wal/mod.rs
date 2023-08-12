@@ -9,7 +9,7 @@ pub use chunks::manager::ChunkManager;
 use std::io;
 use std::sync::{Arc, RwLock};
 
-#[derive(Clone, Copy, Eq, PartialEq)]
+#[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum LogEntryType {
     UserData,
     Unsupported(u8),
@@ -98,15 +98,17 @@ pub struct LogEntry {
 
 impl LogEntry {
     pub fn size(&self) -> u32 {
-        let entry_size = 8 // position
-                + 1 // type
-                + self.payload.len();
+        4 + self.payload_size() + 4
+    }
 
-        4 + entry_size as u32 + 4
+    pub fn payload_size(&self) -> u32 {
+        8 // position
+            + 1 // type
+            + self.payload.len() as u32
     }
 
     pub fn put(&self, buffer: &mut BytesMut) {
-        let size = self.size();
+        let size = self.payload_size();
 
         buffer.put_u32_le(size);
         buffer.put_u64_le(self.position);
@@ -115,17 +117,12 @@ impl LogEntry {
         buffer.put_u32_le(size);
     }
 
+    /// Parsing is not asymmetrical with serialisation because parsing the size of the record
+    /// is done directly when communicating with the storage abstraction directly.
     pub fn get(mut src: Bytes) -> Self {
-        let size = src.get_u32_le();
         let position = src.get_u64_le();
         let r#type = LogEntryType::from_raw(src.get_u8());
-        let payload = src.copy_to_bytes((size - 4 - 8 - 1 - 4) as usize);
-
-        assert_eq!(
-            size,
-            src.get_u32_le(),
-            "We are testing the log entry has a valid frame"
-        );
+        let payload = src;
 
         Self {
             position,

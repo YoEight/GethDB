@@ -135,13 +135,23 @@ where
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
-        let result = service.append(msg.payload)?;
+        let stream_name = msg.payload.stream_name.clone();
+        match service.append(msg.payload) {
+            Err(e) => {
+                let _ = msg.mail.send(Err(eyre::eyre!(
+                    "Error when appending to '{}': {}",
+                    stream_name,
+                    e
+                )));
+            }
+            Ok(result) => {
+                if let AppendStreamCompleted::Success(result) = &result {
+                    let _ = index_queue.send(result.next_logical_position);
+                }
 
-        if let AppendStreamCompleted::Success(result) = &result {
-            let _ = index_queue.send(result.next_logical_position);
+                let _ = msg.mail.send(Ok(result));
+            }
         }
-
-        let _ = msg.mail.send(result);
     }
 
     Ok(())

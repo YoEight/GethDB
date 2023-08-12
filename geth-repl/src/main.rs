@@ -118,12 +118,19 @@ async fn main() -> eyre::Result<()> {
                         let state = repl_state.online();
                         let result = state
                             .client
-                            .read_stream(args.stream, Revision::Start, Direction::Forward)
-                            .await?;
+                            .read_stream(args.stream.as_str(), Revision::Start, Direction::Forward)
+                            .await;
 
-                        let mut reading = Reading::Stream(result);
+                        match result {
+                            Err(e) => {
+                                println!("ERR: Error when reading from '{}': {}", args.stream, e);
+                            }
+                            Ok(result) => {
+                                let mut reading = Reading::Stream(result);
 
-                        reading.display().await?;
+                                reading.display().await?;
+                            }
+                        }
                     }
 
                     OnlineCommands::Subscribe(cmd) => {

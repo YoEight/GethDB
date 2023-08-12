@@ -96,8 +96,19 @@ where
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
-        let result = service.read(msg.payload)?;
-        let _ = msg.mail.send(result);
+        let stream_name = msg.payload.stream_name.clone();
+        match service.read(msg.payload) {
+            Err(e) => {
+                let _ = msg.mail.send(Err(eyre::eyre!(
+                    "Error when reading from '{}': {}",
+                    stream_name,
+                    e
+                )));
+            }
+            Ok(result) => {
+                let _ = msg.mail.send(Ok(result));
+            }
+        }
     }
 
     Ok(())
