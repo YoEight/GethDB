@@ -463,6 +463,24 @@ where
 
 fn storage_read_stream<WAL, S>(
     index: &Lsm<S>,
+    wal: &WALRef<WAL>,
+    args: ReadStream,
+) -> io::Result<VecDeque<Record>>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
+    let records = if args.disable_index {
+        storage_read_stream_without_index(wal, args)
+    } else {
+        storage_read_stream_with_index(index, wal, args)
+    }?;
+
+    Ok(records)
+}
+
+fn storage_read_stream_with_index<WAL, S>(
+    index: &Lsm<S>,
     manager: &WALRef<WAL>,
     args: ReadStream,
 ) -> io::Result<VecDeque<Record>>
@@ -488,6 +506,34 @@ where
             r#type: event.event_type,
             stream_name: event.event_stream_id,
             position: Position(record.position),
+            revision: event.revision,
+            data: event.data,
+        });
+    }
+
+    Ok(records)
+}
+
+fn storage_read_stream_without_index<WAL>(
+    wal: &WALRef<WAL>,
+    args: ReadStream,
+) -> io::Result<VecDeque<Record>>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+{
+    let mut records = VecDeque::new();
+    let mut iter = wal.data_events(0);
+
+    while let Some((position, event)) = iter.next()? {
+        if event.event_stream_id != args.stream {
+            continue;
+        }
+
+        records.push_back(Record {
+            id: event.event_id,
+            r#type: event.event_type,
+            stream_name: event.event_stream_id,
+            position: Position(position),
             revision: event.revision,
             data: event.data,
         });

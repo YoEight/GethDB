@@ -106,6 +106,8 @@ pub struct AppendStream {
 
 #[derive(Args, Debug)]
 pub struct ReadStream {
+    #[arg(long)]
+    pub disable_index: bool,
     pub stream: String,
 }
 
