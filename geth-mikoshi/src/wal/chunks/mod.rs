@@ -131,26 +131,26 @@ where
     S: Storage + 'static,
 {
     fn append<A: LogRecord>(&mut self, records: &[A]) -> io::Result<LogReceipt> {
-        let mut starting_position = self.writer;
+        let mut position = self.writer;
+        let starting_position = position;
         let r#type = A::r#type();
 
         for record in records {
             record.put(&mut self.buffer);
 
             let mut entry = LogEntry {
-                position: starting_position,
+                position,
                 r#type,
                 payload: self.buffer.split().freeze(),
             };
 
             let mut chunk: Chunk = self.ongoing_chunk();
-            let projected_next_logical_position = entry.size() as u64 + starting_position;
+            let projected_next_logical_position = entry.size() as u64 + position;
 
             // Chunk is full and we need to flush previous data we accumulated. We also create a new
             // chunk for next writes.
             if !chunk.contains_log_position(projected_next_logical_position) {
-                let physical_data_size =
-                    chunk.raw_position(starting_position) as usize - CHUNK_HEADER_SIZE;
+                let physical_data_size = chunk.raw_position(position) as usize - CHUNK_HEADER_SIZE;
                 let footer = ChunkFooter {
                     flags: FooterFlags::IS_COMPLETED,
                     physical_data_size,
@@ -167,18 +167,18 @@ where
                     self.buffer.split().freeze(),
                 )?;
 
-                starting_position += chunk.remaining_space_from(starting_position);
+                position += chunk.remaining_space_from(position);
                 chunk = self.new_chunk();
             }
 
-            entry.position = starting_position;
-            let next_logical_position = entry.size() as u64 + starting_position;
-            let local_offset = chunk.raw_position(starting_position);
+            entry.position = position;
+            let local_offset = chunk.raw_position(position);
+            position += entry.size() as u64;
             entry.put(&mut self.buffer);
             self.storage
                 .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
 
-            self.writer = next_logical_position;
+            self.writer = position;
         }
 
         flush_writer_chk(&self.storage, self.writer)?;
