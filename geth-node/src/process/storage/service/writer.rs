@@ -1,8 +1,12 @@
+use chrono::Utc;
 use std::io;
 use std::sync::mpsc;
+use uuid::Uuid;
 
-use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
-use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage, wal::ChunkManager};
+use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_mikoshi::domain::StreamEventAppended;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
 use crate::{
     bus::AppendStreamMsg,
@@ -46,17 +50,18 @@ fn optimistic_concurrency_check(
         }),
     }
 }
-pub struct StorageWriterService<S> {
-    manager: ChunkManager<S>,
+pub struct StorageWriterService<WAL, S> {
+    wal: WALRef<WAL>,
     index: Lsm<S>,
 }
 
-impl<S> StorageWriterService<S>
+impl<WAL, S> StorageWriterService<WAL, S>
 where
+    WAL: WriteAheadLog,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(manager: ChunkManager<S>, index: Lsm<S>) -> Self {
-        Self { manager, index }
+    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
+        Self { wal, index }
     }
 
     pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
@@ -70,48 +75,83 @@ where
             return Ok(AppendStreamCompleted::Failure(e));
         }
 
-        let starting_revision = current_revision.next_revision();
+        let created = Utc::now().timestamp();
+        let mut revision = current_revision.next_revision();
+        let transaction_id = Uuid::new_v4();
+        let mut transaction_offset = 0u16;
+        let mut events = Vec::with_capacity(params.events.len());
 
-        let result = self
-            .manager
-            .append(params.stream_name, starting_revision, params.events)?;
+        for event in params.events {
+            events.push(StreamEventAppended {
+                revision,
+                event_stream_id: params.stream_name.clone(),
+                transaction_id,
+                transaction_offset,
+                event_id: event.id,
+                created,
+                event_type: event.r#type,
+                data: event.data,
+                metadata: Default::default(),
+            });
 
-        Ok(AppendStreamCompleted::Success(result))
+            revision += 1;
+            transaction_offset += 1;
+        }
+
+        let receipt = self.wal.append(events.as_slice())?;
+
+        Ok(AppendStreamCompleted::Success(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(revision),
+            position: Position(receipt.position),
+            next_logical_position: receipt.next_position,
+        }))
     }
 }
 
-pub fn start<S>(
-    manager: ChunkManager<S>,
+pub fn start<WAL, S>(
+    wal: WALRef<WAL>,
     index: Lsm<S>,
     index_queue: mpsc::Sender<u64>,
 ) -> mpsc::Sender<AppendStreamMsg>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let (sender, recv) = mpsc::channel();
-    let service = StorageWriterService::new(manager, index);
+    let service = StorageWriterService::new(wal, index);
 
     tokio::task::spawn_blocking(|| process(service, index_queue, recv));
 
     sender
 }
 
-fn process<S>(
-    mut service: StorageWriterService<S>,
+fn process<WAL, S>(
+    mut service: StorageWriterService<WAL, S>,
     index_queue: mpsc::Sender<u64>,
     queue: mpsc::Receiver<AppendStreamMsg>,
 ) -> io::Result<()>
 where
+    WAL: WriteAheadLog + Send + Sync,
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
-        let result = service.append(msg.payload)?;
+        let stream_name = msg.payload.stream_name.clone();
+        match service.append(msg.payload) {
+            Err(e) => {
+                let _ = msg.mail.send(Err(eyre::eyre!(
+                    "Error when appending to '{}': {}",
+                    stream_name,
+                    e
+                )));
+            }
+            Ok(result) => {
+                if let AppendStreamCompleted::Success(result) = &result {
+                    let _ = index_queue.send(result.next_logical_position);
+                }
 
-        if let AppendStreamCompleted::Success(result) = &result {
-            let _ = index_queue.send(result.next_logical_position);
+                let _ = msg.mail.send(Ok(result));
+            }
         }
-
-        let _ = msg.mail.send(result);
     }
 
     Ok(())

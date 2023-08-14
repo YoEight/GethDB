@@ -1,19 +1,29 @@
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
-use crate::storage::{FileId, Storage};
+use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::chunks::manager::Chunks;
-use crate::wal::{LogEntry, LogEntryType, LogReceipt, WriteAheadLog};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use crate::wal::{LogEntry, LogReceipt, LogRecord, WriteAheadLog};
+use bytes::{Buf, Bytes, BytesMut};
 use std::collections::BTreeMap;
 use std::io;
 
 mod chunk;
 mod footer;
 mod header;
-pub mod manager;
-pub mod record;
+
+#[cfg(test)]
+mod tests;
+
+#[derive(Copy, Clone, Debug)]
+pub struct Chunks;
+impl FileCategory for Chunks {
+    type Item = ChunkInfo;
+
+    fn parse(&self, name: &str) -> Option<Self::Item> {
+        ChunkInfo::from_chunk_filename(name)
+    }
+}
 
 pub struct ChunkBasedWAL<S> {
     buffer: BytesMut,
@@ -127,59 +137,66 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append(&mut self, r#type: LogEntryType, payload: Bytes) -> io::Result<LogReceipt> {
-        let mut starting_position = self.writer;
-        let mut chunk: Chunk = self.ongoing_chunk();
-        let record_size = payload.len() + 1;
+    fn append<A: LogRecord>(&mut self, records: &[A]) -> io::Result<LogReceipt> {
+        let mut position = self.writer;
+        let starting_position = position;
+        let r#type = A::r#type();
 
-        self.buffer.put_u64_le(record_size as u64);
-        self.buffer.put_u8(r#type.raw());
-        self.buffer.put(payload);
-        self.buffer.put_u64_le(record_size as u64);
+        for record in records {
+            record.put(&mut self.buffer);
 
-        let log_entry = self.buffer.split().freeze();
-        let projected_next_logical_position = log_entry.len() as u64 + starting_position;
-
-        // Chunk is full and we need to flush previous data we accumulated. We also create a new
-        // chunk for next writes.
-        if !chunk.contains_log_position(projected_next_logical_position) {
-            let physical_data_size =
-                chunk.raw_position(starting_position) as usize - CHUNK_HEADER_SIZE;
-            let footer = ChunkFooter {
-                flags: FooterFlags::IS_COMPLETED,
-                physical_data_size,
-                logical_data_size: physical_data_size,
-                hash: Default::default(),
+            let mut entry = LogEntry {
+                position,
+                r#type,
+                payload: self.buffer.split().freeze(),
             };
 
-            footer.put(&mut self.buffer);
-            self.ongoing_chunk_mut().footer = Some(footer);
+            let mut chunk: Chunk = self.ongoing_chunk();
+            let projected_next_logical_position = entry.size() as u64 + position;
 
-            self.storage.write_to(
-                chunk.file_id(),
-                (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
-                self.buffer.split().freeze(),
-            )?;
+            // Chunk is full and we need to flush previous data we accumulated. We also create a new
+            // chunk for next writes.
+            if !chunk.contains_log_position(projected_next_logical_position) {
+                let physical_data_size = chunk.raw_position(position) as usize - CHUNK_HEADER_SIZE;
+                let footer = ChunkFooter {
+                    flags: FooterFlags::IS_COMPLETED,
+                    physical_data_size,
+                    logical_data_size: physical_data_size,
+                    hash: Default::default(),
+                };
 
-            starting_position += chunk.remaining_space_from(starting_position);
-            chunk = self.new_chunk();
+                footer.put(&mut self.buffer);
+                self.ongoing_chunk_mut().footer = Some(footer);
+
+                self.storage.write_to(
+                    chunk.file_id(),
+                    (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
+                    self.buffer.split().freeze(),
+                )?;
+
+                position += chunk.remaining_space_from(position);
+                chunk = self.new_chunk();
+            }
+
+            entry.position = position;
+            let local_offset = chunk.raw_position(position);
+            position += entry.size() as u64;
+            entry.put(&mut self.buffer);
+            self.storage
+                .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
+
+            self.writer = position;
         }
 
-        let next_logical_position = log_entry.len() as u64 + starting_position;
-        let local_offset = chunk.raw_position(starting_position);
-        self.storage
-            .write_to(chunk.file_id(), local_offset, log_entry)?;
-
-        self.writer = next_logical_position;
         flush_writer_chk(&self.storage, self.writer)?;
 
         Ok(LogReceipt {
             position: starting_position,
-            next_position: next_logical_position,
+            next_position: self.writer,
         })
     }
 
-    fn read_at(&mut self, position: u64) -> io::Result<LogEntry> {
+    fn read_at(&self, position: u64) -> io::Result<LogEntry> {
         let chunk = if let Some(chunk) = self.find_chunk(position) {
             chunk
         } else {
@@ -195,16 +212,24 @@ where
             .read_from(chunk.file_id(), local_offset, 4)?
             .get_u32_le() as usize;
 
-        let mut record_bytes =
+        let record_bytes =
             self.storage
                 .read_from(chunk.file_id(), local_offset + 4, record_size)?;
 
-        let r#type = LogEntryType::from_raw(record_bytes.get_u8());
+        let post_record_size = self
+            .storage
+            .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
+            .get_u32_le() as usize;
 
-        Ok(LogEntry {
-            position,
-            r#type,
-            payload: record_bytes,
-        })
+        assert_eq!(
+            record_size, post_record_size,
+            "pre and post record size don't match!"
+        );
+
+        Ok(LogEntry::get(record_bytes))
+    }
+
+    fn write_position(&self) -> u64 {
+        self.writer
     }
 }

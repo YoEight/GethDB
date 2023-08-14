@@ -1,6 +1,7 @@
 mod cli;
 mod utils;
 
+use chrono::Utc;
 use directories::UserDirs;
 use glyph::{FileBackedInputs, Input, PromptOptions};
 use std::collections::VecDeque;
@@ -14,10 +15,12 @@ use crate::cli::{
 use crate::utils::expand_path;
 use geth_client::Client;
 use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
+use geth_mikoshi::domain::StreamEventAppended;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::{Lsm, LsmSettings};
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::ChunkManager;
+use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::{LogEntryType, WALRef, WriteAheadLog};
 use geth_mikoshi::IteratorIO;
 use serde::Deserialize;
 use uuid::Uuid;
@@ -83,7 +86,7 @@ async fn main() -> eyre::Result<()> {
                             Ok(i) => i,
                         };
 
-                        let manager = match ChunkManager::load(storage.clone()) {
+                        let wal = match ChunkBasedWAL::load(storage.clone()) {
                             Err(e) => {
                                 println!(
                                     "ERR: Error when loading chunk manager in {:?}: {}",
@@ -92,10 +95,10 @@ async fn main() -> eyre::Result<()> {
                                 continue;
                             }
 
-                            Ok(m) => m,
+                            Ok(m) => WALRef::new(m),
                         };
 
-                        if let Err(e) = index.rebuild(&manager) {
+                        if let Err(e) = index.rebuild(&wal) {
                             println!("ERR: Error when rebuilding index: {}", e);
                             continue;
                         }
@@ -103,7 +106,7 @@ async fn main() -> eyre::Result<()> {
                         repl_state = ReplState::Mikoshi(MikoshiState {
                             directory,
                             index,
-                            manager,
+                            wal,
                         });
                     }
 
@@ -115,12 +118,19 @@ async fn main() -> eyre::Result<()> {
                         let state = repl_state.online();
                         let result = state
                             .client
-                            .read_stream(args.stream, Revision::Start, Direction::Forward)
-                            .await?;
+                            .read_stream(args.stream.as_str(), Revision::Start, Direction::Forward)
+                            .await;
 
-                        let mut reading = Reading::Stream(result);
+                        match result {
+                            Err(e) => {
+                                println!("ERR: Error when reading from '{}': {}", args.stream, e);
+                            }
+                            Ok(result) => {
+                                let mut reading = Reading::Stream(result);
 
-                        reading.display().await?;
+                                reading.display().await?;
+                            }
+                        }
                     }
 
                     OnlineCommands::Subscribe(cmd) => {
@@ -232,7 +242,7 @@ async fn main() -> eyre::Result<()> {
                     match cmd.commands {
                         MikoshiCommands::Read(args) => {
                             let state = repl_state.mikoshi();
-                            match storage_read_stream(&state.index, &state.manager, args) {
+                            match storage_read_stream(&state.index, &state.wal, args) {
                                 Err(e) => {
                                     println!("ERR: Error when reading directly events from GethDB files: {}", e);
                                     continue;
@@ -260,7 +270,7 @@ async fn main() -> eyre::Result<()> {
 
                             match storage_append_stream(
                                 &state.index,
-                                &state.manager,
+                                &state.wal,
                                 args.stream.clone(),
                                 proposes,
                             ) {
@@ -370,7 +380,7 @@ struct OnlineState {
 struct MikoshiState {
     directory: PathBuf,
     index: Lsm<FileSystemStorage>,
-    manager: ChunkManager<FileSystemStorage>,
+    wal: WALRef<ChunkBasedWAL<FileSystemStorage>>,
 }
 
 #[derive(Deserialize)]
@@ -395,25 +405,55 @@ fn load_events_from_file(path: impl AsRef<Path>) -> eyre::Result<Vec<Propose>> {
     Ok(proposes)
 }
 
-fn storage_append_stream<S>(
+fn storage_append_stream<WAL, S>(
     index: &Lsm<S>,
-    manager: &ChunkManager<S>,
+    wal: &WALRef<WAL>,
     stream_name: String,
     proposes: Vec<Propose>,
 ) -> io::Result<WriteResult>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let stream_key = mikoshi_hash(&stream_name);
-    let next_revision = index
+    let created = Utc::now().timestamp();
+    let mut revision = index
         .highest_revision(stream_key)?
         .map_or_else(|| 0, |x| x + 1);
-    let result = manager.append(stream_name, next_revision, proposes)?;
 
-    let records = manager.prepare_logs(result.position.0).map(|record| {
+    let transaction_id = Uuid::new_v4();
+    let mut transaction_offset = 0;
+    let mut events = Vec::with_capacity(proposes.len());
+
+    for event in proposes {
+        events.push(StreamEventAppended {
+            revision,
+            event_stream_id: stream_name.clone(),
+            transaction_id,
+            transaction_offset,
+            event_id: event.id,
+            created,
+            event_type: event.r#type,
+            data: event.data,
+            metadata: Default::default(),
+        });
+
+        revision += 1;
+        transaction_offset += 1;
+    }
+
+    let receipt = wal.append(events.as_slice())?;
+    let position = receipt.position;
+    let result = WriteResult {
+        next_expected_version: ExpectedRevision::Revision(revision),
+        position: Position(position),
+        next_logical_position: receipt.next_position,
+    };
+
+    let records = wal.data_events(position).map(|(position, record)| {
         let key = mikoshi_hash(&record.event_stream_id);
 
-        (key, record.revision, record.logical_position)
+        (key, record.revision, position)
     });
 
     index.put(records)?;
@@ -421,12 +461,31 @@ where
     Ok(result)
 }
 
-fn storage_read_stream<S>(
+fn storage_read_stream<WAL, S>(
     index: &Lsm<S>,
-    manager: &ChunkManager<S>,
+    wal: &WALRef<WAL>,
     args: ReadStream,
 ) -> io::Result<VecDeque<Record>>
 where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
+    let records = if args.disable_index {
+        storage_read_stream_without_index(wal, args)
+    } else {
+        storage_read_stream_with_index(index, wal, args)
+    }?;
+
+    Ok(records)
+}
+
+fn storage_read_stream_with_index<WAL, S>(
+    index: &Lsm<S>,
+    manager: &WALRef<WAL>,
+    args: ReadStream,
+) -> io::Result<VecDeque<Record>>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     let stream_key = mikoshi_hash(&args.stream);
@@ -434,15 +493,49 @@ where
     let mut records = VecDeque::new();
 
     while let Some(entry) = entries.next()? {
-        let prepare = manager.read_at(entry.position)?;
+        let record = manager.read_at(entry.position)?;
+
+        if record.r#type != LogEntryType::UserData {
+            continue;
+        }
+
+        let event = record.unmarshall::<StreamEventAppended>();
 
         records.push_back(Record {
-            id: prepare.event_id,
-            r#type: prepare.event_type,
-            stream_name: prepare.event_stream_id,
-            position: Position(prepare.logical_position),
-            revision: prepare.revision,
-            data: prepare.data,
+            id: event.event_id,
+            r#type: event.event_type,
+            stream_name: event.event_stream_id,
+            position: Position(record.position),
+            revision: event.revision,
+            data: event.data,
+        });
+    }
+
+    Ok(records)
+}
+
+fn storage_read_stream_without_index<WAL>(
+    wal: &WALRef<WAL>,
+    args: ReadStream,
+) -> io::Result<VecDeque<Record>>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+{
+    let mut records = VecDeque::new();
+    let mut iter = wal.data_events(0);
+
+    while let Some((position, event)) = iter.next()? {
+        if event.event_stream_id != args.stream {
+            continue;
+        }
+
+        records.push_back(Record {
+            id: event.event_id,
+            r#type: event.event_type,
+            stream_name: event.event_stream_id,
+            position: Position(position),
+            revision: event.revision,
+            data: event.data,
         });
     }
 

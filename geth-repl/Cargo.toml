@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies.glyph]
 git = "https://github.com/YoEight/glyph.git"
-branch = "master"
+tag = "0.1.0"
 
 [dependencies.geth-client]
 path = "../geth-client"
@@ -32,7 +32,7 @@ features = ["derive"]
 
 [dependencies]
 eyre = "0.6"
-#structopt = "0.3"
 serde_json = "1"
 serde = "1"
 directories = "5"
+chrono = "0.4"

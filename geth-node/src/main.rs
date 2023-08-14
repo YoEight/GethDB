@@ -6,7 +6,8 @@ mod process;
 use bus::new_bus;
 use geth_mikoshi::index::{Lsm, LsmSettings};
 use geth_mikoshi::storage::FileSystemStorage;
-use geth_mikoshi::wal::ChunkManager;
+use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::WALRef;
 use std::path::PathBuf;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
@@ -23,10 +24,10 @@ async fn main() -> eyre::Result<()> {
     let storage = FileSystemStorage::new(PathBuf::from("./geth"))?;
     let index = Lsm::load(LsmSettings::default(), storage.clone())?;
 
-    let manager = ChunkManager::load(storage)?;
-    index.rebuild(&manager)?;
+    let wal = WALRef::new(ChunkBasedWAL::load(storage)?);
+    index.rebuild(&wal)?;
 
-    process::start(mailbox, manager, index);
+    process::start(mailbox, wal, index);
     grpc::start_server(bus).await?;
 
     Ok(())

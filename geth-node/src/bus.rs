@@ -22,12 +22,12 @@ pub enum Msg {
 
 pub struct ReadStreamMsg {
     pub payload: ReadStream,
-    pub mail: oneshot::Sender<ReadStreamCompleted>,
+    pub mail: oneshot::Sender<eyre::Result<ReadStreamCompleted>>,
 }
 
 pub struct AppendStreamMsg {
     pub payload: AppendStream,
-    pub mail: oneshot::Sender<AppendStreamCompleted>,
+    pub mail: oneshot::Sender<eyre::Result<AppendStreamCompleted>>,
 }
 
 pub struct SubscribeMsg {
@@ -70,7 +70,7 @@ impl Bus {
         }
 
         if let Ok(resp) = recv.await {
-            return Ok(resp);
+            return resp;
         }
 
         bail!("Main bus has shutdown!");
@@ -91,7 +91,7 @@ impl Bus {
         }
 
         if let Ok(resp) = recv.await {
-            return Ok(resp);
+            return resp;
         }
 
         bail!("Main bus has shutdown!");
