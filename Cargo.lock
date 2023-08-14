@@ -674,7 +674,7 @@ checksum = "b6c80984affa11d98d1b88b66ac8853f143217b399d3c74116778ff8fdb4ed2e"
 [[package]]
 name = "glyph"
 version = "0.1.0"
-source = "git+https://github.com/YoEight/glyph.git?branch=master#fce39194b96f99dd54bf2f1edaac238ffd6f3bb2"
+source = "git+https://github.com/YoEight/glyph.git?tag=0.1.0#7f55e3108cdb98ed3f68a1588b4be0eec879b393"
 dependencies = [
  "bytes",
  "clap",

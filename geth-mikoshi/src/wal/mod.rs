@@ -1,11 +1,8 @@
 pub mod chunks;
 pub mod data_events;
-#[cfg(test)]
-mod tests;
 
 use crate::wal::data_events::DataEvents;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-pub use chunks::manager::ChunkManager;
 use std::io;
 use std::sync::{Arc, RwLock};
 

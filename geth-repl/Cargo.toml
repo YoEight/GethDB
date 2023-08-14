@@ -7,7 +7,7 @@ edition = "2021"
 
 [dependencies.glyph]
 git = "https://github.com/YoEight/glyph.git"
-branch = "master"
+tag = "0.1.0"
 
 [dependencies.geth-client]
 path = "../geth-client"

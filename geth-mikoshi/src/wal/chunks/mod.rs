@@ -1,9 +1,8 @@
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
-use crate::storage::{FileId, Storage};
+use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::chunks::manager::Chunks;
 use crate::wal::{LogEntry, LogReceipt, LogRecord, WriteAheadLog};
 use bytes::{Buf, Bytes, BytesMut};
 use std::collections::BTreeMap;
@@ -12,11 +11,19 @@ use std::io;
 mod chunk;
 mod footer;
 mod header;
-pub mod manager;
-pub mod record;
 
 #[cfg(test)]
 mod tests;
+
+#[derive(Copy, Clone, Debug)]
+pub struct Chunks;
+impl FileCategory for Chunks {
+    type Item = ChunkInfo;
+
+    fn parse(&self, name: &str) -> Option<Self::Item> {
+        ChunkInfo::from_chunk_filename(name)
+    }
+}
 
 pub struct ChunkBasedWAL<S> {
     buffer: BytesMut,
