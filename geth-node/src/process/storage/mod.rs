@@ -6,13 +6,15 @@ use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
-use crate::bus::{AppendStreamMsg, ReadStreamMsg};
+use crate::bus::{AppendStreamMsg, DeleteStreamMsg, ReadStreamMsg};
+use crate::process::storage::service::writer::WriteRequests;
 use crate::process::storage::service::{index, reader, writer};
 use crate::process::subscriptions::SubscriptionsClient;
 
 enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
+    DeleteStream(DeleteStreamMsg),
 }
 
 pub struct StorageClient {
@@ -30,6 +32,14 @@ impl StorageClient {
 
     pub async fn append_stream(&self, msg: AppendStreamMsg) -> eyre::Result<()> {
         if self.inner.send(Msg::AppendStream(msg)).is_err() {
+            bail!("Main bus has shutdown!");
+        }
+
+        Ok(())
+    }
+
+    pub async fn delete_stream(&self, msg: DeleteStreamMsg) -> eyre::Result<()> {
+        if self.inner.send(Msg::DeleteStream(msg)).is_err() {
             bail!("Main bus has shutdown!");
         }
 
@@ -59,7 +69,7 @@ where
 async fn service(
     mut mailbox: UnboundedReceiver<Msg>,
     reader_queue: std::sync::mpsc::Sender<ReadStreamMsg>,
-    writer_queue: std::sync::mpsc::Sender<AppendStreamMsg>,
+    writer_queue: std::sync::mpsc::Sender<WriteRequests>,
 ) {
     while let Some(msg) = mailbox.recv().await {
         match msg {
@@ -71,7 +81,14 @@ async fn service(
             }
 
             Msg::AppendStream(msg) => {
-                if writer_queue.send(msg).is_err() {
+                if writer_queue.send(WriteRequests::WriteStream(msg)).is_err() {
+                    tracing::error!("storage writer service is down");
+                    break;
+                }
+            }
+
+            Msg::DeleteStream(msg) => {
+                if writer_queue.send(WriteRequests::DeleteStream(msg)).is_err() {
                     tracing::error!("storage writer service is down");
                     break;
                 }

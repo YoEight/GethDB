@@ -25,8 +25,8 @@ where
                     storage.read_stream(msg).await?;
                 }
 
-                Msg::DeleteStream(_msg) => {
-                    // TODO - implement delete stream.
+                Msg::DeleteStream(msg) => {
+                    storage.delete_stream(msg).await?;
                 }
 
                 Msg::Subscribe(msg) => {

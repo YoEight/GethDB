@@ -8,10 +8,17 @@ use geth_mikoshi::domain::StreamEventAppended;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
+use crate::bus::DeleteStreamMsg;
+use crate::messages::{DeleteStream, DeleteStreamCompleted};
 use crate::{
     bus::AppendStreamMsg,
     messages::{AppendStream, AppendStreamCompleted},
 };
+
+pub enum WriteRequests {
+    WriteStream(AppendStreamMsg),
+    DeleteStream(DeleteStreamMsg),
+}
 
 #[derive(Copy, Clone)]
 enum CurrentRevision {
@@ -106,13 +113,17 @@ where
             next_logical_position: receipt.next_position,
         }))
     }
+
+    pub fn delete(&mut self, _params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+        todo!()
+    }
 }
 
 pub fn start<WAL, S>(
     wal: WALRef<WAL>,
     index: Lsm<S>,
     index_queue: mpsc::Sender<u64>,
-) -> mpsc::Sender<AppendStreamMsg>
+) -> mpsc::Sender<WriteRequests>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
@@ -128,28 +139,52 @@ where
 fn process<WAL, S>(
     mut service: StorageWriterService<WAL, S>,
     index_queue: mpsc::Sender<u64>,
-    queue: mpsc::Receiver<AppendStreamMsg>,
+    queue: mpsc::Receiver<WriteRequests>,
 ) -> io::Result<()>
 where
     WAL: WriteAheadLog + Send + Sync,
     S: Storage + Send + Sync + 'static,
 {
     while let Ok(msg) = queue.recv() {
-        let stream_name = msg.payload.stream_name.clone();
-        match service.append(msg.payload) {
-            Err(e) => {
-                let _ = msg.mail.send(Err(eyre::eyre!(
-                    "Error when appending to '{}': {}",
-                    stream_name,
-                    e
-                )));
-            }
-            Ok(result) => {
-                if let AppendStreamCompleted::Success(result) = &result {
-                    let _ = index_queue.send(result.next_logical_position);
-                }
+        match msg {
+            WriteRequests::WriteStream(msg) => {
+                let stream_name = msg.payload.stream_name.clone();
+                match service.append(msg.payload) {
+                    Err(e) => {
+                        let _ = msg.mail.send(Err(eyre::eyre!(
+                            "Error when appending to '{}': {}",
+                            stream_name,
+                            e
+                        )));
+                    }
+                    Ok(result) => {
+                        if let AppendStreamCompleted::Success(result) = &result {
+                            let _ = index_queue.send(result.next_logical_position);
+                        }
 
-                let _ = msg.mail.send(Ok(result));
+                        let _ = msg.mail.send(Ok(result));
+                    }
+                }
+            }
+
+            WriteRequests::DeleteStream(msg) => {
+                let stream_name = msg.payload.stream_name.clone();
+                match service.delete(msg.payload) {
+                    Err(e) => {
+                        let _ = msg.mail.send(Err(eyre::eyre!(
+                            "Error when appending to '{}': {}",
+                            stream_name,
+                            e
+                        )));
+                    }
+                    Ok(result) => {
+                        if let DeleteStreamCompleted::Success(_result) = &result {
+                            // TODO - report to indexing.
+                        }
+
+                        let _ = msg.mail.send(Ok(result));
+                    }
+                }
             }
         }
     }
