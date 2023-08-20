@@ -25,6 +25,10 @@ where
                     storage.read_stream(msg).await?;
                 }
 
+                Msg::DeleteStream(_msg) => {
+                    // TODO - implement delete stream.
+                }
+
                 Msg::Subscribe(msg) => {
                     if subscriptions.subscribe(msg).is_err() {
                         tracing::warn!("Subscriptions service is not longer available. quitting");

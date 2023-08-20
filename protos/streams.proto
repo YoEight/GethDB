@@ -283,14 +283,27 @@ message DeleteReq {
 }
 
 message DeleteResp {
-	oneof position_option {
+	oneof result {
 		Position position = 1;
-		event_store.client.Empty no_position = 2;
+		WrongExpectedVersion wrong_expected_version = 2;
 	}
 
 	message Position {
 		uint64 commit_position = 1;
 		uint64 prepare_position = 2;
+	}
+
+	message WrongExpectedVersion {
+		oneof current_revision_option {
+			uint64 current_revision = 6;
+			event_store.client.Empty current_no_stream = 7;
+		}
+		oneof expected_revision_option {
+			uint64 expected_revision = 8;
+			event_store.client.Empty expected_any = 9;
+			event_store.client.Empty expected_stream_exists = 10;
+			event_store.client.Empty expected_no_stream = 11;
+		}
 	}
 }
 

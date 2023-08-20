@@ -6,18 +6,18 @@ use tonic::Streaming;
 use geth_common::protocol::{
     self,
     streams::{
-        append_req, append_resp, list_progs_resp::ProgrammableSubscriptionSummary, read_resp,
-        server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp, KillProgReq,
-        KillProgResp, ListProgsResp, ProgStatsReq, ProgStatsResp, ReadEvent, ReadReq, ReadResp,
-        RecordedEvent, StreamOption, Success,
+        append_req, append_resp, delete_resp, list_progs_resp::ProgrammableSubscriptionSummary,
+        read_resp, server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp,
+        KillProgReq, KillProgResp, ListProgsResp, ProgStatsReq, ProgStatsResp, ReadEvent, ReadReq,
+        ReadResp, RecordedEvent, StreamOption, Success,
     },
     Empty,
 };
 
 use crate::bus::Bus;
 use crate::messages::{
-    AppendStream, ProcessTarget, ReadStream, StreamTarget, SubscriptionRequestOutcome,
-    SubscriptionTarget,
+    AppendStream, DeleteStream, DeleteStreamCompleted, ProcessTarget, ReadStream, StreamTarget,
+    SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use futures::stream::BoxStream;
@@ -247,8 +247,68 @@ impl Streams for StreamsImpl {
         Ok(Response::new(resp))
     }
 
-    async fn delete(&self, _request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
-        todo!()
+    async fn delete(&self, request: Request<DeleteReq>) -> Result<Response<DeleteResp>, Status> {
+        let request = request.into_inner();
+        let options = request
+            .options
+            .ok_or(Status::invalid_argument("Options field is missing"))?;
+
+        let stream_name = match options
+            .stream_identifier
+            .ok_or(Status::invalid_argument("stream_name field is missing"))?
+            .try_into()
+        {
+            Err(e) => {
+                return Err(Status::invalid_argument(format!(
+                    "stream_name field is not a valid utf-8 format: {}",
+                    e
+                )))
+            }
+            Ok(s) => s,
+        };
+
+        let expected = options
+            .expected_stream_revision
+            .ok_or(Status::invalid_argument(
+                "expected_stream_revision field is missing",
+            ))?
+            .into();
+
+        match self
+            .bus
+            .delete_stream(DeleteStream {
+                stream_name,
+                expected,
+            })
+            .await
+        {
+            Err(e) => Err(Status::unavailable(format!(
+                "Error when deleting stream: {}",
+                e
+            ))),
+
+            Ok(result) => {
+                let resp = match result {
+                    DeleteStreamCompleted::Success(result) => DeleteResp {
+                        result: Some(delete_resp::Result::Position(delete_resp::Position {
+                            commit_position: result.position.raw(),
+                            prepare_position: result.position.raw(),
+                        })),
+                    },
+
+                    DeleteStreamCompleted::Failure(e) => DeleteResp {
+                        result: Some(delete_resp::Result::WrongExpectedVersion(
+                            delete_resp::WrongExpectedVersion {
+                                current_revision_option: Some(e.current.into()),
+                                expected_revision_option: Some(e.expected.into()),
+                            },
+                        )),
+                    },
+                };
+
+                Ok(Response::new(resp))
+            }
+        }
     }
 
     async fn get_programmable_subscription_stats(

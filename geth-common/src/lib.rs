@@ -4,6 +4,7 @@ use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 use protocol::streams::append_resp;
+use protocol::streams::delete_resp;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -295,6 +296,25 @@ impl From<protocol::streams::append_req::options::ExpectedStreamRevision> for Ex
     }
 }
 
+impl From<protocol::streams::delete_req::options::ExpectedStreamRevision> for ExpectedRevision {
+    fn from(value: protocol::streams::delete_req::options::ExpectedStreamRevision) -> Self {
+        match value {
+            protocol::streams::delete_req::options::ExpectedStreamRevision::Any(_) => {
+                ExpectedRevision::Any
+            }
+            protocol::streams::delete_req::options::ExpectedStreamRevision::NoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            protocol::streams::delete_req::options::ExpectedStreamRevision::StreamExists(_) => {
+                ExpectedRevision::StreamExists
+            }
+            protocol::streams::delete_req::options::ExpectedStreamRevision::Revision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
 impl From<ExpectedRevision> for protocol::streams::append_req::options::ExpectedStreamRevision {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -409,6 +429,21 @@ impl From<ExpectedRevision> for append_resp::wrong_expected_version::CurrentRevi
     }
 }
 
+impl From<ExpectedRevision> for delete_resp::wrong_expected_version::CurrentRevisionOption {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                delete_resp::wrong_expected_version::CurrentRevisionOption::CurrentRevision(v)
+            }
+            ExpectedRevision::NoStream => {
+                delete_resp::wrong_expected_version::CurrentRevisionOption::CurrentNoStream(
+                    Default::default(),
+                )
+            }
+            _ => unreachable!(),
+        }
+    }
+}
 impl From<ExpectedRevision> for append_resp::wrong_expected_version::ExpectedRevisionOption {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -434,6 +469,31 @@ impl From<ExpectedRevision> for append_resp::wrong_expected_version::ExpectedRev
     }
 }
 
+impl From<ExpectedRevision> for delete_resp::wrong_expected_version::ExpectedRevisionOption {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedRevision(v)
+            }
+            ExpectedRevision::NoStream => {
+                delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedNoStream(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::Any => {
+                delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedAny(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::StreamExists => {
+                delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedStreamExists(
+                    Default::default(),
+                )
+            }
+        }
+    }
+}
+
 impl From<append_resp::wrong_expected_version::CurrentRevisionOption> for ExpectedRevision {
     fn from(value: append_resp::wrong_expected_version::CurrentRevisionOption) -> Self {
         match value {
@@ -441,6 +501,19 @@ impl From<append_resp::wrong_expected_version::CurrentRevisionOption> for Expect
                 ExpectedRevision::NoStream
             }
             append_resp::wrong_expected_version::CurrentRevisionOption::CurrentRevision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
+impl From<delete_resp::wrong_expected_version::CurrentRevisionOption> for ExpectedRevision {
+    fn from(value: delete_resp::wrong_expected_version::CurrentRevisionOption) -> Self {
+        match value {
+            delete_resp::wrong_expected_version::CurrentRevisionOption::CurrentNoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            delete_resp::wrong_expected_version::CurrentRevisionOption::CurrentRevision(v) => {
                 ExpectedRevision::Revision(v)
             }
         }
@@ -460,6 +533,25 @@ impl From<append_resp::wrong_expected_version::ExpectedRevisionOption> for Expec
                 _,
             ) => ExpectedRevision::StreamExists,
             append_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedRevision(v) => {
+                ExpectedRevision::Revision(v)
+            }
+        }
+    }
+}
+
+impl From<delete_resp::wrong_expected_version::ExpectedRevisionOption> for ExpectedRevision {
+    fn from(value: delete_resp::wrong_expected_version::ExpectedRevisionOption) -> Self {
+        match value {
+            delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedAny(_) => {
+                ExpectedRevision::Any
+            }
+            delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedNoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedStreamExists(
+                _,
+            ) => ExpectedRevision::StreamExists,
+            delete_resp::wrong_expected_version::ExpectedRevisionOption::ExpectedRevision(v) => {
                 ExpectedRevision::Revision(v)
             }
         }

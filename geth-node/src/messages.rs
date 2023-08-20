@@ -28,7 +28,19 @@ pub struct AppendStream {
 }
 
 #[derive(Debug)]
+pub struct DeleteStream {
+    pub stream_name: String,
+    pub expected: ExpectedRevision,
+}
+
+#[derive(Debug)]
 pub enum AppendStreamCompleted {
+    Success(WriteResult),
+    Failure(WrongExpectedRevisionError),
+}
+
+#[derive(Debug)]
+pub enum DeleteStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
 }

@@ -7,13 +7,14 @@ use tokio::sync::{
 use uuid::Uuid;
 
 use crate::messages::{
-    AppendStream, AppendStreamCompleted, ReadStream, ReadStreamCompleted, SubscribeTo,
-    SubscriptionConfirmed,
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
+    ReadStreamCompleted, SubscribeTo, SubscriptionConfirmed,
 };
 
 pub enum Msg {
     ReadStream(ReadStreamMsg),
     AppendStream(AppendStreamMsg),
+    DeleteStream(DeleteStreamMsg),
     Subscribe(SubscribeMsg),
     GetProgrammableSubscriptionStats(GetProgrammableSubscriptionStatsMsg),
     KillProgrammableSubscription(KillProgrammableSubscriptionMsg),
@@ -28,6 +29,11 @@ pub struct ReadStreamMsg {
 pub struct AppendStreamMsg {
     pub payload: AppendStream,
     pub mail: oneshot::Sender<eyre::Result<AppendStreamCompleted>>,
+}
+
+pub struct DeleteStreamMsg {
+    pub payload: DeleteStream,
+    pub mail: oneshot::Sender<eyre::Result<DeleteStreamCompleted>>,
 }
 
 pub struct SubscribeMsg {
@@ -81,6 +87,27 @@ impl Bus {
         if self
             .inner
             .send(Msg::AppendStream(AppendStreamMsg {
+                payload: msg,
+                mail: sender,
+            }))
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return resp;
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn delete_stream(&self, msg: DeleteStream) -> eyre::Result<DeleteStreamCompleted> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .inner
+            .send(Msg::DeleteStream(DeleteStreamMsg {
                 payload: msg,
                 mail: sender,
             }))
