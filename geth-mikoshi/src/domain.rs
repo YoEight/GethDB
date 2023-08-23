@@ -1,6 +1,6 @@
 use crate::marshalling::{get_string, put_string, variable_string_length_bytes_size};
 use crate::wal::{LogEntryType, LogRecord};
-use bytes::{Buf, BufMut, Bytes};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use uuid::Uuid;
 
 #[derive(Debug, Clone)]
@@ -74,5 +74,42 @@ impl LogRecord for StreamEventAppended {
             + self.data.len()
             + 4 // metadata encoded length
             + self.metadata.len()
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct StreamDeleted {
+    pub revision: u64,
+    pub event_stream_id: String,
+    pub created: i64,
+}
+
+impl LogRecord for StreamDeleted {
+    fn get(mut src: Bytes) -> Self {
+        let revision = src.get_u64_le();
+        let event_stream_id = get_string(&mut src);
+        let created = src.get_i64_le();
+
+        StreamDeleted {
+            revision,
+            event_stream_id,
+            created,
+        }
+    }
+
+    fn put(&self, buffer: &mut BytesMut) {
+        buffer.put_u64_le(self.revision);
+        put_string(&self.event_stream_id, buffer);
+        buffer.put_i64_le(self.created);
+    }
+
+    fn r#type() -> LogEntryType {
+        LogEntryType::StreamDeleted
+    }
+
+    fn size(&self) -> usize {
+        8 // revision
+            + variable_string_length_bytes_size(self.event_stream_id.len())
+            + 8 // timestamp
     }
 }

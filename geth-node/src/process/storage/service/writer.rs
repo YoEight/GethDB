@@ -4,7 +4,7 @@ use std::sync::mpsc;
 use uuid::Uuid;
 
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
-use geth_mikoshi::domain::StreamEventAppended;
+use geth_mikoshi::domain::{StreamDeleted, StreamEventAppended};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
@@ -114,8 +114,28 @@ where
         }))
     }
 
-    pub fn delete(&mut self, _params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
-        todo!()
+    pub fn delete(&mut self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+        let stream_key = mikoshi_hash(&params.stream_name);
+        let current_revision = self
+            .index
+            .highest_revision(stream_key)?
+            .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+
+        if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
+            return Ok(DeleteStreamCompleted::Failure(e));
+        }
+
+        let receipt = self.wal.append(&[StreamDeleted {
+            revision: current_revision.next_revision(),
+            event_stream_id: params.stream_name,
+            created: Utc::now().timestamp(),
+        }])?;
+
+        Ok(DeleteStreamCompleted::Success(WriteResult {
+            next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
+            position: Position(receipt.position),
+            next_logical_position: receipt.next_position,
+        }))
     }
 }
 
@@ -172,14 +192,14 @@ where
                 match service.delete(msg.payload) {
                     Err(e) => {
                         let _ = msg.mail.send(Err(eyre::eyre!(
-                            "Error when appending to '{}': {}",
+                            "Error when deleting stream '{}': {}",
                             stream_name,
                             e
                         )));
                     }
                     Ok(result) => {
-                        if let DeleteStreamCompleted::Success(_result) = &result {
-                            // TODO - report to indexing.
+                        if let DeleteStreamCompleted::Success(result) = &result {
+                            let _ = index_queue.send(result.next_logical_position);
                         }
 
                         let _ = msg.mail.send(Ok(result));

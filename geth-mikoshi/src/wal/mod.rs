@@ -9,6 +9,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Clone, Copy, Eq, PartialEq, Debug)]
 pub enum LogEntryType {
     UserData,
+    StreamDeleted,
     Unsupported(u8),
 }
 
@@ -16,6 +17,7 @@ impl LogEntryType {
     pub fn from_raw(value: u8) -> Self {
         match value {
             0 => LogEntryType::UserData,
+            1 => LogEntryType::StreamDeleted,
             x => LogEntryType::Unsupported(x),
         }
     }
@@ -25,6 +27,7 @@ impl LogEntryType {
     pub fn raw(&self) -> u8 {
         match self {
             LogEntryType::UserData => 0,
+            LogEntryType::StreamDeleted => 1,
             LogEntryType::Unsupported(x) => *x,
         }
     }
