@@ -1,7 +1,9 @@
 pub mod chunks;
 pub mod data_events;
+pub mod records;
 
 use crate::wal::data_events::DataEvents;
+use crate::wal::records::RecordIter;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
 use std::sync::{Arc, RwLock};
@@ -76,6 +78,15 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         };
 
         DataEvents::new(self.clone(), from, to)
+    }
+
+    pub fn records(&self, from: u64) -> RecordIter<WAL> {
+        let to = {
+            let inner = self.inner.read().unwrap();
+            inner.write_position()
+        };
+
+        RecordIter::new(self.clone(), from, to)
     }
 
     pub fn write_position(&self) -> u64 {

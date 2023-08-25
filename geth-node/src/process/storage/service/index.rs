@@ -4,6 +4,7 @@ use geth_common::Position;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::records::Records;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{Entry, IteratorIO};
 use std::io;
@@ -31,21 +32,29 @@ where
     pub fn chase(&mut self, starting_position: u64) -> io::Result<()> {
         let records = self
             .wal
-            .data_events(starting_position)
-            .map(|(position, record)| {
-                let key = mikoshi_hash(&record.event_stream_id);
+            .records(starting_position)
+            .map(|(position, record)| match record {
+                Records::StreamEventAppended(record) => {
+                    let key = mikoshi_hash(&record.event_stream_id);
 
-                let _ = self.sub_client.event_committed(Entry {
-                    id: record.event_id,
-                    r#type: record.event_type,
-                    stream_name: record.event_stream_id,
-                    revision: record.revision,
-                    data: record.data,
-                    position: Position(position),
-                    created: Utc.timestamp_opt(record.created, 0).unwrap(),
-                });
+                    let _ = self.sub_client.event_committed(Entry {
+                        id: record.event_id,
+                        r#type: record.event_type,
+                        stream_name: record.event_stream_id,
+                        revision: record.revision,
+                        data: record.data,
+                        position: Position(position),
+                        created: Utc.timestamp_opt(record.created, 0).unwrap(),
+                    });
 
-                (key, record.revision, position)
+                    (key, record.revision, position)
+                }
+
+                Records::StreamDeleted(record) => {
+                    let key = mikoshi_hash(&record.event_stream_id);
+
+                    (key, record.revision, u64::MAX)
+                }
             });
 
         self.index.put(records)?;
