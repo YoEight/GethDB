@@ -4,6 +4,7 @@ use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
 use crate::index::{IteratorIO, IteratorIOExt, Merge};
 use crate::storage::{FileId, Storage};
+use crate::wal::records::Records;
 use crate::wal::{WALRef, WriteAheadLog};
 use bytes::{Buf, BufMut, BytesMut};
 use geth_common::{Direction, Revision};
@@ -133,11 +134,20 @@ where
 
     pub fn rebuild<WAL: WriteAheadLog>(&self, wal: &WALRef<WAL>) -> io::Result<()> {
         let logical_position = self.state.read().unwrap().logical_position;
-        let records = wal.data_events(logical_position).map(|(position, r)| {
-            let key = mikoshi_hash(&r.event_stream_id);
+        let records = wal
+            .records(logical_position)
+            .map(|(position, record)| match record {
+                Records::StreamEventAppended(record) => {
+                    let key = mikoshi_hash(&record.event_stream_id);
+                    (key, record.revision, position)
+                }
 
-            (key, r.revision, position)
-        });
+                Records::StreamDeleted(record) => {
+                    let key = mikoshi_hash(&record.event_stream_id);
+
+                    (key, record.revision, u64::MAX)
+                }
+            });
 
         self.put(records)?;
 

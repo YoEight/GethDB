@@ -120,9 +120,11 @@ where
 
         let receipt = self.wal.append(&[StreamDeleted {
             revision: current_revision.next_revision(),
-            event_stream_id: params.stream_name,
+            event_stream_id: params.stream_name.clone(),
             created: Utc::now().timestamp(),
         }])?;
+
+        self.revision_cache.insert(params.stream_name, u64::MAX);
 
         Ok(DeleteStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
