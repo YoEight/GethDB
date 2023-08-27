@@ -340,6 +340,31 @@ impl From<ExpectedRevision> for protocol::streams::append_req::options::Expected
     }
 }
 
+impl From<ExpectedRevision> for protocol::streams::delete_req::options::ExpectedStreamRevision {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Any => {
+                protocol::streams::delete_req::options::ExpectedStreamRevision::Any(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::NoStream => {
+                protocol::streams::delete_req::options::ExpectedStreamRevision::NoStream(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::StreamExists => {
+                protocol::streams::delete_req::options::ExpectedStreamRevision::StreamExists(
+                    Default::default(),
+                )
+            }
+            ExpectedRevision::Revision(v) => {
+                protocol::streams::delete_req::options::ExpectedStreamRevision::Revision(v)
+            }
+        }
+    }
+}
+
 impl From<protocol::streams::RevisionOption> for Revision<u64> {
     fn from(value: protocol::streams::RevisionOption) -> Self {
         match value {
@@ -366,6 +391,12 @@ impl From<protocol::streams::read_event::Position> for Position {
             protocol::streams::read_event::Position::CommitPosition(v) => Position(v),
             protocol::streams::read_event::Position::NoPosition(_) => Position(u64::MAX),
         }
+    }
+}
+
+impl From<protocol::streams::delete_resp::Position> for Position {
+    fn from(value: protocol::streams::delete_resp::Position) -> Self {
+        Position(value.prepare_position)
     }
 }
 
@@ -573,6 +604,12 @@ pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
     pub position: Position,
     pub next_logical_position: u64,
+}
+
+#[derive(Debug)]
+pub enum DeleteResult {
+    WrongExpectedRevision(WrongExpectedRevisionError),
+    Success(Position),
 }
 
 #[derive(Clone, Debug)]

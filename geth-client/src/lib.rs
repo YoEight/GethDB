@@ -4,7 +4,9 @@ use chrono::{TimeZone, Utc};
 use futures_util::TryStreamExt;
 use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
-use geth_common::protocol::streams::{KillProgReq, ProgStatsReq};
+use geth_common::protocol::streams::{
+    delete_req, delete_resp, DeleteReq, KillProgReq, ProgStatsReq,
+};
 use geth_common::protocol::Empty;
 use geth_common::{
     protocol::streams::{
@@ -14,8 +16,8 @@ use geth_common::{
         read_req::{self, options::StreamOptions},
         read_resp, AppendReq, ReadReq, ReadResp,
     },
-    Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary, Propose, Record,
-    Revision, WriteResult, WrongExpectedRevisionError,
+    DeleteResult, Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary,
+    Propose, Record, Revision, WriteResult, WrongExpectedRevisionError,
 };
 use std::collections::HashMap;
 use tonic::{
@@ -270,6 +272,37 @@ impl Client {
         }
 
         Ok(summaries)
+    }
+
+    pub async fn delete_stream(
+        &mut self,
+        stream_name: impl AsRef<str>,
+        expected: ExpectedRevision,
+    ) -> tonic::Result<DeleteResult> {
+        let req = DeleteReq {
+            options: Some(delete_req::Options {
+                stream_identifier: Some(stream_name.as_ref().into()),
+                expected_stream_revision: Some(expected.into()),
+            }),
+        };
+
+        let result = self
+            .inner
+            .delete(Request::new(req))
+            .await?
+            .into_inner()
+            .result
+            .expect("to be defined");
+
+        match result {
+            delete_resp::Result::Position(p) => Ok(DeleteResult::Success(p.into())),
+            delete_resp::Result::WrongExpectedVersion(e) => Ok(
+                DeleteResult::WrongExpectedRevision(WrongExpectedRevisionError {
+                    expected: e.expected_revision_option.unwrap().into(),
+                    current: e.current_revision_option.unwrap().into(),
+                }),
+            ),
+        }
     }
 }
 
