@@ -14,9 +14,9 @@ pub struct ReadStream {
     pub count: usize,
 }
 
-pub struct ReadStreamCompleted {
-    pub correlation: Uuid,
-    pub reader: MikoshiStream,
+pub enum ReadStreamCompleted {
+    StreamDeleted,
+    Success(MikoshiStream),
 }
 
 #[derive(Debug)]
@@ -37,6 +37,7 @@ pub struct DeleteStream {
 pub enum AppendStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
+    StreamDeleted,
 }
 
 #[derive(Debug)]

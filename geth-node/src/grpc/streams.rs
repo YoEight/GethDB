@@ -16,8 +16,8 @@ use geth_common::protocol::{
 
 use crate::bus::Bus;
 use crate::messages::{
-    AppendStream, DeleteStream, DeleteStreamCompleted, ProcessTarget, ReadStream, StreamTarget,
-    SubscriptionRequestOutcome, SubscriptionTarget,
+    AppendStream, DeleteStream, DeleteStreamCompleted, ProcessTarget, ReadStream,
+    ReadStreamCompleted, StreamTarget, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use futures::stream::BoxStream;
@@ -55,7 +55,7 @@ impl Streams for StreamsImpl {
 
         let (stream_name, revision) = match stream_name {
             StreamOption::Stream(options) => {
-                let ident = if let Some(ident) = options.stream_identifier {
+                let ident: String = if let Some(ident) = options.stream_identifier {
                     ident
                         .try_into()
                         .map_err(|_| Status::invalid_argument("Stream name is not valid UTF-8"))?
@@ -91,13 +91,21 @@ impl Streams for StreamsImpl {
                     correlation: Uuid::new_v4(),
                     starting: revision,
                     count: count as usize,
-                    stream_name,
+                    stream_name: stream_name.clone(),
                     direction,
                 };
 
                 tracing::info!("Managed to parse read stream successfully");
                 match self.bus.read_stream(msg).await {
-                    Ok(resp) => resp.reader,
+                    Ok(resp) => match resp {
+                        ReadStreamCompleted::StreamDeleted => {
+                            return Err(Status::not_found(format!(
+                                "Stream '{}' is deleted",
+                                stream_name
+                            )))
+                        }
+                        ReadStreamCompleted::Success(reader) => reader,
+                    },
                     Err(e) => {
                         tracing::error!("Error when reading from mikoshi: {}", e);
                         return Err(Status::unavailable(e.to_string()));
@@ -215,7 +223,7 @@ impl Streams for StreamsImpl {
             .bus
             .append_stream(AppendStream {
                 correlation: Uuid::new_v4(),
-                stream_name,
+                stream_name: stream_name.clone(),
                 events,
                 expected,
             })
@@ -242,6 +250,12 @@ impl Streams for StreamsImpl {
                     },
                 )),
             },
+            AppendStreamCompleted::StreamDeleted => {
+                return Err(Status::not_found(format!(
+                    "Stream '{}' is deleted",
+                    stream_name
+                )))
+            }
         };
 
         Ok(Response::new(resp))

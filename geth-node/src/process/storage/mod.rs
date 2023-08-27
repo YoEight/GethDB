@@ -21,6 +21,8 @@ pub struct StorageClient {
     inner: mpsc::UnboundedSender<Msg>,
 }
 
+pub type RevisionCache = moka::sync::Cache<String, u64>;
+
 impl StorageClient {
     pub async fn read_stream(&self, msg: ReadStreamMsg) -> eyre::Result<()> {
         if self.inner.send(Msg::ReadStream(msg)).is_err() {
@@ -56,10 +58,20 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
+    let revision_cache = moka::sync::Cache::<String, u64>::builder()
+        .max_capacity(10_000)
+        .name("revision-cache")
+        .build();
+
     let (sender, mailbox) = mpsc::unbounded_channel();
     let index_queue = index::start(wal.clone(), index.clone(), sub_client);
-    let writer_queue = writer::start(wal.clone(), index.clone(), index_queue);
-    let reader_queue = reader::start(wal, index.clone());
+    let writer_queue = writer::start(
+        wal.clone(),
+        index.clone(),
+        revision_cache.clone(),
+        index_queue,
+    );
+    let reader_queue = reader::start(wal, index.clone(), revision_cache);
 
     tokio::spawn(service(mailbox, reader_queue, writer_queue));
 

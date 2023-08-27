@@ -10,6 +10,8 @@ use geth_mikoshi::{hashing::mikoshi_hash, index::Lsm, storage::Storage};
 
 use crate::bus::DeleteStreamMsg;
 use crate::messages::{DeleteStream, DeleteStreamCompleted};
+use crate::process::storage::service::current::CurrentRevision;
+use crate::process::storage::RevisionCache;
 use crate::{
     bus::AppendStreamMsg,
     messages::{AppendStream, AppendStreamCompleted},
@@ -18,28 +20,6 @@ use crate::{
 pub enum WriteRequests {
     WriteStream(AppendStreamMsg),
     DeleteStream(DeleteStreamMsg),
-}
-
-#[derive(Copy, Clone)]
-enum CurrentRevision {
-    NoStream,
-    Revision(u64),
-}
-
-impl CurrentRevision {
-    fn next_revision(self) -> u64 {
-        match self {
-            CurrentRevision::NoStream => 0,
-            CurrentRevision::Revision(r) => r + 1,
-        }
-    }
-
-    fn as_expected(self) -> ExpectedRevision {
-        match self {
-            CurrentRevision::NoStream => ExpectedRevision::NoStream,
-            CurrentRevision::Revision(v) => ExpectedRevision::Revision(v),
-        }
-    }
 }
 
 fn optimistic_concurrency_check(
@@ -60,6 +40,7 @@ fn optimistic_concurrency_check(
 pub struct StorageWriterService<WAL, S> {
     wal: WALRef<WAL>,
     index: Lsm<S>,
+    revision_cache: RevisionCache,
 }
 
 impl<WAL, S> StorageWriterService<WAL, S>
@@ -67,16 +48,27 @@ where
     WAL: WriteAheadLog,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
-        Self { wal, index }
+    pub fn new(wal: WALRef<WAL>, index: Lsm<S>, revision_cache: RevisionCache) -> Self {
+        Self {
+            wal,
+            index,
+            revision_cache,
+        }
     }
 
     pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
         let stream_key = mikoshi_hash(&params.stream_name);
-        let current_revision = self
-            .index
-            .highest_revision(stream_key)?
-            .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+        let current_revision = if let Some(current) = self.revision_cache.get(&params.stream_name) {
+            CurrentRevision::Revision(current)
+        } else {
+            self.index
+                .highest_revision(stream_key)?
+                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
+        };
+
+        if current_revision.is_deleted() {
+            return Ok(AppendStreamCompleted::StreamDeleted);
+        }
 
         if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
             return Ok(AppendStreamCompleted::Failure(e));
@@ -106,6 +98,7 @@ where
         }
 
         let receipt = self.wal.append(events.as_slice())?;
+        self.revision_cache.insert(params.stream_name, revision - 1);
 
         Ok(AppendStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
@@ -142,6 +135,7 @@ where
 pub fn start<WAL, S>(
     wal: WALRef<WAL>,
     index: Lsm<S>,
+    revision_cache: RevisionCache,
     index_queue: mpsc::Sender<u64>,
 ) -> mpsc::Sender<WriteRequests>
 where
@@ -149,7 +143,7 @@ where
     S: Storage + Send + Sync + 'static,
 {
     let (sender, recv) = mpsc::channel();
-    let service = StorageWriterService::new(wal, index);
+    let service = StorageWriterService::new(wal, index, revision_cache);
 
     tokio::task::spawn_blocking(|| process(service, index_queue, recv));
 
