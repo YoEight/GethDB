@@ -14,7 +14,9 @@ use crate::cli::{
 };
 use crate::utils::expand_path;
 use geth_client::Client;
-use geth_common::{Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult};
+use geth_common::{
+    DeleteResult, Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
+};
 use geth_mikoshi::domain::StreamEventAppended;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::{Lsm, LsmSettings};
@@ -232,6 +234,39 @@ async fn main() -> eyre::Result<()> {
                                     .unwrap()
                                 );
                             }
+                        }
+                    }
+
+                    OnlineCommands::Delete(opts) => {
+                        let state = repl_state.online();
+
+                        match state
+                            .client
+                            .delete_stream(opts.stream.as_str(), ExpectedRevision::Any)
+                            .await
+                        {
+                            Err(e) => {
+                                println!("ERR: Error when deleting stream {}: {}", opts.stream, e);
+                            }
+
+                            Ok(result) => match result {
+                                DeleteResult::WrongExpectedRevision(e) => {
+                                    println!(
+                                        "ERR: Wrong expected revision when deleting stream '{}', expected: {} but got {}",
+                                        opts.stream,
+                                        e.expected,
+                                        e.current,
+                                    );
+                                }
+
+                                DeleteResult::Success(p) => {
+                                    println!(
+                                        "Stream '{}' deletion successful, position {}",
+                                        opts.stream,
+                                        p.raw(),
+                                    );
+                                }
+                            },
                         }
                     }
 

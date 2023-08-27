@@ -50,6 +50,10 @@ pub enum OnlineCommands {
     /// Append a stream
     Append(AppendStream),
 
+    #[command(arg_required_else_help = true)]
+    /// Delete a stream
+    Delete(DeleteStream),
+
     /// Subscription commands
     Subscribe(Subscribe),
 
@@ -102,6 +106,12 @@ pub struct AppendStream {
 
     /// Path to json file.
     pub json: PathBuf,
+}
+
+#[derive(Args, Debug)]
+pub struct DeleteStream {
+    // Stream's name
+    pub stream: String,
 }
 
 #[derive(Args, Debug)]
