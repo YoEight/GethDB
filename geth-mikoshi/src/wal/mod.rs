@@ -148,6 +148,7 @@ impl LogEntry {
 }
 
 pub struct LogReceipt {
-    pub position: u64,
+    pub start_position: u64,
     pub next_position: u64,
+    pub mappings: Vec<u64>,
 }

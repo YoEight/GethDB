@@ -76,6 +76,7 @@ where
 
         let created = Utc::now().timestamp();
         let mut revision = current_revision.next_revision();
+        let starting_revision = revision;
         let transaction_id = Uuid::new_v4();
         let mut transaction_offset = 0u16;
         let mut events = Vec::with_capacity(params.events.len());
@@ -98,11 +99,18 @@ where
         }
 
         let receipt = self.wal.append(events.as_slice())?;
+        let index_entries = receipt
+            .mappings
+            .into_iter()
+            .enumerate()
+            .map(|(offset, position)| (stream_key, starting_revision + offset as u64, position));
+
         self.revision_cache.insert(params.stream_name, revision - 1);
+        self.index.put_values(index_entries)?;
 
         Ok(AppendStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(revision),
-            position: Position(receipt.position),
+            position: Position(receipt.start_position),
             next_logical_position: receipt.next_position,
         }))
     }
@@ -128,7 +136,7 @@ where
 
         Ok(DeleteStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
-            position: Position(receipt.position),
+            position: Position(receipt.start_position),
             next_logical_position: receipt.next_position,
         }))
     }

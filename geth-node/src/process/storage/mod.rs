@@ -1,4 +1,5 @@
 mod service;
+mod writer;
 
 use eyre::bail;
 use geth_mikoshi::index::Lsm;
@@ -8,7 +9,7 @@ use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, DeleteStreamMsg, ReadStreamMsg};
 use crate::process::storage::service::writer::WriteRequests;
-use crate::process::storage::service::{index, reader, writer};
+use crate::process::storage::service::{index, reader};
 use crate::process::subscriptions::SubscriptionsClient;
 
 enum Msg {
@@ -65,7 +66,7 @@ where
 
     let (sender, mailbox) = mpsc::unbounded_channel();
     let index_queue = index::start(wal.clone(), index.clone(), sub_client);
-    let writer_queue = writer::start(
+    let writer_queue = service::writer::start(
         wal.clone(),
         index.clone(),
         revision_cache.clone(),
