@@ -9,6 +9,7 @@ use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
+use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
 pub struct StorageWriter<WAL, S> {
@@ -19,7 +20,7 @@ pub struct StorageWriter<WAL, S> {
 
 impl<WAL, S> StorageWriter<WAL, S>
 where
-    WAL: WriteAheadLog,
+    WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
     pub fn new(wal: WALRef<WAL>, index: Lsm<S>, revision_cache: RevisionCache) -> Self {
@@ -30,89 +31,122 @@ where
         }
     }
 
-    pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
-        let stream_key = mikoshi_hash(&params.stream_name);
-        let current_revision = if let Some(current) = self.revision_cache.get(&params.stream_name) {
-            CurrentRevision::Revision(current)
-        } else {
-            self.index
-                .highest_revision(stream_key)?
-                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
-        };
+    pub async fn append(&self, params: AppendStream) -> AppendStreamCompleted {
+        let wal = self.wal.clone();
+        let index = self.index.clone();
+        let revision_cache = self.revision_cache.clone();
 
-        if current_revision.is_deleted() {
-            return Ok(AppendStreamCompleted::StreamDeleted);
+        let handle = spawn_blocking(move || {
+            let stream_key = mikoshi_hash(&params.stream_name);
+            let current_revision = if let Some(current) = revision_cache.get(&params.stream_name) {
+                CurrentRevision::Revision(current)
+            } else {
+                index
+                    .highest_revision(stream_key)?
+                    .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
+            };
+
+            if current_revision.is_deleted() {
+                return Ok::<_, io::Error>(AppendStreamCompleted::StreamDeleted);
+            }
+
+            if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
+                return Ok(AppendStreamCompleted::Failure(e));
+            }
+
+            let created = Utc::now().timestamp();
+            let mut revision = current_revision.next_revision();
+            let transaction_id = Uuid::new_v4();
+            let mut transaction_offset = 0u16;
+            let mut events = Vec::with_capacity(params.events.len());
+
+            for event in params.events {
+                events.push(StreamEventAppended {
+                    revision,
+                    event_stream_id: params.stream_name.clone(),
+                    transaction_id,
+                    transaction_offset,
+                    event_id: event.id,
+                    created,
+                    event_type: event.r#type,
+                    data: event.data,
+                    metadata: Default::default(),
+                });
+
+                revision += 1;
+                transaction_offset += 1;
+            }
+
+            let receipt = wal.append(events.as_slice())?;
+            // TODO - Move to implemented indexing the previous way.
+            // let index_entries =
+            //     receipt
+            //         .mappings
+            //         .into_iter()
+            //         .enumerate()
+            //         .map(|(offset, position)| {
+            //             (stream_key, starting_revision + offset as u64, position)
+            //         });
+
+            revision_cache.insert(params.stream_name, revision - 1);
+
+            Ok(AppendStreamCompleted::Success(WriteResult {
+                next_expected_version: ExpectedRevision::Revision(revision),
+                position: Position(receipt.start_position),
+                next_logical_position: receipt.next_position,
+            }))
+        });
+
+        match handle.await {
+            Err(_) => {
+                AppendStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
+            }
+            Ok(result) => match result {
+                Err(e) => AppendStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e)),
+                Ok(v) => v,
+            },
         }
-
-        if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-            return Ok(AppendStreamCompleted::Failure(e));
-        }
-
-        let created = Utc::now().timestamp();
-        let mut revision = current_revision.next_revision();
-        let starting_revision = revision;
-        let transaction_id = Uuid::new_v4();
-        let mut transaction_offset = 0u16;
-        let mut events = Vec::with_capacity(params.events.len());
-
-        for event in params.events {
-            events.push(StreamEventAppended {
-                revision,
-                event_stream_id: params.stream_name.clone(),
-                transaction_id,
-                transaction_offset,
-                event_id: event.id,
-                created,
-                event_type: event.r#type,
-                data: event.data,
-                metadata: Default::default(),
-            });
-
-            revision += 1;
-            transaction_offset += 1;
-        }
-
-        let receipt = self.wal.append(events.as_slice())?;
-        let index_entries = receipt
-            .mappings
-            .into_iter()
-            .enumerate()
-            .map(|(offset, position)| (stream_key, starting_revision + offset as u64, position));
-
-        self.revision_cache.insert(params.stream_name, revision - 1);
-        self.index.put_values(index_entries)?;
-
-        Ok(AppendStreamCompleted::Success(WriteResult {
-            next_expected_version: ExpectedRevision::Revision(revision),
-            position: Position(receipt.start_position),
-            next_logical_position: receipt.next_position,
-        }))
     }
 
-    pub fn delete(&mut self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
-        let stream_key = mikoshi_hash(&params.stream_name);
-        let current_revision = self
-            .index
-            .highest_revision(stream_key)?
-            .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+    pub async fn delete(&mut self, params: DeleteStream) -> DeleteStreamCompleted {
+        let index = self.index.clone();
+        let revision_cache = self.revision_cache.clone();
+        let wal = self.wal.clone();
 
-        if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-            return Ok(DeleteStreamCompleted::Failure(e));
+        let handle = spawn_blocking(move || {
+            let stream_key = mikoshi_hash(&params.stream_name);
+            let current_revision = index
+                .highest_revision(stream_key)?
+                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+
+            if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
+                return Ok::<_, io::Error>(DeleteStreamCompleted::Failure(e));
+            }
+
+            let receipt = wal.append(&[StreamDeleted {
+                revision: current_revision.next_revision(),
+                event_stream_id: params.stream_name.clone(),
+                created: Utc::now().timestamp(),
+            }])?;
+
+            revision_cache.insert(params.stream_name, u64::MAX);
+
+            Ok(DeleteStreamCompleted::Success(WriteResult {
+                next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
+                position: Position(receipt.start_position),
+                next_logical_position: receipt.next_position,
+            }))
+        });
+
+        match handle.await {
+            Err(_) => {
+                DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
+            }
+            Ok(result) => match result {
+                Err(e) => DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e)),
+                Ok(v) => v,
+            },
         }
-
-        let receipt = self.wal.append(&[StreamDeleted {
-            revision: current_revision.next_revision(),
-            event_stream_id: params.stream_name.clone(),
-            created: Utc::now().timestamp(),
-        }])?;
-
-        self.revision_cache.insert(params.stream_name, u64::MAX);
-
-        Ok(DeleteStreamCompleted::Success(WriteResult {
-            next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
-            position: Position(receipt.start_position),
-            next_logical_position: receipt.next_position,
-        }))
     }
 }
 

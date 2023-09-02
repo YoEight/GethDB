@@ -8,7 +8,7 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, DeleteStreamMsg, ReadStreamMsg};
-use crate::process::storage::service::{index, reader};
+use crate::process::storage::service::reader;
 use crate::process::storage::writer::StorageWriter;
 use crate::process::subscriptions::SubscriptionsClient;
 
@@ -18,13 +18,13 @@ enum Msg {
     DeleteStream(DeleteStreamMsg),
 }
 
-pub struct StorageClient {
+pub struct StorageRef {
     inner: mpsc::UnboundedSender<Msg>,
 }
 
 pub type RevisionCache = moka::sync::Cache<String, u64>;
 
-impl StorageClient {
+impl StorageRef {
     pub async fn read_stream(&self, msg: ReadStreamMsg) -> eyre::Result<()> {
         if self.inner.send(Msg::ReadStream(msg)).is_err() {
             bail!("Main bus has shutdown!");
@@ -50,11 +50,7 @@ impl StorageClient {
     }
 }
 
-pub fn start<WAL, S>(
-    wal: WALRef<WAL>,
-    index: Lsm<S>,
-    sub_client: SubscriptionsClient,
-) -> StorageClient
+pub fn start<WAL, S>(wal: WALRef<WAL>, index: Lsm<S>, sub_client: SubscriptionsClient) -> StorageRef
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
@@ -67,12 +63,11 @@ where
     let writer = StorageWriter::new(wal.clone(), index.clone(), revision_cache.clone());
 
     let (sender, mailbox) = mpsc::unbounded_channel();
-    let index_queue = index::start(wal.clone(), index.clone(), sub_client);
     let reader_queue = reader::start(wal, index.clone(), revision_cache);
 
     tokio::spawn(service(mailbox, reader_queue, writer));
 
-    StorageClient { inner: sender }
+    StorageRef { inner: sender }
 }
 
 async fn service<WAL, S>(
@@ -93,31 +88,11 @@ async fn service<WAL, S>(
             }
 
             Msg::AppendStream(msg) => {
-                let stream_name = msg.payload.stream_name.clone();
-                let result = match writer.append(msg.payload) {
-                    Err(e) => {
-                        tracing::error!("Error when appending stream '{}': {}", stream_name, e);
-                        Err(e.into())
-                    }
-
-                    Ok(result) => Ok(result),
-                };
-
-                let _ = msg.mail.send(result);
+                let _ = msg.mail.send(Ok(writer.append(msg.payload).await));
             }
 
             Msg::DeleteStream(msg) => {
-                let stream_name = msg.payload.stream_name.clone();
-                let result = match writer.delete(msg.payload) {
-                    Err(e) => {
-                        tracing::error!("Error when deleting stream '{}': {}", stream_name, e);
-                        Err(e.into())
-                    }
-
-                    Ok(result) => Ok(result),
-                };
-
-                let _ = msg.mail.send(result);
+                let _ = msg.mail.send(Ok(writer.delete(msg.payload).await));
             }
         }
     }

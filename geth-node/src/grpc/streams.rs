@@ -250,6 +250,9 @@ impl Streams for StreamsImpl {
                     },
                 )),
             },
+            AppendStreamCompleted::Unexpected(e) => {
+                return Err(Status::unavailable(format!("Unexpected error: {}", e)))
+            }
             AppendStreamCompleted::StreamDeleted => {
                 return Err(Status::not_found(format!(
                     "Stream '{}' is deleted",
@@ -318,6 +321,10 @@ impl Streams for StreamsImpl {
                             },
                         )),
                     },
+
+                    DeleteStreamCompleted::Unexpected(e) => {
+                        return Err(Status::unavailable(format!("Unexpected error: {}", e)));
+                    }
                 };
 
                 Ok(Response::new(resp))
