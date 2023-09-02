@@ -8,8 +8,8 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, DeleteStreamMsg, ReadStreamMsg};
-use crate::process::storage::service::writer::WriteRequests;
 use crate::process::storage::service::{index, reader};
+use crate::process::storage::writer::StorageWriter;
 use crate::process::subscriptions::SubscriptionsClient;
 
 enum Msg {
@@ -64,26 +64,25 @@ where
         .name("revision-cache")
         .build();
 
+    let writer = StorageWriter::new(wal.clone(), index.clone(), revision_cache.clone());
+
     let (sender, mailbox) = mpsc::unbounded_channel();
     let index_queue = index::start(wal.clone(), index.clone(), sub_client);
-    let writer_queue = service::writer::start(
-        wal.clone(),
-        index.clone(),
-        revision_cache.clone(),
-        index_queue,
-    );
     let reader_queue = reader::start(wal, index.clone(), revision_cache);
 
-    tokio::spawn(service(mailbox, reader_queue, writer_queue));
+    tokio::spawn(service(mailbox, reader_queue, writer));
 
     StorageClient { inner: sender }
 }
 
-async fn service(
+async fn service<WAL, S>(
     mut mailbox: UnboundedReceiver<Msg>,
     reader_queue: std::sync::mpsc::Sender<ReadStreamMsg>,
-    writer_queue: std::sync::mpsc::Sender<WriteRequests>,
-) {
+    mut writer: StorageWriter<WAL, S>,
+) where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
     while let Some(msg) = mailbox.recv().await {
         match msg {
             Msg::ReadStream(msg) => {
@@ -94,17 +93,31 @@ async fn service(
             }
 
             Msg::AppendStream(msg) => {
-                if writer_queue.send(WriteRequests::WriteStream(msg)).is_err() {
-                    tracing::error!("storage writer service is down");
-                    break;
-                }
+                let stream_name = msg.payload.stream_name.clone();
+                let result = match writer.append(msg.payload) {
+                    Err(e) => {
+                        tracing::error!("Error when appending stream '{}': {}", stream_name, e);
+                        Err(e.into())
+                    }
+
+                    Ok(result) => Ok(result),
+                };
+
+                let _ = msg.mail.send(result);
             }
 
             Msg::DeleteStream(msg) => {
-                if writer_queue.send(WriteRequests::DeleteStream(msg)).is_err() {
-                    tracing::error!("storage writer service is down");
-                    break;
-                }
+                let stream_name = msg.payload.stream_name.clone();
+                let result = match writer.delete(msg.payload) {
+                    Err(e) => {
+                        tracing::error!("Error when deleting stream '{}': {}", stream_name, e);
+                        Err(e.into())
+                    }
+
+                    Ok(result) => Ok(result),
+                };
+
+                let _ = msg.mail.send(result);
             }
         }
     }
