@@ -104,6 +104,9 @@ impl Streams for StreamsImpl {
                                 stream_name
                             )))
                         }
+                        ReadStreamCompleted::Unexpected(e) => {
+                            return Err(Status::unavailable(format!("Unexpected error: {}", e)))
+                        }
                         ReadStreamCompleted::Success(reader) => reader,
                     },
                     Err(e) => {

@@ -108,7 +108,7 @@ where
         }
     }
 
-    pub async fn delete(&mut self, params: DeleteStream) -> DeleteStreamCompleted {
+    pub async fn delete(&self, params: DeleteStream) -> DeleteStreamCompleted {
         let index = self.index.clone();
         let revision_cache = self.revision_cache.clone();
         let wal = self.wal.clone();

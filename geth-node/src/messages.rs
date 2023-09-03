@@ -16,6 +16,7 @@ pub struct ReadStream {
 
 pub enum ReadStreamCompleted {
     StreamDeleted,
+    Unexpected(Report),
     Success(MikoshiStream),
 }
 

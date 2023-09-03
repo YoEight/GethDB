@@ -1,3 +1,4 @@
+pub mod reader;
 mod service;
 mod writer;
 
@@ -8,7 +9,7 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 use crate::bus::{AppendStreamMsg, DeleteStreamMsg, ReadStreamMsg};
-use crate::process::storage::service::reader;
+use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::StorageWriter;
 use crate::process::subscriptions::SubscriptionsClient;
 
@@ -61,19 +62,19 @@ where
         .build();
 
     let writer = StorageWriter::new(wal.clone(), index.clone(), revision_cache.clone());
+    let reader = StorageReader::new(wal.clone(), index.clone(), revision_cache.clone());
 
     let (sender, mailbox) = mpsc::unbounded_channel();
-    let reader_queue = reader::start(wal, index.clone(), revision_cache);
 
-    tokio::spawn(service(mailbox, reader_queue, writer));
+    tokio::spawn(service(mailbox, reader, writer));
 
     StorageRef { inner: sender }
 }
 
 async fn service<WAL, S>(
     mut mailbox: UnboundedReceiver<Msg>,
-    reader_queue: std::sync::mpsc::Sender<ReadStreamMsg>,
-    mut writer: StorageWriter<WAL, S>,
+    reader: StorageReader<WAL, S>,
+    writer: StorageWriter<WAL, S>,
 ) where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
@@ -81,10 +82,7 @@ async fn service<WAL, S>(
     while let Some(msg) = mailbox.recv().await {
         match msg {
             Msg::ReadStream(msg) => {
-                if reader_queue.send(msg).is_err() {
-                    tracing::error!("storage reader service is down");
-                    break;
-                }
+                let _ = msg.mail.send(Ok(reader.read(msg.payload).await));
             }
 
             Msg::AppendStream(msg) => {
