@@ -12,6 +12,7 @@ use std::io;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct StorageWriter<WAL, S> {
     wal: WALRef<WAL>,
     index: Lsm<S>,

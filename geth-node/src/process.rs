@@ -1,76 +1,133 @@
-use crate::bus::{Mailbox, Msg};
+use crate::bus::{
+    GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
+};
+use crate::messages::{
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
+    ReadStreamCompleted, SubscribeTo, SubscriptionConfirmed,
+};
+use crate::process::storage::StorageService;
+use crate::process::subscriptions::SubscriptionsClient;
+use eyre::bail;
+use geth_common::{ProgrammableStats, ProgrammableSummary};
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use tokio::sync::oneshot;
+use uuid::Uuid;
 
 mod storage;
 mod subscriptions;
 
-pub fn start<WAL, S>(mut mailbox: Mailbox, wal: WALRef<WAL>, index: Lsm<S>)
+#[derive(Clone)]
+pub struct Processes<WAL, S> {
+    storage: StorageService<WAL, S>,
+    subscriptions: SubscriptionsClient,
+}
+
+impl<WAL, S> Processes<WAL, S>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    let subscriptions = subscriptions::start();
-    let storage = storage::start(wal, index, subscriptions.clone());
+    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
+        let subscriptions = subscriptions::start();
+        let storage = StorageService::new(wal, index, subscriptions.clone());
 
-    tokio::spawn(async move {
-        while let Some(msg) = mailbox.next().await {
-            match msg {
-                Msg::AppendStream(msg) => {
-                    storage.append_stream(msg).await?;
-                }
+        Self {
+            storage,
+            subscriptions,
+        }
+    }
 
-                Msg::ReadStream(msg) => {
-                    storage.read_stream(msg).await?;
-                }
+    pub async fn append_stream(&self, params: AppendStream) -> AppendStreamCompleted {
+        self.storage.append_stream(params).await
+    }
 
-                Msg::DeleteStream(msg) => {
-                    storage.delete_stream(msg).await?;
-                }
+    pub async fn read_stream(&self, params: ReadStream) -> ReadStreamCompleted {
+        self.storage.read_stream(params).await
+    }
 
-                Msg::Subscribe(msg) => {
-                    if subscriptions.subscribe(msg).is_err() {
-                        tracing::warn!("Subscriptions service is not longer available. quitting");
-                        break;
-                    }
-                }
+    pub async fn delete_stream(&self, params: DeleteStream) -> DeleteStreamCompleted {
+        self.storage.delete_stream(params).await
+    }
 
-                Msg::GetProgrammableSubscriptionStats(msg) => {
-                    if subscriptions
-                        .get_programmable_subscription_stats(msg)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!("Subscriptions service is not longer available. quitting");
-                        break;
-                    }
-                }
-
-                Msg::KillProgrammableSubscription(msg) => {
-                    if subscriptions
-                        .kill_programmable_subscription(msg)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!("Subscriptions service is not longer available. quitting");
-                        break;
-                    }
-                }
-
-                Msg::ListProgrammableSubscriptions(msg) => {
-                    if subscriptions
-                        .list_programmable_subscriptions(msg.mail)
-                        .await
-                        .is_err()
-                    {
-                        tracing::warn!("Subscriptions service is not longer available. quitting");
-                        break;
-                    }
-                }
-            }
+    pub async fn subscribe_to(&self, msg: SubscribeTo) -> eyre::Result<SubscriptionConfirmed> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .subscribe(SubscribeMsg {
+                payload: msg,
+                mail: sender,
+            })
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
         }
 
-        Ok::<_, eyre::Report>(())
-    });
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn get_programmable_subscription_stats(
+        &self,
+        id: Uuid,
+    ) -> eyre::Result<Option<ProgrammableStats>> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .get_programmable_subscription_stats(GetProgrammableSubscriptionStatsMsg {
+                id,
+                mail: sender,
+            })
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn kill_programmable_subscription(&self, id: Uuid) -> eyre::Result<()> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .kill_programmable_subscription(KillProgrammableSubscriptionMsg { id, mail: sender })
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
+
+    pub async fn list_programmable_subscriptions(&self) -> eyre::Result<Vec<ProgrammableSummary>> {
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .list_programmable_subscriptions(sender)
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
+    }
 }

@@ -16,6 +16,7 @@ use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::process::storage::service::current::CurrentRevision;
 use crate::process::storage::RevisionCache;
 
+#[derive(Clone)]
 pub struct StorageReader<WAL, S> {
     wal: WALRef<WAL>,
     index: Lsm<S>,
