@@ -141,7 +141,6 @@ where
         let mut position = self.writer;
         let starting_position = position;
         let r#type = A::r#type();
-        let mut mappings = Vec::with_capacity(records.len());
 
         for record in records {
             record.put(&mut self.buffer);
@@ -181,7 +180,6 @@ where
 
             entry.position = position;
             let local_offset = chunk.raw_position(position);
-            mappings.push(position);
             position += entry.size() as u64;
             entry.put(&mut self.buffer);
             self.storage
@@ -195,7 +193,6 @@ where
         Ok(LogReceipt {
             start_position: starting_position,
             next_position: self.writer,
-            mappings,
         })
     }
 
