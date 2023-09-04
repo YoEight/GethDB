@@ -1,11 +1,10 @@
 use crate::messages::{AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted};
+use crate::process::storage::index::StorageIndex;
 use crate::process::storage::service::current::CurrentRevision;
 use crate::process::storage::RevisionCache;
 use chrono::Utc;
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
 use geth_mikoshi::domain::{StreamDeleted, StreamEventAppended};
-use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
@@ -13,9 +12,12 @@ use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
 #[derive(Clone)]
-pub struct StorageWriter<WAL, S> {
+pub struct StorageWriter<WAL, S>
+where
+    S: Storage,
+{
     wal: WALRef<WAL>,
-    index: Lsm<S>,
+    index: StorageIndex<S>,
     revision_cache: RevisionCache,
 }
 
@@ -24,7 +26,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Lsm<S>, revision_cache: RevisionCache) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>, revision_cache: RevisionCache) -> Self {
         Self {
             wal,
             index,
@@ -38,14 +40,7 @@ where
         let revision_cache = self.revision_cache.clone();
 
         let handle = spawn_blocking(move || {
-            let stream_key = mikoshi_hash(&params.stream_name);
-            let current_revision = if let Some(current) = revision_cache.get(&params.stream_name) {
-                CurrentRevision::Revision(current)
-            } else {
-                index
-                    .highest_revision(stream_key)?
-                    .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
-            };
+            let current_revision = index.stream_current_revision(&params.stream_name)?;
 
             if current_revision.is_deleted() {
                 return Ok::<_, io::Error>(AppendStreamCompleted::StreamDeleted);
@@ -79,15 +74,7 @@ where
             }
 
             let receipt = wal.append(events.as_slice())?;
-            // TODO - Move to implemented indexing the previous way.
-            // let index_entries =
-            //     receipt
-            //         .mappings
-            //         .into_iter()
-            //         .enumerate()
-            //         .map(|(offset, position)| {
-            //             (stream_key, starting_revision + offset as u64, position)
-            //         });
+            index.chase(receipt.next_position);
 
             revision_cache.insert(params.stream_name, revision - 1);
 
@@ -115,10 +102,7 @@ where
         let wal = self.wal.clone();
 
         let handle = spawn_blocking(move || {
-            let stream_key = mikoshi_hash(&params.stream_name);
-            let current_revision = index
-                .highest_revision(stream_key)?
-                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+            let current_revision = index.stream_current_revision(&params.stream_name)?;
 
             if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
                 return Ok::<_, io::Error>(DeleteStreamCompleted::Failure(e));

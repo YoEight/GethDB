@@ -6,21 +6,19 @@ use geth_common::Position;
 use geth_mikoshi::domain::StreamEventAppended;
 use geth_mikoshi::wal::{LogEntryType, WALRef, WriteAheadLog};
 use geth_mikoshi::{
-    hashing::mikoshi_hash,
-    index::{IteratorIO, Lsm},
-    storage::Storage,
-    Entry, MikoshiStream,
+    hashing::mikoshi_hash, index::IteratorIO, storage::Storage, Entry, MikoshiStream,
 };
 
 use crate::messages::{ReadStream, ReadStreamCompleted};
-use crate::process::storage::service::current::CurrentRevision;
-use crate::process::storage::RevisionCache;
+use crate::process::storage::index::StorageIndex;
 
 #[derive(Clone)]
-pub struct StorageReader<WAL, S> {
+pub struct StorageReader<WAL, S>
+where
+    S: Storage,
+{
     wal: WALRef<WAL>,
-    index: Lsm<S>,
-    revision_cache: RevisionCache,
+    index: StorageIndex<S>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -28,36 +26,29 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Lsm<S>, revision_cache: RevisionCache) -> Self {
-        Self {
-            wal,
-            index,
-            revision_cache,
-        }
+    pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>) -> Self {
+        Self { wal, index }
     }
 
     pub async fn read(&self, params: ReadStream) -> ReadStreamCompleted {
         let index = self.index.clone();
         let wal = self.wal.clone();
-        let revision_cache = self.revision_cache.clone();
         let (send_result, recv_result) = tokio::sync::oneshot::channel();
 
         spawn_blocking(move || {
-            let key = mikoshi_hash(&params.stream_name);
-            let current_revision = if let Some(current) = revision_cache.get(&params.stream_name) {
-                CurrentRevision::Revision(current)
-            } else {
-                index
-                    .highest_revision(key)?
-                    .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
-            };
+            let current_revision = index.stream_current_revision(&params.stream_name)?;
 
             if current_revision.is_deleted() {
                 let _ = send_result.send(ReadStreamCompleted::StreamDeleted);
                 return Ok::<_, io::Error>(());
             }
 
-            let mut iter = index.scan(key, params.direction, params.starting, params.count);
+            let mut iter = index.lsm().scan(
+                mikoshi_hash(&params.stream_name),
+                params.direction,
+                params.starting,
+                params.count,
+            );
 
             let (read_stream, read_queue) = tokio::sync::mpsc::channel(500);
             let stream = MikoshiStream::new(read_queue);

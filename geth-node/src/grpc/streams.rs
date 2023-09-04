@@ -30,7 +30,10 @@ use prost_types::Timestamp;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub struct StreamsImpl<WAL, S> {
+pub struct StreamsImpl<WAL, S>
+where
+    S: Storage,
+{
     processes: Processes<WAL, S>,
 }
 

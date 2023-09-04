@@ -1,3 +1,4 @@
+mod index;
 pub mod reader;
 mod service;
 mod writer;
@@ -10,15 +11,18 @@ use crate::messages::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
     ReadStreamCompleted,
 };
+use crate::process::storage::index::StorageIndex;
 use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::StorageWriter;
 use crate::process::subscriptions::SubscriptionsClient;
 
 #[derive(Clone)]
-pub struct StorageService<WAL, S> {
+pub struct StorageService<WAL, S>
+where
+    S: Storage,
+{
     writer: StorageWriter<WAL, S>,
     reader: StorageReader<WAL, S>,
-    client: SubscriptionsClient,
 }
 
 pub type RevisionCache = moka::sync::Cache<String, u64>;
@@ -34,10 +38,11 @@ where
             .name("revision-cache")
             .build();
 
+        let index = StorageIndex::new(wal.clone(), index.clone(), client, revision_cache.clone());
+
         Self {
             writer: StorageWriter::new(wal.clone(), index.clone(), revision_cache.clone()),
-            reader: StorageReader::new(wal, index, revision_cache),
-            client,
+            reader: StorageReader::new(wal, index),
         }
     }
 

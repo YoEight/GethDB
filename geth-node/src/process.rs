@@ -19,7 +19,10 @@ mod storage;
 mod subscriptions;
 
 #[derive(Clone)]
-pub struct Processes<WAL, S> {
+pub struct Processes<WAL, S>
+where
+    S: Storage,
+{
     storage: StorageService<WAL, S>,
     subscriptions: SubscriptionsClient,
 }
