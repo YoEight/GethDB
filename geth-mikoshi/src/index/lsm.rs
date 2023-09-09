@@ -145,7 +145,7 @@ where
                 Records::StreamDeleted(record) => {
                     let key = mikoshi_hash(&record.event_stream_id);
 
-                    (key, record.revision, u64::MAX)
+                    (key, u64::MAX, position)
                 }
             });
 

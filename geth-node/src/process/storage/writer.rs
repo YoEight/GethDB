@@ -115,6 +115,7 @@ where
             }])?;
 
             revision_cache.insert(params.stream_name, u64::MAX);
+            index.chase(receipt.next_position);
 
             Ok(DeleteStreamCompleted::Success(WriteResult {
                 next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),

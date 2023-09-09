@@ -102,9 +102,16 @@ where
         let current_revision = if let Some(current) = self.revision_cache.get(stream_name) {
             CurrentRevision::Revision(current)
         } else {
-            self.index
+            let revision = self
+                .index
                 .highest_revision(stream_key)?
-                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision)
+                .map_or_else(|| CurrentRevision::NoStream, CurrentRevision::Revision);
+
+            if let CurrentRevision::Revision(rev) = revision {
+                self.revision_cache.insert(stream_name.to_string(), rev);
+            }
+
+            revision
         };
 
         Ok(current_revision)
