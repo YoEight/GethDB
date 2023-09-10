@@ -1,8 +1,7 @@
-use crate::process::storage::service::current::CurrentRevision;
 use crate::process::storage::RevisionCache;
 use crate::process::subscriptions::SubscriptionsClient;
 use chrono::{TimeZone, Utc};
-use geth_common::Position;
+use geth_common::{ExpectedRevision, Position};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -11,6 +10,36 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::Entry;
 use geth_mikoshi::IteratorIO;
 use std::io;
+
+#[derive(Copy, Clone)]
+pub enum CurrentRevision {
+    NoStream,
+    Revision(u64),
+}
+
+impl CurrentRevision {
+    pub fn next_revision(self) -> u64 {
+        match self {
+            CurrentRevision::NoStream => 0,
+            CurrentRevision::Revision(r) => r + 1,
+        }
+    }
+
+    pub fn as_expected(self) -> ExpectedRevision {
+        match self {
+            CurrentRevision::NoStream => ExpectedRevision::NoStream,
+            CurrentRevision::Revision(v) => ExpectedRevision::Revision(v),
+        }
+    }
+
+    pub fn is_deleted(&self) -> bool {
+        if let CurrentRevision::Revision(r) = self {
+            return *r == u64::MAX;
+        }
+
+        false
+    }
+}
 
 #[derive(Clone)]
 pub struct StorageIndex<S>

@@ -1,6 +1,5 @@
 use crate::messages::{AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted};
-use crate::process::storage::index::StorageIndex;
-use crate::process::storage::service::current::CurrentRevision;
+use crate::process::storage::index::{CurrentRevision, StorageIndex};
 use crate::process::storage::RevisionCache;
 use chrono::Utc;
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};

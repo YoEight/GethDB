@@ -1,6 +1,5 @@
 mod index;
 pub mod reader;
-mod service;
 mod writer;
 
 use geth_mikoshi::index::Lsm;
