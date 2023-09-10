@@ -16,6 +16,7 @@ pub struct ReadStream {
 
 pub enum ReadStreamCompleted {
     StreamDeleted,
+    Unexpected(Report),
     Success(MikoshiStream),
 }
 
@@ -37,6 +38,7 @@ pub struct DeleteStream {
 pub enum AppendStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
+    Unexpected(Report),
     StreamDeleted,
 }
 
@@ -44,6 +46,7 @@ pub enum AppendStreamCompleted {
 pub enum DeleteStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
+    Unexpected(Report),
 }
 
 #[derive(Debug)]

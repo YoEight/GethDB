@@ -191,7 +191,7 @@ where
         flush_writer_chk(&self.storage, self.writer)?;
 
         Ok(LogReceipt {
-            position: starting_position,
+            start_position: starting_position,
             next_position: self.writer,
         })
     }

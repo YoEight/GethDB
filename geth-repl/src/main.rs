@@ -478,7 +478,7 @@ where
     }
 
     let receipt = wal.append(events.as_slice())?;
-    let position = receipt.position;
+    let position = receipt.start_position;
     let result = WriteResult {
         next_expected_version: ExpectedRevision::Revision(revision),
         position: Position(position),

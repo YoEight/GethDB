@@ -14,32 +14,45 @@ use geth_common::protocol::{
     Empty,
 };
 
-use crate::bus::Bus;
 use crate::messages::{
     AppendStream, DeleteStream, DeleteStreamCompleted, ProcessTarget, ReadStream,
     ReadStreamCompleted, StreamTarget, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
+use crate::process::Processes;
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::{Direction, ExpectedRevision, Propose};
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::WriteAheadLog;
 use prost_types::Timestamp;
 use std::collections::HashMap;
 use uuid::Uuid;
 
-pub struct StreamsImpl {
-    bus: Bus,
+pub struct StreamsImpl<WAL, S>
+where
+    S: Storage,
+{
+    processes: Processes<WAL, S>,
 }
 
-impl StreamsImpl {
-    pub fn new(bus: Bus) -> Self {
-        Self { bus }
+impl<WAL, S> StreamsImpl<WAL, S>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
+    pub fn new(processes: Processes<WAL, S>) -> Self {
+        Self { processes }
     }
 }
 
 #[tonic::async_trait]
-impl Streams for StreamsImpl {
+impl<WAL, S> Streams for StreamsImpl<WAL, S>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
     type ReadStream = BoxStream<'static, Result<ReadResp, Status>>;
     async fn read(&self, request: Request<ReadReq>) -> Result<Response<Self::ReadStream>, Status> {
         tracing::info!("ReadStream request received!");
@@ -96,20 +109,17 @@ impl Streams for StreamsImpl {
                 };
 
                 tracing::info!("Managed to parse read stream successfully");
-                match self.bus.read_stream(msg).await {
-                    Ok(resp) => match resp {
-                        ReadStreamCompleted::StreamDeleted => {
-                            return Err(Status::not_found(format!(
-                                "Stream '{}' is deleted",
-                                stream_name
-                            )))
-                        }
-                        ReadStreamCompleted::Success(reader) => reader,
-                    },
-                    Err(e) => {
-                        tracing::error!("Error when reading from mikoshi: {}", e);
-                        return Err(Status::unavailable(e.to_string()));
+                match self.processes.read_stream(msg).await {
+                    ReadStreamCompleted::StreamDeleted => {
+                        return Err(Status::not_found(format!(
+                            "Stream '{}' is deleted",
+                            stream_name
+                        )))
                     }
+                    ReadStreamCompleted::Unexpected(e) => {
+                        return Err(Status::unavailable(format!("Unexpected error: {}", e)))
+                    }
+                    ReadStreamCompleted::Success(reader) => reader,
                 }
             }
 
@@ -133,7 +143,7 @@ impl Streams for StreamsImpl {
                     target,
                 };
 
-                match self.bus.subscribe_to(msg).await {
+                match self.processes.subscribe_to(msg).await {
                     Ok(resp) => match resp.outcome {
                         SubscriptionRequestOutcome::Success(reader) => reader,
                         SubscriptionRequestOutcome::Failure(e) => {
@@ -220,15 +230,14 @@ impl Streams for StreamsImpl {
 
         tracing::info!("Manage to parse append stream request");
         let resp = self
-            .bus
+            .processes
             .append_stream(AppendStream {
                 correlation: Uuid::new_v4(),
                 stream_name: stream_name.clone(),
                 events,
                 expected,
             })
-            .await
-            .map_err(|e| Status::unavailable(e.to_string()))?;
+            .await;
 
         let resp = match resp {
             AppendStreamCompleted::Success(result) => AppendResp {
@@ -250,6 +259,9 @@ impl Streams for StreamsImpl {
                     },
                 )),
             },
+            AppendStreamCompleted::Unexpected(e) => {
+                return Err(Status::unavailable(format!("Unexpected error: {}", e)))
+            }
             AppendStreamCompleted::StreamDeleted => {
                 return Err(Status::not_found(format!(
                     "Stream '{}' is deleted",
@@ -288,41 +300,36 @@ impl Streams for StreamsImpl {
             ))?
             .into();
 
-        match self
-            .bus
+        let resp = match self
+            .processes
             .delete_stream(DeleteStream {
                 stream_name,
                 expected,
             })
             .await
         {
-            Err(e) => Err(Status::unavailable(format!(
-                "Error when deleting stream: {}",
-                e
-            ))),
+            DeleteStreamCompleted::Success(result) => DeleteResp {
+                result: Some(delete_resp::Result::Position(delete_resp::Position {
+                    commit_position: result.position.raw(),
+                    prepare_position: result.position.raw(),
+                })),
+            },
 
-            Ok(result) => {
-                let resp = match result {
-                    DeleteStreamCompleted::Success(result) => DeleteResp {
-                        result: Some(delete_resp::Result::Position(delete_resp::Position {
-                            commit_position: result.position.raw(),
-                            prepare_position: result.position.raw(),
-                        })),
+            DeleteStreamCompleted::Failure(e) => DeleteResp {
+                result: Some(delete_resp::Result::WrongExpectedVersion(
+                    delete_resp::WrongExpectedVersion {
+                        current_revision_option: Some(e.current.into()),
+                        expected_revision_option: Some(e.expected.into()),
                     },
+                )),
+            },
 
-                    DeleteStreamCompleted::Failure(e) => DeleteResp {
-                        result: Some(delete_resp::Result::WrongExpectedVersion(
-                            delete_resp::WrongExpectedVersion {
-                                current_revision_option: Some(e.current.into()),
-                                expected_revision_option: Some(e.expected.into()),
-                            },
-                        )),
-                    },
-                };
-
-                Ok(Response::new(resp))
+            DeleteStreamCompleted::Unexpected(e) => {
+                return Err(Status::unavailable(format!("Unexpected error: {}", e)));
             }
-        }
+        };
+
+        Ok(Response::new(resp))
     }
 
     async fn get_programmable_subscription_stats(
@@ -331,7 +338,7 @@ impl Streams for StreamsImpl {
     ) -> Result<Response<ProgStatsResp>, Status> {
         let id = parse_required_uuid("id", request.into_inner().id)?;
 
-        match self.bus.get_programmable_subscription_stats(id).await {
+        match self.processes.get_programmable_subscription_stats(id).await {
             Err(_) => Err(Status::unavailable("Server is down")),
             Ok(stats) => {
                 if let Some(stats) = stats {
@@ -362,7 +369,7 @@ impl Streams for StreamsImpl {
     ) -> Result<Response<KillProgResp>, Status> {
         let id = parse_required_uuid("id", request.into_inner().id)?;
 
-        if let Err(_) = self.bus.kill_programmable_subscription(id).await {
+        if let Err(_) = self.processes.kill_programmable_subscription(id).await {
             Err(Status::unavailable("Server is down"))
         } else {
             Ok(Response::new(KillProgResp {
@@ -375,7 +382,7 @@ impl Streams for StreamsImpl {
         &self,
         _request: Request<Empty>,
     ) -> Result<Response<ListProgsResp>, Status> {
-        match self.bus.list_programmable_subscriptions().await {
+        match self.processes.list_programmable_subscriptions().await {
             Err(_) => Err(Status::unavailable("Server is down")),
             Ok(progs) => Ok(Response::new(ListProgsResp {
                 summaries: progs
