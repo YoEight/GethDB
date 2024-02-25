@@ -6,4 +6,5 @@ members = [
     "geth-repl",
     "geth-client",
     "geth-common",
+    "geth-consensus",
 ]
