@@ -19,6 +19,13 @@ pub struct AppendEntries<Id> {
 }
 
 #[derive(Debug)]
+pub struct EntriesReplicated<Id> {
+    pub node_id: Id,
+    pub term: u64,
+    pub success: bool,
+}
+
+#[derive(Debug)]
 pub struct VoteCasted<Id> {
     pub node_id: Id,
     pub term: u64,
