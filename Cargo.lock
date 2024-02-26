@@ -670,6 +670,7 @@ name = "geth-consensus"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "rand",
 ]
 
 [[package]]

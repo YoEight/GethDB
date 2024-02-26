@@ -1,8 +1,11 @@
 use std::cmp::min;
+use std::collections::HashSet;
+use std::hash::Hash;
 use std::io;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use bytes::BytesMut;
+use rand::{Rng, thread_rng};
 
 use crate::entry::{Entry, EntryId};
 use crate::msg::{
@@ -79,29 +82,50 @@ pub trait IterateEntries {
     fn next(&mut self) -> io::Result<Option<Entry>>;
 }
 
+#[derive(Debug, PartialEq, Eq)]
 pub enum State {
     Candidate,
     Follower,
     Leader,
 }
 
+pub struct TimeRange {
+    low: u64,
+    high: u64,
+}
+
+impl TimeRange {
+    pub fn new(low: u64, high: u64) -> Self {
+        Self { low, high }
+    }
+
+    pub fn update_timeout(&self) -> Duration {
+        let mut rng = thread_rng();
+
+        Duration::from_millis(rng.gen_range(self.low..self.high))
+    }
+}
+
 fn run_raft_app<NodeId, Storage, Command, R, S, D>(
     node_id: NodeId,
     seeds: Vec<NodeId>,
+    time_range: TimeRange,
     mut storage: Storage,
     mut mailbox: R,
     sender: S,
 ) where
-    NodeId: Ord + Clone,
+    NodeId: Ord + Hash + Clone,
     Storage: PersistentStorage,
     Command: UserCommand,
     S: RaftSender<Id = NodeId>,
     R: RaftRecv<Id = NodeId, Command = Command>,
     D: CommandDispatch<Command = Command>,
 {
+    let mut tally = HashSet::<NodeId>::new();
     let mut commit_index = 0u64;
     let mut voted_for = None;
-    let mut election_timeout = Instant::now();
+    let mut time_tracker = Instant::now();
+    let mut election_timeout = time_range.update_timeout();
     let mut state = if seeds.is_empty() {
         State::Leader
     } else {
@@ -186,7 +210,7 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                     term = args.term;
                 }
 
-                election_timeout = Instant::now();
+                time_tracker = Instant::now();
                 state = State::Follower;
 
                 // Checks if we have a point of reference with the leader.
@@ -247,7 +271,32 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                 );
             }
 
-            Msg::VoteReceived(_) => {}
+            Msg::VoteReceived(args) => {
+                // Probably out-of-order message.
+                if term > args.term || state == State::Leader {
+                    continue;
+                }
+
+                if term < args.term {
+                    term = args.term;
+                    state = State::Follower;
+                    time_tracker = Instant::now();
+                    election_timeout = time_range.update_timeout();
+
+                    continue;
+                }
+
+                if args.granted {
+                    tally.insert(args.node_id);
+
+                    // If the cluster reached quorum
+                    if tally.len() + 1 >= (seeds.len() + 1) / 2 {
+                        state = State::Leader;
+                        tally.clear();
+                    }
+                }
+            }
+
             Msg::EntriesAppended(_) => {}
             Msg::Command(_) => {}
             Msg::Tick => {}
