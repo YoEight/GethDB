@@ -1,11 +1,11 @@
 use std::cmp::min;
-use std::collections::{HashMap, HashSet};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::io;
 use std::time::{Duration, Instant};
 
-use bytes::BytesMut;
-use rand::{Rng, thread_rng};
+use bytes::{Bytes, BytesMut};
+use rand::{thread_rng, Rng};
 
 use crate::entry::{Entry, EntryId};
 use crate::msg::{
@@ -46,6 +46,8 @@ pub trait CommandDispatch {
 
 pub trait UserCommand: RaftCommand {
     fn is_read(&self) -> bool;
+
+    fn reject(self);
 }
 
 pub trait RaftRecv {
@@ -76,6 +78,28 @@ pub trait PersistentStorage {
     fn last_entry(&self) -> Option<EntryId>;
     fn previous_entry(&self, index: u64) -> Option<EntryId>;
     fn contains_entry(&self, entry_id: &EntryId) -> bool;
+
+    fn append_entry(&mut self, term: u64, payload: Bytes) -> u64 {
+        let index = self.next_index();
+
+        self.append_entries(vec![Entry {
+            index,
+            term,
+            payload,
+        }]);
+
+        index
+    }
+
+    /// We purposely require a mutable reference to enforce that only one location can mutate the
+    /// persistent log entries.
+    fn next_index(&mut self) -> u64 {
+        if let Some(entry) = self.last_entry() {
+            return entry.index + 1;
+        }
+
+        0
+    }
 }
 
 pub trait IterateEntries {
@@ -133,6 +157,7 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
     mut storage: Storage,
     mut mailbox: R,
     sender: S,
+    dispatcher: D,
 ) where
     NodeId: Ord + Hash + Clone,
     Storage: PersistentStorage,
@@ -148,6 +173,8 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
     let mut voted_for = None;
     let mut time_tracker = Instant::now();
     let mut election_timeout = time_range.update_timeout();
+    let mut buffer = BytesMut::new();
+    let mut inflights = VecDeque::new();
 
     for seed_id in &seeds {
         let state = Replica::new(seed_id.clone());
@@ -346,8 +373,17 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                                 min(lowest_replicated_index, replica.match_index);
                         }
 
-                        // TODO - If we have pending user append commands, we reports all operations
-                        // lesser or equal to `lowest_replicated_index` completed successfully.
+                        // Report all commands that got successfully replicated.
+                        while let Some((index, cmd)) = inflights.pop_front() {
+                            if index <= lowest_replicated_index {
+                                dispatcher.dispatch(cmd);
+                            } else {
+                                // We reached a point where we didn't receive acknowledgement that
+                                // pass that point, the commands got replicated.
+                                inflights.push_front((index, cmd));
+                                break;
+                            }
+                        }
 
                         commit_index = lowest_replicated_index;
                     } else {
@@ -359,7 +395,7 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                 }
             }
 
-            Msg::Command(args) => {
+            Msg::Command(cmd) => {
                 // If we are dealing with a write command but are not the leader of the cluster,
                 // we must refuse to serve the command.
                 //
@@ -367,8 +403,25 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                 // we are not the leader either. It the node is lagging behind replication-wise,
                 // the user might get different view of the data whether they are reading from the
                 // leader node or not.
-                if !args.is_read() && state != State::Leader {
-                    // TODO - Reject the command.
+                if !cmd.is_read() && state != State::Leader {
+                    cmd.reject();
+                    continue;
+                }
+
+                // We persist the command on our side. If we replicated in enough node, we will
+                // let the command through.
+                cmd.write(&mut buffer);
+                let index = storage.append_entry(term, buffer.split().freeze());
+
+                // We are in single-node, we can dispatch the command to the upper layers of node.
+                if seeds.is_empty() {
+                    dispatcher.dispatch(cmd);
+                } else {
+                    // TODO - we keep recent commands in-memory until replication is successful.
+                    // NOTE: It could cause rapid memory increase if the node is under heavy load.
+                    // Another approach would be to read the command back from the persistent
+                    // storage. Doing so cause unnecessary back & forth (de)serialization.
+                    inflights.push_back((index, cmd));
                 }
             }
 
