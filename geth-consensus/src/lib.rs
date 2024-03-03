@@ -69,6 +69,10 @@ pub trait RaftSender {
     fn entries_replicated(&self, target: Self::Id, resp: EntriesReplicated<Self::Id>) {
         self.send(target, Request::EntriesReplicated(resp));
     }
+
+    fn replicate_entries(&self, target: Self::Id, req: AppendEntries<Self::Id>) {
+        self.send(target, Request::AppendEntries(req));
+    }
 }
 
 pub trait PersistentStorage {
@@ -100,10 +104,31 @@ pub trait PersistentStorage {
 
         0
     }
+
+    fn previous_entry_or_default(&self, index: u64) -> EntryId {
+        if let Some(entry) = self.previous_entry(index) {
+            return entry;
+        }
+
+        EntryId::new(0, 0)
+    }
 }
 
 pub trait IterateEntries {
     fn next(&mut self) -> io::Result<Option<Entry>>;
+
+    fn collect(mut self) -> io::Result<Vec<Entry>>
+    where
+        Self: Sized,
+    {
+        let mut entries = Vec::new();
+
+        while let Some(entry) = self.next()? {
+            entries.push(entry);
+        }
+
+        Ok(entries)
+    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -425,7 +450,45 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                 }
             }
 
-            Msg::Tick => {}
+            Msg::Tick => {
+                // In single-node we don't need to communicate with other nodes.
+                if seeds.is_empty() {
+                    return;
+                }
+
+                if state == State::Leader {
+                    for replica in replicas.values() {
+                        let prev_entry = storage.previous_entry_or_default(replica.next_index);
+
+                        let entries = storage.read_entries(prev_entry.index, 500);
+
+                        match entries.collect() {
+                            Err(e) => {
+                                // Best course of action would be to crash the server. I don't see
+                                // immediate ways to recover from this, especially as a leader.
+                                // TODO - Write an ERROR log statement to trace what exactly went
+                                // wrong.
+                                break;
+                            }
+
+                            Ok(entries) => {
+                                sender.replicate_entries(
+                                    replica.id.clone(),
+                                    AppendEntries {
+                                        term,
+                                        leader_id: node_id.clone(),
+                                        prev_log_index: prev_entry.index,
+                                        prev_log_term: prev_entry.term,
+                                        leader_commit: commit_index,
+                                        entries,
+                                    },
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
             Msg::Shutdown => {
                 break;
             }
