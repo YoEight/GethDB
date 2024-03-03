@@ -8,3 +8,7 @@ edition = "2021"
 [dependencies]
 bytes = "*"
 rand = "0.8"
+
+[dev-dependencies]
+arbitrary = "1.3"
+proptest = "1.4"

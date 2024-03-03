@@ -1,8 +1,22 @@
-use crate::entry::{Entry, EntryId};
+use arbitrary::{Arbitrary, Unstructured};
+use proptest::proptest;
+
 use crate::{IterateEntries, PersistentStorage};
+use crate::entry::{Entry, EntryId};
+use crate::tests::arb_entries;
 
 pub struct InMemStorage {
     inner: Vec<Entry>,
+}
+
+impl InMemStorage {
+    pub fn from(inner: Vec<Entry>) -> Self {
+        Self { inner }
+    }
+
+    pub fn empty() -> Self {
+        Self { inner: Vec::new() }
+    }
 }
 
 impl PersistentStorage for InMemStorage {
@@ -61,6 +75,21 @@ impl PersistentStorage for InMemStorage {
     }
 }
 
+impl<'a> Arbitrary<'a> for InMemStorage {
+    fn arbitrary(u: &mut Unstructured<'a>) -> arbitrary::Result<Self> {
+        let len = u.arbitrary_len::<Entry>()?;
+        let mut inner = Vec::with_capacity(len);
+
+        for _ in 0..len {
+            inner.push(u.arbitrary()?);
+        }
+
+        inner.sort_by(|a: &Entry, b| (a.index, a.term).cmp(&(b.index, b.term)));
+
+        Ok(Self { inner })
+    }
+}
+
 struct InMemIter<'a> {
     inner: &'a Vec<Entry>,
     start: u64,
@@ -95,4 +124,31 @@ impl<'a> IterateEntries for InMemIter<'a> {
 
         Ok(None)
     }
+}
+
+proptest! {
+    #[test]
+    fn test_in_mem_append_entries(entries in arb_entries(0u64 ..= 100)) {
+        let mut storage = InMemStorage::empty();
+        storage.append_entries(entries);
+    }
+}
+
+proptest! {
+    #[test]
+    fn test_in_mem_contains_entry_non_existing(
+        entries in arb_entries(0u64 ..= 100),
+        index in 101u64 ..= 200,
+        term in 200u64 ..= 300,
+    ) {
+        let storage = InMemStorage::from(entries);
+
+        assert!(!storage.contains_entry(&EntryId::new(index, term)));
+    }
+}
+#[test]
+fn test_in_mem_contains_entry_when_empty() {
+    let storage = InMemStorage::empty();
+
+    assert!(storage.contains_entry(&EntryId::new(0, 0)));
 }
