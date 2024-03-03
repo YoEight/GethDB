@@ -5,7 +5,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use rand::{Rng, thread_rng};
+use rand::{thread_rng, Rng};
 
 use crate::entry::{Entry, EntryId};
 use crate::msg::{
@@ -14,6 +14,9 @@ use crate::msg::{
 
 mod entry;
 mod msg;
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 pub enum Msg<Id, Command> {
@@ -81,7 +84,7 @@ pub trait RaftSender {
 
 pub trait PersistentStorage {
     fn append_entries(&mut self, entries: Vec<Entry>);
-    fn read_entries(&self, index: u64, max_count: u64) -> impl IterateEntries;
+    fn read_entries(&self, index: u64, max_count: usize) -> impl IterateEntries;
     fn remove_entries(&mut self, from: &EntryId);
     fn last_entry(&self) -> Option<EntryId>;
     fn previous_entry(&self, index: u64) -> Option<EntryId>;

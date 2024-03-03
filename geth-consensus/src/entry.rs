@@ -12,7 +12,7 @@ impl EntryId {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Entry {
     pub index: u64,
     pub term: u64,
