@@ -5,7 +5,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 use bytes::{Bytes, BytesMut};
-use rand::{thread_rng, Rng};
+use rand::{Rng, thread_rng};
 
 use crate::entry::{Entry, EntryId};
 use crate::msg::{
@@ -62,6 +62,10 @@ pub trait RaftSender {
 
     fn send(&self, target: Self::Id, request: Request<Self::Id>);
 
+    fn request_vote(&self, target: Self::Id, req: RequestVote<Self::Id>) {
+        self.send(target, Request::RequestVote(req));
+    }
+
     fn vote_casted(&self, target: Self::Id, resp: VoteCasted<Self::Id>) {
         self.send(target, Request::VoteCasted(resp));
     }
@@ -93,6 +97,14 @@ pub trait PersistentStorage {
         }]);
 
         index
+    }
+
+    fn last_entry_or_default(&self) -> EntryId {
+        if let Some(entry) = self.last_entry() {
+            return entry;
+        }
+
+        EntryId { index: 0, term: 0 }
     }
 
     /// We purposely require a mutable reference to enforce that only one location can mutate the
@@ -148,7 +160,7 @@ impl TimeRange {
         Self { low, high }
     }
 
-    pub fn update_timeout(&self) -> Duration {
+    pub fn new_timeout(&self) -> Duration {
         let mut rng = thread_rng();
 
         Duration::from_millis(rng.gen_range(self.low..self.high))
@@ -197,7 +209,7 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
     let mut last_applied = 0u64;
     let mut voted_for = None;
     let mut time_tracker = Instant::now();
-    let mut election_timeout = time_range.update_timeout();
+    let mut election_timeout = time_range.new_timeout();
     let mut buffer = BytesMut::new();
     let mut inflights = VecDeque::new();
 
@@ -361,7 +373,7 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                     term = args.term;
                     state = State::Follower;
                     time_tracker = Instant::now();
-                    election_timeout = time_range.update_timeout();
+                    election_timeout = time_range.new_timeout();
 
                     continue;
                 }
@@ -485,6 +497,26 @@ fn run_raft_app<NodeId, Storage, Command, R, S, D>(
                                 );
                             }
                         }
+                    }
+                } else if time_tracker.elapsed() >= election_timeout {
+                    // We didn't hear form the leader a long time ago, time to start a new election.
+                    state = State::Candidate;
+                    term += 1;
+                    voted_for = Some(node_id.clone());
+                    election_timeout = time_range.new_timeout();
+                    time_tracker = Instant::now();
+
+                    let last_entry = storage.last_entry_or_default();
+                    for replica in replicas.values() {
+                        sender.request_vote(
+                            replica.id.clone(),
+                            RequestVote {
+                                term,
+                                candidate_id: node_id.clone(),
+                                last_log_index: last_entry.index,
+                                last_log_term: last_entry.term,
+                            },
+                        );
                     }
                 }
             }
