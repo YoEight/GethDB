@@ -26,6 +26,7 @@ prop_compose! {
         mut entries in vec(arb_entry(index_range), 0 ..= 100),
     ) -> Vec<Entry> {
         entries.sort_by(|a: &Entry, b| (a.index, a.term).cmp(&(b.index, b.term)));
+        entries.dedup_by(|a, b| a.index == b.index);
         entries
     }
 }

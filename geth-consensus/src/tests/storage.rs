@@ -128,9 +128,22 @@ impl<'a> IterateEntries for InMemIter<'a> {
 
 proptest! {
     #[test]
-    fn test_in_mem_append_entries(entries in arb_entries(0u64 ..= 100)) {
+    fn test_in_mem_append_entries_and_read_all(
+        entries in arb_entries(0u64 ..= 100),
+    ) {
+        let expected = entries.clone();
         let mut storage = InMemStorage::empty();
         storage.append_entries(entries);
+
+        for (a, b) in expected
+            .into_iter()
+            .zip(storage.read_entries(0, usize::MAX)
+            .collect()
+            .unwrap()) {
+
+            assert_eq!(a.index, b.index);
+            assert_eq!(a.term, b.term);
+        }
     }
 }
 
@@ -146,6 +159,32 @@ proptest! {
         assert!(!storage.contains_entry(&EntryId::new(index, term)));
     }
 }
+
+proptest! {
+    #[test]
+    fn test_in_mem_previous_entry_non_empty(
+        entries in arb_entries(1u64 ..= 100),
+    ) {
+        let storage = InMemStorage::from(entries.clone());
+
+        let mut prev_entry: Option<Entry> = None;
+        for entry in entries {
+            if let Some(actual) = storage.previous_entry(entry.index) {
+                println!("Current entry: index {}, term {}", entry.index, entry.term);
+                let expected = prev_entry.take().unwrap();
+
+                assert_eq!(expected.index, actual.index);
+                assert_eq!(expected.term, actual.term);
+            } else {
+                println!("(Empty) Current entry: index {}, term {}", entry.index, entry.term);
+                assert!(prev_entry.is_none());
+            }
+
+            prev_entry = Some(entry);
+        }
+    }
+}
+
 #[test]
 fn test_in_mem_contains_entry_when_empty() {
     let storage = InMemStorage::empty();
