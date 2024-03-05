@@ -1,9 +1,9 @@
 use arbitrary::{Arbitrary, Unstructured};
 use proptest::proptest;
 
-use crate::{IterateEntries, PersistentStorage};
 use crate::entry::{Entry, EntryId};
 use crate::tests::arb_entries;
+use crate::{IterateEntries, PersistentStorage};
 
 pub struct InMemStorage {
     inner: Vec<Entry>,
