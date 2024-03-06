@@ -84,6 +84,7 @@ pub trait RaftSender {
 }
 
 pub trait PersistentStorage {
+    fn empty() -> Self;
     fn append_entries(&mut self, entries: Vec<Entry>);
     fn read_entries(&self, index: u64, max_count: usize) -> impl IterateEntries;
     fn remove_entries(&mut self, from: &EntryId);
