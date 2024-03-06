@@ -1,5 +1,6 @@
 use arbitrary::{Arbitrary, Unstructured};
 use proptest::proptest;
+use rand::Rng;
 
 use crate::entry::{Entry, EntryId};
 use crate::tests::arb_entries;
@@ -181,6 +182,41 @@ proptest! {
             }
 
             prev_entry = Some(entry);
+        }
+    }
+}
+
+proptest! {
+    #[test]
+    fn test_in_mem_remove_entries(
+        entries in arb_entries(0u64 ..= 100),
+    ) {
+        // A check to prevent empty-ranges.
+        let point = if entries.len() > 1 {
+            rand::thread_rng().gen_range(0usize .. entries.len())
+        } else {
+            0
+        };
+
+        let mut storage = InMemStorage::from(entries.clone());
+        let entry = if let Some(e) = entries.get(point) {
+            e.id()
+        } else {
+            // Means we are dealing with an empty entry collection.
+            EntryId::new(0, 0)
+        };
+
+        let mut expected = entries.clone();
+
+        expected.retain(|e| e.index < entry.index);
+        storage.remove_entries(&entry);
+
+        let actual = storage.read_all().collect().unwrap();
+
+        assert_eq!(expected.len(), actual.len());
+
+        for (a, b) in expected.iter().zip(actual.iter()) {
+            assert_eq!(a.id(), b.id());
         }
     }
 }

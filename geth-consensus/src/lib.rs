@@ -128,6 +128,10 @@ pub trait PersistentStorage {
 
         EntryId::new(0, 0)
     }
+
+    fn read_all(&self) -> impl IterateEntries {
+        self.read_entries(0, usize::MAX)
+    }
 }
 
 pub trait IterateEntries {
