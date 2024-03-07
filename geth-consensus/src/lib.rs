@@ -1,4 +1,3 @@
-use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::Hash;
 use std::io;
 use std::time::{Duration, Instant};
@@ -212,41 +211,8 @@ pub fn run_raft_app<NodeId, Storage, Command, R, S, D>(
     R: RaftRecv<Id = NodeId, Command = Command>,
     D: CommandDispatch<Command = Command>,
 {
-    let mut replicas = HashMap::new();
-    let commit_index = 0u64;
-    let election_timeout = time_range.new_timeout();
-    let buffer = BytesMut::new();
-
-    for seed_id in &seeds {
-        let state = Replica::new(seed_id.clone());
-        replicas.insert(seed_id.clone(), state);
-    }
-
-    let state = if seeds.is_empty() {
-        State::Leader
-    } else {
-        State::Follower
-    };
-
-    let term = if let Some(entry_id) = storage.last_entry() {
-        entry_id.term
-    } else {
-        0
-    };
-
-    let mut sm = RaftSM {
-        id: node_id,
-        term,
-        state,
-        commit_index,
-        voted_for: None,
-        tally: HashSet::new(),
-        time: Instant::now(),
-        election_timeout,
-        inflights: VecDeque::new(),
-        buffer,
-        replicas,
-    };
+    let term = storage.last_entry().map(|e| e.term);
+    let mut sm = RaftSM::new(node_id, &time_range, seeds, term);
 
     while let Some(msg) = mailbox.recv() {
         match msg {

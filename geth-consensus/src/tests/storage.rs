@@ -4,7 +4,7 @@ use crate::entry::{Entry, EntryId};
 use crate::IterateEntries;
 use crate::PersistentStorage;
 
-mod in_mem;
+pub mod in_mem;
 
 fn prop_append_entries_and_read_all<S: PersistentStorage>(entries: Vec<Entry>) {
     let expected = entries.clone();

@@ -33,6 +33,33 @@ where
     NodeId: Clone + Ord + Hash,
     Command: UserCommand,
 {
+    pub fn new(id: NodeId, time_range: &TimeRange, seeds: Vec<NodeId>, term: Option<u64>) -> Self {
+        let mut replicas = HashMap::<NodeId, Replica<NodeId>>::new();
+        let state = if seeds.is_empty() {
+            State::Leader
+        } else {
+            State::Follower
+        };
+
+        for seed in seeds {
+            replicas.insert(seed.clone(), Replica::new(seed));
+        }
+
+        Self {
+            id,
+            term: term.unwrap_or_default(),
+            state,
+            commit_index: 0,
+            voted_for: None,
+            tally: HashSet::default(),
+            time: Instant::now(),
+            election_timeout: time_range.new_timeout(),
+            inflights: VecDeque::new(),
+            buffer: Default::default(),
+            replicas,
+        }
+    }
+
     pub fn handle_request_vote<S, P>(&mut self, sender: &S, storage: &P, args: RequestVote<NodeId>)
     where
         S: RaftSender<Id = NodeId>,
@@ -310,7 +337,7 @@ where
 
         if self.state == State::Leader {
             self.replicate_entries(storage, sender);
-        } else if self.time.duration_since(now) >= self.election_timeout {
+        } else if now.duration_since(self.time) >= self.election_timeout {
             // We didn't hear form the leader a long time ago, time to start a new election.
             self.state = State::Candidate;
             self.term += 1;
