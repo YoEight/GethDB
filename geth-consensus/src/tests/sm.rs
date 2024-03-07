@@ -88,8 +88,13 @@ fn test_move_to_leader_when_garnered_enough_votes() {
 
     assert_eq!(State::Leader, sm.state);
 
+    // We check that as the leader of the cluster, the node send append entries RPC as soon as
+    // possible.
     let mut reqs = sender.take();
     reqs.sort_by(|a, b| a.target.cmp(&b.target));
+
+    assert!(!reqs.is_empty());
+    assert_eq!(seeds.len(), reqs.len());
 
     let last_entry = storage.last_entry_or_default();
     for (seed, req) in seeds.into_iter().zip(reqs.into_iter()) {
