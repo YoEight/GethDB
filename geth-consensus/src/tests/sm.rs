@@ -1,10 +1,10 @@
 use std::time::{Duration, Instant};
 
+use crate::{PersistentStorage, Request, State, TimeRange};
 use crate::msg::{AppendEntries, VoteReceived};
 use crate::state_machine::RaftSM;
-use crate::tests::storage::in_mem::InMemStorage;
 use crate::tests::{TestCommand, TestSender};
-use crate::{PersistentStorage, Request, State, TimeRange};
+use crate::tests::storage::in_mem::InMemStorage;
 
 #[test]
 // TODO - Move that test to proptest to check that the logic is working regardless of how many
@@ -171,4 +171,58 @@ fn move_from_candidate_to_follower_when_leader_show_up_empty_log() {
     assert_eq!(term, args.term);
     assert_eq!(node_id, args.node_id);
     assert!(args.success);
+}
+
+#[test]
+// TODO - Move that test to proptest to check that the logic is working regardless of how many
+// entries that we got.
+fn move_from_leader_to_follower_if_better_leader_is_showing_up() {
+    let node_id = 0;
+    let seeds = (1usize..=2).collect::<Vec<_>>();
+    let time_range = TimeRange::new(150, 300);
+    let sender = TestSender::new();
+    let mut storage = InMemStorage::empty();
+
+    let mut sm = RaftSM::<usize, TestCommand>::new(node_id, &time_range, seeds.clone(), None);
+    let election_timeout = sm.election_timeout;
+    let new_time = Instant::now() + election_timeout;
+
+    sm.handle_tick(&time_range, &storage, &sender, new_time);
+
+    // We clear the vote requests
+    sender.take();
+
+    sm.handle_vote_received(
+        &time_range,
+        &storage,
+        &sender,
+        new_time + Duration::from_millis(10),
+        VoteReceived {
+            node_id: 1,
+            term: sm.term,
+            granted: true,
+        },
+    );
+
+    assert_eq!(State::Leader, sm.state);
+
+    let new_term = sm.term + 1;
+    let new_time = sm.time + Duration::from_millis(10);
+    sm.handle_append_entries(
+        &sender,
+        &mut storage,
+        new_time,
+        AppendEntries {
+            term: new_term,
+            leader_id: 2,
+            prev_log_index: 0,
+            prev_log_term: 0,
+            leader_commit: 0,
+            entries: vec![],
+        },
+    );
+
+    assert_eq!(State::Follower, sm.state);
+    assert_eq!(new_term, sm.term);
+    assert_eq!(new_time, sm.time);
 }
