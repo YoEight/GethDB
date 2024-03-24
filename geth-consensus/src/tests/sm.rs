@@ -6,7 +6,7 @@ use crate::entry::Entry;
 use crate::msg::{AppendEntries, VoteReceived};
 use crate::state_machine::RaftSM;
 use crate::tests::storage::in_mem::InMemStorage;
-use crate::tests::{arb_entries, TestCommand, TestSender};
+use crate::tests::{arb_entries, TestCommand, TestDispatch, TestSender};
 use crate::{PersistentStorage, Request, State, TimeRange};
 
 proptest! {
@@ -270,4 +270,29 @@ fn prop_move_from_leader_to_follower_if_better_leader_is_showing_up(entries: Vec
     assert_eq!(State::Follower, sm.state);
     assert_eq!(new_term, sm.term);
     assert_eq!(new_time, sm.time);
+}
+
+#[test]
+fn test_reject_command_if_not_leader() {
+    let node_id = 0;
+    let seeds = (1usize..=2).collect::<Vec<_>>();
+    let time_range = TimeRange::new(150, 300);
+    // let sender = TestSender::new();
+    let dispatch = TestDispatch::new();
+    let mut storage = InMemStorage::empty();
+    let last_entry = storage.last_entry_or_default();
+
+    let mut sm = RaftSM::<usize, TestCommand>::new(
+        node_id,
+        &time_range,
+        seeds.clone(),
+        Some(last_entry.term),
+    );
+
+    assert_eq!(State::Follower, sm.state);
+
+    let command = TestCommand::write_command();
+    sm.handle_command(&mut storage, &dispatch, command.clone());
+
+    assert!(command.is_rejected());
 }

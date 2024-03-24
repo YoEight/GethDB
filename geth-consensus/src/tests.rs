@@ -42,12 +42,20 @@ pub enum TestCommandKind {
     Write,
 }
 
+#[derive(Clone)]
 pub struct TestCommand {
     pub reject: Arc<AtomicBool>,
     pub kind: TestCommandKind,
 }
 
 impl TestCommand {
+    pub fn write_command() -> Self {
+        Self {
+            reject: Arc::new(Default::default()),
+            kind: TestCommandKind::Write,
+        }
+    }
+
     pub fn is_rejected(&self) -> bool {
         self.reject.load(Ordering::SeqCst)
     }
