@@ -7,4 +7,5 @@ members = [
     "geth-client",
     "geth-common",
     "geth-consensus",
+    "geth-domain",
 ]

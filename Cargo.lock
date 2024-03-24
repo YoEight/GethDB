@@ -690,6 +690,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "geth-domain"
+version = "0.1.0"
+dependencies = [
+ "geth-consensus",
+ "geth-mikoshi",
+]
+
+[[package]]
 name = "geth-mikoshi"
 version = "0.1.0"
 dependencies = [
