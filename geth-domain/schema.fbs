@@ -1,0 +1,30 @@
+namespace Geth;
+
+table ExpectExists {}
+table ExpectEmpty {}
+
+table ExpectRevision {
+    revision: uint64;
+}
+
+union StreamExpectation {
+    ExpectExists,
+    ExpectEmpty,
+    ExpectRevision,
+}
+
+table ProposedEvent {
+    class:string;
+    stream:string;
+    revision:uint64;
+}
+
+table AppendStream {
+    stream: string;
+    expectation: StreamExpectation;
+    events: [ProposedEvent];
+}
+
+union Commands {
+    AppendStream,
+}
