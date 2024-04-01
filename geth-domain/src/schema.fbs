@@ -17,6 +17,7 @@ table ProposedEvent {
     class:string;
     stream:string;
     revision:uint64;
+    payload: [uint8];
 }
 
 table AppendStream {
@@ -25,6 +26,17 @@ table AppendStream {
     events: [ProposedEvent];
 }
 
+table DeleteStream {
+    stream:string;
+}
+
 union Commands {
     AppendStream,
+    DeleteStream,
 }
+
+table Command {
+    command:Commands;
+}
+
+root_type Command;
