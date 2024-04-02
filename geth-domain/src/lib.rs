@@ -15,6 +15,11 @@ pub enum ExpectedRevision {
     Revision(u64),
 }
 
+pub struct ProposedEvent<'a> {
+    pub r#type: &'a str,
+    pub payload: &'a [u8],
+}
+
 pub struct AppendStream<'a> {
     builder: &'a mut FlatBufferBuilder<'a>,
     args: internal::AppendStreamArgs<'a>,
@@ -58,65 +63,61 @@ impl<'a> AppendStream<'a> {
         }
     }
 
-    pub fn finish(mut self) -> PersistCommand<'a> {
+    pub fn with_event(self, event: ProposedEvent) -> &'a [u8] {
+        self.with_events(&[event])
+    }
+
+    pub fn with_events(mut self, events: &[ProposedEvent]) -> &'a [u8] {
+        self.builder
+            .start_vector::<WIPOffset<internal::ProposedEvent>>(events.len());
+
+        for event in events {
+            let class = self.builder.create_string(event.r#type);
+            let payload = self.builder.create_vector(event.payload);
+            let event = internal::ProposedEvent::create(
+                self.builder,
+                &mut internal::ProposedEventArgs {
+                    class: Some(class),
+                    stream: Some(self.stream_name),
+                    payload: Some(payload),
+                },
+            );
+
+            self.builder.push(event);
+        }
+
+        let events = self.builder.end_vector(events.len());
+
+        self.args.events = Some(events);
+        self.finish()
+    }
+
+    pub fn finish(mut self) -> &'a [u8] {
         let command = internal::AppendStream::create(self.builder, &mut self.args).as_union_value();
 
-        internal::Command::create(
+        let data = internal::Command::create(
             self.builder,
             &internal::CommandArgs {
                 command_type: internal::Commands::AppendStream,
                 command: Some(command),
             },
-        )
+        );
+
+        self.builder.finish_minimal(data);
+        self.builder.finished_data()
     }
 }
 
 #[test]
 fn test_serde() {
     let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
-    let stream_name = builder.create_shared_string("foobar");
 
-    let mut events = Vec::new();
-    let class = builder.create_string("user-created");
-
-    events.push(internal::ProposedEvent::create(
-        &mut builder,
-        &mut internal::ProposedEventArgs {
-            class: Some(class),
-            stream: Some(stream_name),
-            revision: 42,
-            payload: None,
-        },
-    ));
-
-    let events = builder.create_vector(events.as_slice());
-
-    let expect = internal::ExpectRevision::create(
-        &mut builder,
-        &mut internal::ExpectRevisionArgs { revision: 41 },
-    )
-    .as_union_value();
-
-    let append_stream = internal::AppendStream::create(
-        &mut builder,
-        &mut internal::AppendStreamArgs {
-            stream: Some(stream_name),
-            expectation_type: internal::StreamExpectation::ExpectRevision,
-            expectation: Some(expect),
-            events: Some(events),
+    let data = AppendStream::new(&mut builder, "foobar", ExpectedRevision::Any).with_event(
+        ProposedEvent {
+            r#type: "user-created",
+            payload: b"qwerty",
         },
     );
-
-    let command = internal::Command::create(
-        &mut builder,
-        &mut internal::CommandArgs {
-            command_type: internal::Commands::AppendStream,
-            command: Some(append_stream.as_union_value()),
-        },
-    );
-
-    builder.finish_minimal(command);
-    let data = builder.finished_data();
 
     let actual = flatbuffers::root::<internal::Command>(data).unwrap();
 

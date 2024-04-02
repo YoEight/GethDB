@@ -16,8 +16,7 @@ union StreamExpectation {
 table ProposedEvent {
     class:string;
     stream:string;
-    revision:uint64;
-    payload: [uint8];
+    payload: [ubyte];
 }
 
 table AppendStream {

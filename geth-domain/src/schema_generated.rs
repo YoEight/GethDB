@@ -477,8 +477,7 @@ impl<'a> flatbuffers::Follow<'a> for ProposedEvent<'a> {
 impl<'a> ProposedEvent<'a> {
   pub const VT_CLASS: flatbuffers::VOffsetT = 4;
   pub const VT_STREAM: flatbuffers::VOffsetT = 6;
-  pub const VT_REVISION: flatbuffers::VOffsetT = 8;
-  pub const VT_PAYLOAD: flatbuffers::VOffsetT = 10;
+  pub const VT_PAYLOAD: flatbuffers::VOffsetT = 8;
 
   #[inline]
   pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -490,7 +489,6 @@ impl<'a> ProposedEvent<'a> {
     args: &'args ProposedEventArgs<'args>
   ) -> flatbuffers::WIPOffset<ProposedEvent<'bldr>> {
     let mut builder = ProposedEventBuilder::new(_fbb);
-    builder.add_revision(args.revision);
     if let Some(x) = args.payload { builder.add_payload(x); }
     if let Some(x) = args.stream { builder.add_stream(x); }
     if let Some(x) = args.class { builder.add_class(x); }
@@ -513,13 +511,6 @@ impl<'a> ProposedEvent<'a> {
     unsafe { self._tab.get::<flatbuffers::ForwardsUOffset<&str>>(ProposedEvent::VT_STREAM, None)}
   }
   #[inline]
-  pub fn revision(&self) -> u64 {
-    // Safety:
-    // Created from valid Table for this object
-    // which contains a valid value in this slot
-    unsafe { self._tab.get::<u64>(ProposedEvent::VT_REVISION, Some(0)).unwrap()}
-  }
-  #[inline]
   pub fn payload(&self) -> Option<flatbuffers::Vector<'a, u8>> {
     // Safety:
     // Created from valid Table for this object
@@ -537,7 +528,6 @@ impl flatbuffers::Verifiable for ProposedEvent<'_> {
     v.visit_table(pos)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("class", Self::VT_CLASS, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<&str>>("stream", Self::VT_STREAM, false)?
-     .visit_field::<u64>("revision", Self::VT_REVISION, false)?
      .visit_field::<flatbuffers::ForwardsUOffset<flatbuffers::Vector<'_, u8>>>("payload", Self::VT_PAYLOAD, false)?
      .finish();
     Ok(())
@@ -546,7 +536,6 @@ impl flatbuffers::Verifiable for ProposedEvent<'_> {
 pub struct ProposedEventArgs<'a> {
     pub class: Option<flatbuffers::WIPOffset<&'a str>>,
     pub stream: Option<flatbuffers::WIPOffset<&'a str>>,
-    pub revision: u64,
     pub payload: Option<flatbuffers::WIPOffset<flatbuffers::Vector<'a, u8>>>,
 }
 impl<'a> Default for ProposedEventArgs<'a> {
@@ -555,7 +544,6 @@ impl<'a> Default for ProposedEventArgs<'a> {
     ProposedEventArgs {
       class: None,
       stream: None,
-      revision: 0,
       payload: None,
     }
   }
@@ -573,10 +561,6 @@ impl<'a: 'b, 'b> ProposedEventBuilder<'a, 'b> {
   #[inline]
   pub fn add_stream(&mut self, stream: flatbuffers::WIPOffset<&'b  str>) {
     self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(ProposedEvent::VT_STREAM, stream);
-  }
-  #[inline]
-  pub fn add_revision(&mut self, revision: u64) {
-    self.fbb_.push_slot::<u64>(ProposedEvent::VT_REVISION, revision, 0);
   }
   #[inline]
   pub fn add_payload(&mut self, payload: flatbuffers::WIPOffset<flatbuffers::Vector<'b , u8>>) {
@@ -602,7 +586,6 @@ impl core::fmt::Debug for ProposedEvent<'_> {
     let mut ds = f.debug_struct("ProposedEvent");
       ds.field("class", &self.class());
       ds.field("stream", &self.stream());
-      ds.field("revision", &self.revision());
       ds.field("payload", &self.payload());
       ds.finish()
   }
