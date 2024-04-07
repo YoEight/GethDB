@@ -68,8 +68,7 @@ impl<'a> AppendStream<'a> {
     }
 
     pub fn with_events(mut self, events: &[ProposedEvent]) -> &'a [u8] {
-        self.builder
-            .start_vector::<WIPOffset<internal::ProposedEvent>>(events.len());
+        let mut proposed_events = Vec::new();
 
         for event in events {
             let class = self.builder.create_string(event.r#type);
@@ -83,10 +82,12 @@ impl<'a> AppendStream<'a> {
                 },
             );
 
-            self.builder.push(event);
+            proposed_events.push(event);
         }
 
-        let events = self.builder.end_vector(events.len());
+        let events = self
+            .builder
+            .create_vector_from_iter(proposed_events.into_iter());
 
         self.args.events = Some(events);
         self.finish()
