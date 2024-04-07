@@ -976,6 +976,8 @@ pub mod geth {
 
     impl<'a> DeleteStream<'a> {
         pub const VT_STREAM: flatbuffers::VOffsetT = 4;
+        pub const VT_EXPECTATION_TYPE: flatbuffers::VOffsetT = 6;
+        pub const VT_EXPECTATION: flatbuffers::VOffsetT = 8;
 
         #[inline]
         pub unsafe fn init_from_table(table: flatbuffers::Table<'a>) -> Self {
@@ -987,9 +989,13 @@ pub mod geth {
             args: &'args DeleteStreamArgs<'args>,
         ) -> flatbuffers::WIPOffset<DeleteStream<'bldr>> {
             let mut builder = DeleteStreamBuilder::new(_fbb);
+            if let Some(x) = args.expectation {
+                builder.add_expectation(x);
+            }
             if let Some(x) = args.stream {
                 builder.add_stream(x);
             }
+            builder.add_expectation_type(args.expectation_type);
             builder.finish()
         }
 
@@ -1001,6 +1007,77 @@ pub mod geth {
             unsafe {
                 self._tab
                     .get::<flatbuffers::ForwardsUOffset<&str>>(DeleteStream::VT_STREAM, None)
+            }
+        }
+        #[inline]
+        pub fn expectation_type(&self) -> StreamExpectation {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<StreamExpectation>(
+                        DeleteStream::VT_EXPECTATION_TYPE,
+                        Some(StreamExpectation::NONE),
+                    )
+                    .unwrap()
+            }
+        }
+        #[inline]
+        pub fn expectation(&self) -> Option<flatbuffers::Table<'a>> {
+            // Safety:
+            // Created from valid Table for this object
+            // which contains a valid value in this slot
+            unsafe {
+                self._tab
+                    .get::<flatbuffers::ForwardsUOffset<flatbuffers::Table<'a>>>(
+                        DeleteStream::VT_EXPECTATION,
+                        None,
+                    )
+            }
+        }
+        #[inline]
+        #[allow(non_snake_case)]
+        pub fn expectation_as_expect_exists(&self) -> Option<ExpectExists<'a>> {
+            if self.expectation_type() == StreamExpectation::ExpectExists {
+                self.expectation().map(|t| {
+                    // Safety:
+                    // Created from a valid Table for this object
+                    // Which contains a valid union in this slot
+                    unsafe { ExpectExists::init_from_table(t) }
+                })
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        #[allow(non_snake_case)]
+        pub fn expectation_as_expect_empty(&self) -> Option<ExpectEmpty<'a>> {
+            if self.expectation_type() == StreamExpectation::ExpectEmpty {
+                self.expectation().map(|t| {
+                    // Safety:
+                    // Created from a valid Table for this object
+                    // Which contains a valid union in this slot
+                    unsafe { ExpectEmpty::init_from_table(t) }
+                })
+            } else {
+                None
+            }
+        }
+
+        #[inline]
+        #[allow(non_snake_case)]
+        pub fn expectation_as_expect_revision(&self) -> Option<ExpectRevision<'a>> {
+            if self.expectation_type() == StreamExpectation::ExpectRevision {
+                self.expectation().map(|t| {
+                    // Safety:
+                    // Created from a valid Table for this object
+                    // Which contains a valid union in this slot
+                    unsafe { ExpectRevision::init_from_table(t) }
+                })
+            } else {
+                None
             }
         }
     }
@@ -1018,17 +1095,48 @@ pub mod geth {
                     Self::VT_STREAM,
                     false,
                 )?
+                .visit_union::<StreamExpectation, _>(
+                    "expectation_type",
+                    Self::VT_EXPECTATION_TYPE,
+                    "expectation",
+                    Self::VT_EXPECTATION,
+                    false,
+                    |key, v, pos| match key {
+                        StreamExpectation::ExpectExists => v
+                            .verify_union_variant::<flatbuffers::ForwardsUOffset<ExpectExists>>(
+                                "StreamExpectation::ExpectExists",
+                                pos,
+                            ),
+                        StreamExpectation::ExpectEmpty => v
+                            .verify_union_variant::<flatbuffers::ForwardsUOffset<ExpectEmpty>>(
+                                "StreamExpectation::ExpectEmpty",
+                                pos,
+                            ),
+                        StreamExpectation::ExpectRevision => v
+                            .verify_union_variant::<flatbuffers::ForwardsUOffset<ExpectRevision>>(
+                                "StreamExpectation::ExpectRevision",
+                                pos,
+                            ),
+                        _ => Ok(()),
+                    },
+                )?
                 .finish();
             Ok(())
         }
     }
     pub struct DeleteStreamArgs<'a> {
         pub stream: Option<flatbuffers::WIPOffset<&'a str>>,
+        pub expectation_type: StreamExpectation,
+        pub expectation: Option<flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>>,
     }
     impl<'a> Default for DeleteStreamArgs<'a> {
         #[inline]
         fn default() -> Self {
-            DeleteStreamArgs { stream: None }
+            DeleteStreamArgs {
+                stream: None,
+                expectation_type: StreamExpectation::NONE,
+                expectation: None,
+            }
         }
     }
 
@@ -1041,6 +1149,24 @@ pub mod geth {
         pub fn add_stream(&mut self, stream: flatbuffers::WIPOffset<&'b str>) {
             self.fbb_
                 .push_slot_always::<flatbuffers::WIPOffset<_>>(DeleteStream::VT_STREAM, stream);
+        }
+        #[inline]
+        pub fn add_expectation_type(&mut self, expectation_type: StreamExpectation) {
+            self.fbb_.push_slot::<StreamExpectation>(
+                DeleteStream::VT_EXPECTATION_TYPE,
+                expectation_type,
+                StreamExpectation::NONE,
+            );
+        }
+        #[inline]
+        pub fn add_expectation(
+            &mut self,
+            expectation: flatbuffers::WIPOffset<flatbuffers::UnionWIPOffset>,
+        ) {
+            self.fbb_.push_slot_always::<flatbuffers::WIPOffset<_>>(
+                DeleteStream::VT_EXPECTATION,
+                expectation,
+            );
         }
         #[inline]
         pub fn new(
@@ -1063,6 +1189,43 @@ pub mod geth {
         fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
             let mut ds = f.debug_struct("DeleteStream");
             ds.field("stream", &self.stream());
+            ds.field("expectation_type", &self.expectation_type());
+            match self.expectation_type() {
+                StreamExpectation::ExpectExists => {
+                    if let Some(x) = self.expectation_as_expect_exists() {
+                        ds.field("expectation", &x)
+                    } else {
+                        ds.field(
+                            "expectation",
+                            &"InvalidFlatbuffer: Union discriminant does not match value.",
+                        )
+                    }
+                }
+                StreamExpectation::ExpectEmpty => {
+                    if let Some(x) = self.expectation_as_expect_empty() {
+                        ds.field("expectation", &x)
+                    } else {
+                        ds.field(
+                            "expectation",
+                            &"InvalidFlatbuffer: Union discriminant does not match value.",
+                        )
+                    }
+                }
+                StreamExpectation::ExpectRevision => {
+                    if let Some(x) = self.expectation_as_expect_revision() {
+                        ds.field("expectation", &x)
+                    } else {
+                        ds.field(
+                            "expectation",
+                            &"InvalidFlatbuffer: Union discriminant does not match value.",
+                        )
+                    }
+                }
+                _ => {
+                    let x: Option<()> = None;
+                    ds.field("expectation", &x)
+                }
+            };
             ds.finish()
         }
     }

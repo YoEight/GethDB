@@ -27,6 +27,7 @@ table AppendStream {
 
 table DeleteStream {
     stream:string;
+    expectation: StreamExpectation;
 }
 
 union Commands {
