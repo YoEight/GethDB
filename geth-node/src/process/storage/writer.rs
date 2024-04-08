@@ -1,14 +1,16 @@
+use std::io;
+
+use chrono::Utc;
+use tokio::task::spawn_blocking;
+use uuid::Uuid;
+
+use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+
 use crate::messages::{AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted};
 use crate::process::storage::index::{CurrentRevision, StorageIndex};
 use crate::process::storage::RevisionCache;
-use chrono::Utc;
-use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
-use geth_mikoshi::domain::{StreamDeleted, StreamEventAppended};
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-use std::io;
-use tokio::task::spawn_blocking;
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct StorageWriter<WAL, S>

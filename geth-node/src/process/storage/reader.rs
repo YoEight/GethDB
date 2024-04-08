@@ -1,13 +1,15 @@
-use chrono::{TimeZone, Utc};
 use std::io;
+
+use chrono::{TimeZone, Utc};
+use flatbuffers::FlatBufferBuilder;
 use tokio::task::spawn_blocking;
 
 use geth_common::Position;
-use geth_mikoshi::domain::StreamEventAppended;
-use geth_mikoshi::wal::{LogEntryType, WALRef, WriteAheadLog};
+use geth_domain::RecordedEvent;
 use geth_mikoshi::{
-    hashing::mikoshi_hash, index::IteratorIO, storage::Storage, Entry, MikoshiStream,
+    Entry, hashing::mikoshi_hash, index::IteratorIO, MikoshiStream, storage::Storage,
 };
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::process::storage::index::StorageIndex;
@@ -19,6 +21,7 @@ where
 {
     wal: WALRef<WAL>,
     index: StorageIndex<S>,
+    builder: FlatBufferBuilder<'static>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -27,7 +30,11 @@ where
     S: Storage + Send + Sync + 'static,
 {
     pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>) -> Self {
-        Self { wal, index }
+        Self {
+            wal,
+            index,
+            builder: FlatBufferBuilder::with_capacity(4_096),
+        }
     }
 
     pub async fn read(&self, params: ReadStream) -> ReadStreamCompleted {
@@ -56,17 +63,23 @@ where
 
             while let Some(entry) = iter.next()? {
                 let record = wal.read_at(entry.position)?;
-                if record.r#type != LogEntryType::UserData {
-                    continue;
-                }
 
-                let event = record.unmarshall::<StreamEventAppended>();
+                let event = if let Ok(event) = geth_domain::parse_event(record.payload.as_ref()) {
+                    if let Some(event) = event.event_as_recorded_event() {
+                        RecordedEvent::from(event)
+                    } else {
+                        panic!("We expected a record event at that log position");
+                    }
+                } else {
+                    panic!("Error when parsing command from the transaction log");
+                };
+
                 let entry = Entry {
-                    id: event.event_id,
-                    r#type: event.event_type,
-                    stream_name: event.event_stream_id,
+                    id: event.id,
+                    r#type: event.class,
+                    stream_name: event.stream_name,
                     revision: event.revision,
-                    data: event.data,
+                    data: event.data.into(),
                     position: Position(record.position),
                     created: Utc.timestamp_opt(event.created, 0).unwrap(),
                 };

@@ -1,19 +1,17 @@
+use bytes::Bytes;
+use chrono::{DateTime, Utc};
+use tokio::sync::mpsc;
+use uuid::Uuid;
+
+use geth_common::{Position, Record};
+pub use index::IteratorIO;
+
 mod constants;
-pub mod domain;
 pub mod hashing;
 pub mod index;
 pub mod marshalling;
 pub mod storage;
 pub mod wal;
-
-use bytes::Bytes;
-use chrono::{DateTime, Utc};
-
-use geth_common::{Position, Record};
-use tokio::sync::mpsc;
-use uuid::Uuid;
-
-pub use index::IteratorIO;
 
 #[derive(Debug, Clone)]
 pub struct Entry {

@@ -1,0 +1,32 @@
+namespace Geth;
+
+struct Id {
+    high:uint64;
+    low:uint64;
+}
+
+table RecordedEvent {
+    id: Id;
+    revision:uint64;
+    stream_name:string;
+    class:string;
+    created:int64;
+    data:[ubyte];
+    metadata:[ubyte];
+}
+
+table StreamDeleted {
+    stream_name:string;
+    created:int64;
+}
+
+union Events {
+    RecordedEvent,
+    StreamDeleted,
+}
+
+table Event {
+    event: Events;
+}
+
+root_type Event;

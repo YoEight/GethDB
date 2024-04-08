@@ -1,18 +1,18 @@
-use crate::hashing::mikoshi_hash;
-use crate::index::block::BlockEntry;
-use crate::index::mem_table::MemTable;
-use crate::index::ss_table::SsTable;
-use crate::index::{IteratorIO, IteratorIOExt, Merge};
-use crate::storage::{FileId, Storage};
-use crate::wal::records::Records;
-use crate::wal::{WALRef, WriteAheadLog};
-use bytes::{Buf, BufMut, BytesMut};
-use geth_common::{Direction, Revision};
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::iter::once;
 use std::sync::{Arc, RwLock};
+
+use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
+
+use geth_common::{Direction, Revision};
+
+use crate::index::{IteratorIO, IteratorIOExt, Merge};
+use crate::index::block::BlockEntry;
+use crate::index::mem_table::MemTable;
+use crate::index::ss_table::SsTable;
+use crate::storage::{FileId, Storage};
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
@@ -132,7 +132,9 @@ where
         })
     }
 
-    pub fn rebuild<WAL: WriteAheadLog>(&self, wal: &WALRef<WAL>) -> io::Result<()> {
+    // Rebuilding the index is now something that requires geth-domain as we see indexing as a
+    // projection now.
+    /*pub fn rebuild<WAL: WriteAheadLog>(&self, wal: &WALRef<WAL>) -> io::Result<()> {
         let logical_position = self.state.read().unwrap().logical_position;
         let records = wal
             .records(logical_position)
@@ -156,7 +158,7 @@ where
         state.logical_position = writer_checkpoint;
 
         Ok(())
-    }
+    }*/
 
     pub fn ss_table_count(&self) -> usize {
         let state = self.state.read().unwrap();

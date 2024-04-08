@@ -1,46 +1,12 @@
-pub mod chunks;
-pub mod data_events;
-pub mod records;
-
-use crate::wal::data_events::DataEvents;
-use crate::wal::records::RecordIter;
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
 use std::sync::{Arc, RwLock};
 
-#[derive(Clone, Copy, Eq, PartialEq, Debug)]
-pub enum LogEntryType {
-    UserData,
-    StreamDeleted,
-    Unsupported(u8),
-}
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 
-impl LogEntryType {
-    pub fn from_raw(value: u8) -> Self {
-        match value {
-            0 => LogEntryType::UserData,
-            1 => LogEntryType::StreamDeleted,
-            x => LogEntryType::Unsupported(x),
-        }
-    }
-}
+use crate::wal::entries::EntryIter;
 
-impl LogEntryType {
-    pub fn raw(&self) -> u8 {
-        match self {
-            LogEntryType::UserData => 0,
-            LogEntryType::StreamDeleted => 1,
-            LogEntryType::Unsupported(x) => *x,
-        }
-    }
-}
-
-pub trait LogRecord {
-    fn get(bytes: Bytes) -> Self;
-    fn put(&self, buffer: &mut BytesMut);
-    fn r#type() -> LogEntryType;
-    fn size(&self) -> usize;
-}
+pub mod chunks;
+pub mod entries;
 
 pub struct WALRef<A> {
     inner: Arc<RwLock<A>>,
@@ -61,9 +27,9 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append<A: LogRecord>(&self, records: &[A]) -> io::Result<LogReceipt> {
+    pub fn append(&self, entry: &[u8]) -> io::Result<LogReceipt> {
         let mut inner = self.inner.write().unwrap();
-        inner.append(records)
+        inner.append(entry)
     }
 
     pub fn read_at(&self, position: u64) -> io::Result<LogEntry> {
@@ -71,22 +37,13 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         inner.read_at(position)
     }
 
-    pub fn data_events(&self, from: u64) -> DataEvents<WAL> {
+    pub fn entries(&self, from: u64) -> EntryIter<WAL> {
         let to = {
             let inner = self.inner.read().unwrap();
             inner.write_position()
         };
 
-        DataEvents::new(self.clone(), from, to)
-    }
-
-    pub fn records(&self, from: u64) -> RecordIter<WAL> {
-        let to = {
-            let inner = self.inner.read().unwrap();
-            inner.write_position()
-        };
-
-        RecordIter::new(self.clone(), from, to)
+        EntryIter::new(self.clone(), from, to)
     }
 
     pub fn write_position(&self) -> u64 {
@@ -96,14 +53,13 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
 }
 
 pub trait WriteAheadLog {
-    fn append<A: LogRecord>(&mut self, records: &[A]) -> io::Result<LogReceipt>;
+    fn append(&mut self, entry: &[u8]) -> io::Result<LogReceipt>;
     fn read_at(&self, position: u64) -> io::Result<LogEntry>;
     fn write_position(&self) -> u64;
 }
 
 pub struct LogEntry {
     pub position: u64,
-    pub r#type: LogEntryType,
     pub payload: Bytes,
 }
 
@@ -114,7 +70,6 @@ impl LogEntry {
 
     pub fn payload_size(&self) -> u32 {
         8 // position
-            + 1 // type
             + self.payload.len() as u32
     }
 
@@ -123,7 +78,6 @@ impl LogEntry {
 
         buffer.put_u32_le(size);
         buffer.put_u64_le(self.position);
-        buffer.put_u8(self.r#type.raw());
         buffer.put(self.payload.clone());
         buffer.put_u32_le(size);
     }
@@ -132,18 +86,9 @@ impl LogEntry {
     /// is done directly when communicating with the storage abstraction directly.
     pub fn get(mut src: Bytes) -> Self {
         let position = src.get_u64_le();
-        let r#type = LogEntryType::from_raw(src.get_u8());
         let payload = src;
 
-        Self {
-            position,
-            r#type,
-            payload,
-        }
-    }
-
-    pub fn unmarshall<A: LogRecord>(&self) -> A {
-        A::get(self.payload.clone())
+        Self { position, payload }
     }
 }
 

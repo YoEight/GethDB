@@ -1,10 +1,14 @@
 use std::process::Command;
 
 fn main() {
-    Command::new("flatc")
-        .arg("--rust")
-        .current_dir("src")
-        .arg("schema.fbs")
-        .output()
-        .unwrap();
+    let files = &["commands", "events"];
+
+    for file in files {
+        Command::new("flatc")
+            .arg("--rust")
+            .current_dir("src")
+            .arg(format!("{}.fbs", file))
+            .output()
+            .unwrap();
+    }
 }

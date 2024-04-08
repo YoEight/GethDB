@@ -1,12 +1,17 @@
 use flatbuffers::{FlatBufferBuilder, UnionWIPOffset, WIPOffset};
+use uuid::Uuid;
 
-pub mod internal {
-    pub use crate::schema_generated::geth::*;
+pub mod binary {
+    pub use crate::commands_generated::geth::*;
+    pub use crate::events_generated::geth::*;
 }
 
-mod schema_generated;
+mod commands_generated;
+mod events_generated;
+mod iter;
+mod tf_log;
 
-pub type PersistCommand<'a> = WIPOffset<internal::Command<'a>>;
+pub type PersistCommand<'a> = WIPOffset<binary::Command<'a>>;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ExpectedRevision {
@@ -20,25 +25,34 @@ impl ExpectedRevision {
     pub fn serialize(
         self,
         builder: &mut FlatBufferBuilder,
-    ) -> (
-        internal::StreamExpectation,
-        Option<WIPOffset<UnionWIPOffset>>,
-    ) {
+    ) -> (binary::StreamExpectation, Option<WIPOffset<UnionWIPOffset>>) {
         match self {
-            ExpectedRevision::Any => (internal::StreamExpectation::NONE, None),
-            ExpectedRevision::Empty => (internal::StreamExpectation::ExpectEmpty, None),
-            ExpectedRevision::Exists => (internal::StreamExpectation::ExpectExists, None),
+            ExpectedRevision::Any => (binary::StreamExpectation::NONE, None),
+            ExpectedRevision::Empty => (binary::StreamExpectation::ExpectEmpty, None),
+            ExpectedRevision::Exists => (binary::StreamExpectation::ExpectExists, None),
             ExpectedRevision::Revision(revision) => {
-                let revision = internal::ExpectRevision::create(
+                let revision = binary::ExpectRevision::create(
                     builder,
-                    &mut internal::ExpectRevisionArgs { revision },
+                    &mut binary::ExpectRevisionArgs { revision },
                 )
                 .as_union_value();
 
-                (internal::StreamExpectation::ExpectRevision, Some(revision))
+                (binary::StreamExpectation::ExpectRevision, Some(revision))
             }
         }
     }
+}
+
+pub fn parse_command(bytes: &[u8]) -> eyre::Result<binary::Command> {
+    let cmd = flatbuffers::root::<binary::Command>(bytes)?;
+
+    Ok(cmd)
+}
+
+pub fn parse_event(bytes: &[u8]) -> eyre::Result<binary::Event> {
+    let event = flatbuffers::root::<binary::Event>(bytes)?;
+
+    Ok(event)
 }
 
 pub struct ProposedEvent<'a> {
@@ -48,7 +62,7 @@ pub struct ProposedEvent<'a> {
 
 pub struct AppendStream<'a> {
     builder: &'a mut FlatBufferBuilder<'a>,
-    args: internal::AppendStreamArgs<'a>,
+    args: binary::AppendStreamArgs<'a>,
     stream_name: WIPOffset<&'a str>,
 }
 
@@ -61,7 +75,7 @@ impl<'a> AppendStream<'a> {
         let stream_name = builder.create_shared_string(stream_name);
         let (expectation_type, expectation) = expected.serialize(builder);
 
-        let args = internal::AppendStreamArgs {
+        let args = binary::AppendStreamArgs {
             stream: Some(stream_name),
             expectation_type,
             expectation,
@@ -85,9 +99,9 @@ impl<'a> AppendStream<'a> {
         for event in events {
             let class = self.builder.create_string(event.r#type);
             let payload = self.builder.create_vector(event.payload);
-            let event = internal::ProposedEvent::create(
+            let event = binary::ProposedEvent::create(
                 self.builder,
-                &mut internal::ProposedEventArgs {
+                &mut binary::ProposedEventArgs {
                     class: Some(class),
                     stream: Some(self.stream_name),
                     payload: Some(payload),
@@ -106,12 +120,12 @@ impl<'a> AppendStream<'a> {
     }
 
     pub fn finish(mut self) -> &'a [u8] {
-        let command = internal::AppendStream::create(self.builder, &mut self.args).as_union_value();
+        let command = binary::AppendStream::create(self.builder, &mut self.args).as_union_value();
 
-        let data = internal::Command::create(
+        let data = binary::Command::create(
             self.builder,
-            &internal::CommandArgs {
-                command_type: internal::Commands::AppendStream,
+            &binary::CommandArgs {
+                command_type: binary::Commands::AppendStream,
                 command: Some(command),
             },
         );
@@ -123,7 +137,7 @@ impl<'a> AppendStream<'a> {
 
 pub struct DeleteStream<'a> {
     builder: &'a mut FlatBufferBuilder<'a>,
-    args: internal::DeleteStreamArgs<'a>,
+    args: binary::DeleteStreamArgs<'a>,
 }
 
 impl<'a> DeleteStream<'a> {
@@ -136,7 +150,7 @@ impl<'a> DeleteStream<'a> {
         let (expectation_type, expectation) = expected.serialize(builder);
         Self {
             builder,
-            args: internal::DeleteStreamArgs {
+            args: binary::DeleteStreamArgs {
                 stream: Some(stream_name),
                 expectation_type,
                 expectation,
@@ -145,12 +159,12 @@ impl<'a> DeleteStream<'a> {
     }
 
     pub fn finish(mut self) -> &'a [u8] {
-        let command = internal::DeleteStream::create(self.builder, &mut self.args).as_union_value();
+        let command = binary::DeleteStream::create(self.builder, &mut self.args).as_union_value();
 
-        let data = internal::Command::create(
+        let data = binary::Command::create(
             self.builder,
-            &internal::CommandArgs {
-                command_type: internal::Commands::DeleteStream,
+            &binary::CommandArgs {
+                command_type: binary::Commands::DeleteStream,
                 command: Some(command),
             },
         );
@@ -160,27 +174,49 @@ impl<'a> DeleteStream<'a> {
     }
 }
 
+pub struct RecordedEvent {
+    pub id: Uuid,
+    pub revision: u64,
+    pub stream_name: String,
+    pub class: String,
+    pub created: i64,
+    pub data: Vec<u8>,
+    pub metadata: Vec<u8>,
+}
+
+impl RecordedEvent {
+    pub fn from(inner: binary::RecordedEvent) -> RecordedEvent {
+        let id = inner.id().unwrap();
+        Self {
+            id: Uuid::from_bytes(id.0),
+            revision: inner.revision(),
+            stream_name: inner.stream_name().unwrap_or_default().to_string(),
+            class: inner.class().unwrap_or_default().to_string(),
+            created: inner.created(),
+            data: inner.data().unwrap_or_default().bytes().to_owned(),
+            metadata: inner.metadata().unwrap_or_default().bytes().to_owned(),
+        }
+    }
+}
+
 #[test]
 fn test_serde_expectation() {
     let mut builder = FlatBufferBuilder::with_capacity(1_024);
     let (expectation_type, expectation) = ExpectedRevision::Any.serialize(&mut builder);
 
-    assert_eq!(internal::StreamExpectation::NONE, expectation_type);
+    assert_eq!(binary::StreamExpectation::NONE, expectation_type);
     assert!(expectation.is_none());
 
     let (expectation_type, expectation) = ExpectedRevision::Exists.serialize(&mut builder);
-    assert_eq!(internal::StreamExpectation::ExpectExists, expectation_type);
+    assert_eq!(binary::StreamExpectation::ExpectExists, expectation_type);
     assert!(expectation.is_none());
 
     let (expectation_type, expectation) = ExpectedRevision::Empty.serialize(&mut builder);
-    assert_eq!(internal::StreamExpectation::ExpectEmpty, expectation_type);
+    assert_eq!(binary::StreamExpectation::ExpectEmpty, expectation_type);
     assert!(expectation.is_none());
 
     let (expectation_type, expectation) = ExpectedRevision::Revision(42).serialize(&mut builder);
-    assert_eq!(
-        internal::StreamExpectation::ExpectRevision,
-        expectation_type
-    );
+    assert_eq!(binary::StreamExpectation::ExpectRevision, expectation_type);
 
     assert!(expectation.is_some());
 
@@ -199,7 +235,7 @@ fn test_serde_append_stream() {
             payload: b"qwerty",
         });
 
-    let actual = flatbuffers::root::<internal::Command>(data).unwrap();
+    let actual = flatbuffers::root::<binary::Command>(data).unwrap();
     let actual_app = actual.command_as_append_stream().unwrap();
     let stream_name = actual_app.stream().unwrap_or_default();
     let events = actual_app.events().unwrap();
@@ -217,7 +253,7 @@ fn test_serde_delete_stream() {
     let mut builder = FlatBufferBuilder::with_capacity(1_024);
 
     let data = DeleteStream::new(&mut builder, "foobar", ExpectedRevision::Revision(42)).finish();
-    let actual = flatbuffers::root::<internal::Command>(data).unwrap();
+    let actual = flatbuffers::root::<binary::Command>(data).unwrap();
     let actual_delete = actual.command_as_delete_stream().unwrap();
     let stream_name = actual_delete.stream().unwrap();
     let expectation = actual_delete.expectation_as_expect_revision().unwrap();
