@@ -1,3 +1,8 @@
+use std::io;
+
+pub use lsm::{Lsm, LsmSettings};
+pub use merge::Merge;
+
 pub(crate) mod block;
 pub(crate) mod lsm;
 mod mem_table;
@@ -5,11 +10,6 @@ mod merge;
 mod ss_table;
 #[cfg(test)]
 mod tests;
-
-use std::io;
-
-pub use lsm::{Lsm, LsmSettings};
-pub use merge::Merge;
 
 pub trait IteratorIO {
     type Item;
@@ -22,6 +22,14 @@ pub trait IteratorIO {
         F: FnMut(Self::Item) -> A,
     {
         Map { func, inner: self }
+    }
+
+    fn map_io<F, A>(self, func: F) -> MapIO<F, Self>
+    where
+        Self: Sized,
+        F: FnMut(Self::Item) -> io::Result<A>,
+    {
+        MapIO { func, inner: self }
     }
 
     fn last(mut self) -> io::Result<Option<Self::Item>>
@@ -53,6 +61,27 @@ where
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         if let Some(item) = self.inner.next()? {
             return Ok(Some((self.func)(item)));
+        }
+
+        Ok(None)
+    }
+}
+
+pub struct MapIO<F, I> {
+    func: F,
+    inner: I,
+}
+
+impl<F, I, A> IteratorIO for MapIO<F, I>
+where
+    I: IteratorIO,
+    F: FnMut(I::Item) -> io::Result<A>,
+{
+    type Item = A;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        if let Some(item) = self.inner.next()? {
+            return Ok(Some((self.func)(item)?));
         }
 
         Ok(None)

@@ -1,7 +1,7 @@
 use std::io;
 
-use crate::IteratorIO;
 use crate::wal::{LogEntry, WALRef, WriteAheadLog};
+use crate::IteratorIO;
 
 pub struct EntryIter<WAL> {
     pub(crate) log_position: u64,

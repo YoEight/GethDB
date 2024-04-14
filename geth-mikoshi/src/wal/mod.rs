@@ -27,9 +27,12 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append(&self, entry: &[u8]) -> io::Result<LogReceipt> {
+    pub fn append<'a, I>(&self, entries: I) -> io::Result<LogReceipt>
+    where
+        I: IntoIterator<Item = &'a [u8]>,
+    {
         let mut inner = self.inner.write().unwrap();
-        inner.append(entry)
+        inner.append(entries)
     }
 
     pub fn read_at(&self, position: u64) -> io::Result<LogEntry> {
@@ -53,7 +56,9 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
 }
 
 pub trait WriteAheadLog {
-    fn append(&mut self, entry: &[u8]) -> io::Result<LogReceipt>;
+    fn append<'a, I>(&mut self, entries: I) -> io::Result<LogReceipt>
+    where
+        I: IntoIterator<Item = &'a [u8]>;
     fn read_at(&self, position: u64) -> io::Result<LogEntry>;
     fn write_position(&self) -> u64;
 }
@@ -82,7 +87,7 @@ impl LogEntry {
         buffer.put_u32_le(size);
     }
 
-    /// Parsing is not asymmetrical with serialisation because parsing the size of the record
+    /// Parsing is not symmetrical with serialisation because parsing the size of the record
     /// is done directly when communicating with the storage abstraction directly.
     pub fn get(mut src: Bytes) -> Self {
         let position = src.get_u64_le();

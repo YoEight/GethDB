@@ -1,10 +1,15 @@
 use std::io;
 
-use geth_common::ExpectedRevision;
+use chrono::{TimeZone, Utc};
+
+use geth_common::{ExpectedRevision, Position};
+use geth_domain::binary::Events;
+use geth_domain::parse_event;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::{Entry, IteratorIO};
 
 use crate::process::storage::RevisionCache;
 use crate::process::subscriptions::SubscriptionsClient;
@@ -67,51 +72,60 @@ where
         let starting_position = wal.write_position();
 
         // Starting index chase process.
-        // std::thread::spawn(move || {
-        //     let mut current = starting_position;
-        //     while let Ok(next) = recv.recv() {
-        //         tracing::debug!("Request to chase WAL from {}", next);
-        //         if current > next {
-        //             tracing::debug!(
-        //                 "Discard chase request because current index checkpoint ({}) is greater to requested starting point ({})",
-        //                 current,
-        //                 next,
-        //             );
-        //             continue;
-        //         }
-        //
-        //         let records = wal.records(next).map(|(position, record)| match record {
-        //             Records::StreamEventAppended(record) => {
-        //                 let key = mikoshi_hash(&record.event_stream_id);
-        //
-        //                 let _ = subscriptions.event_committed(Entry {
-        //                     id: record.event_id,
-        //                     r#type: record.event_type,
-        //                     stream_name: record.event_stream_id,
-        //                     revision: record.revision,
-        //                     data: record.data,
-        //                     position: Position(position),
-        //                     created: Utc.timestamp_opt(record.created, 0).unwrap(),
-        //                 });
-        //
-        //                 (key, record.revision, position)
-        //             }
-        //
-        //             Records::StreamDeleted(record) => {
-        //                 let key = mikoshi_hash(&record.event_stream_id);
-        //
-        //                 (key, record.revision, u64::MAX)
-        //             }
-        //         });
-        //
-        //         if let Err(e) = chase_index.put(records) {
-        //             tracing::error!("Error when indexing entries from position {}: {}", next, e);
-        //         } else {
-        //             tracing::debug!("Chasing completed {} -> {}", current, next);
-        //             current = next;
-        //         }
-        //     }
-        // });
+        std::thread::spawn(move || {
+            let mut current = starting_position;
+            while let Ok(next) = recv.recv() {
+                tracing::debug!("Request to chase WAL from {}", next);
+                if current > next {
+                    tracing::debug!(
+                        "Discard chase request because current index checkpoint ({}) is greater to requested starting point ({})",
+                        current,
+                        next,
+                    );
+                    continue;
+                }
+
+                let records = wal.entries(next).map_io(|entry| {
+                    let event = parse_event(&entry.payload)
+                        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
+
+                    if let Some(event) = event.event_as_recorded_event() {
+                        let key = mikoshi_hash(event.stream_name().unwrap());
+                        let event = geth_domain::RecordedEvent::from(event);
+                        let revision = event.revision;
+                        let _ = subscriptions.event_committed(Entry {
+                            id: event.id,
+                            r#type: event.class,
+                            stream_name: event.stream_name,
+                            revision: event.revision,
+                            data: event.data.into(),
+                            position: Position(entry.position),
+                            created: Utc.timestamp_opt(event.created, 0).unwrap(),
+                        });
+
+                        return Ok((key, revision, entry.position));
+                    }
+
+                    if let Some(event) = event.event_as_stream_deleted() {
+                        let key = mikoshi_hash(event.stream_name().unwrap());
+
+                        return Ok((key, event.revision(), u64::MAX));
+                    }
+
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "dealing with an event that we don't support",
+                    ))
+                });
+
+                if let Err(e) = chase_index.put(records) {
+                    tracing::error!("Error when indexing entries from position {}: {}", next, e);
+                } else {
+                    tracing::debug!("Chasing completed {} -> {}", current, next);
+                    current = next;
+                }
+            }
+        });
 
         Self {
             index,

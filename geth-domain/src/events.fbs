@@ -17,6 +17,7 @@ table RecordedEvent {
 
 table StreamDeleted {
     stream_name:string;
+    revision:uint64;
     created:int64;
 }
 

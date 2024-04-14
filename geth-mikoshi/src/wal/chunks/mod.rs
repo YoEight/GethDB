@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::{FileCategory, FileId, Storage};
-use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
+use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;
@@ -139,54 +139,62 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append(&mut self, entry: &[u8]) -> io::Result<LogReceipt> {
+    fn append<'a, I>(&mut self, entries: I) -> io::Result<LogReceipt>
+    where
+        I: IntoIterator<Item = &'a [u8]>,
+    {
         let mut position = self.writer;
         let starting_position = position;
 
-        self.buffer.put_slice(entry);
+        for entry in entries {
+            self.buffer.put_slice(entry);
 
-        let mut entry = LogEntry {
-            position,
-            payload: self.buffer.split().freeze(),
-        };
-
-        let mut chunk: Chunk = self.ongoing_chunk();
-        let projected_next_logical_position = entry.size() as u64 + position;
-
-        // Chunk is full, and we need to flush previous data we accumulated. We also create a new
-        // chunk for next writes.
-        if !chunk.contains_log_position(projected_next_logical_position) {
-            let physical_data_size = chunk.raw_position(position) as usize - CHUNK_HEADER_SIZE;
-            let footer = ChunkFooter {
-                flags: FooterFlags::IS_COMPLETED,
-                physical_data_size,
-                logical_data_size: physical_data_size,
-                hash: Default::default(),
+            let mut entry = LogEntry {
+                position,
+                payload: self.buffer.split().freeze(),
             };
 
-            footer.put(&mut self.buffer);
-            self.ongoing_chunk_mut().footer = Some(footer);
+            let mut chunk: Chunk = self.ongoing_chunk();
+            let projected_next_logical_position = entry.size() as u64 + position;
 
-            self.storage.write_to(
-                chunk.file_id(),
-                (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
-                self.buffer.split().freeze(),
-            )?;
+            // Chunk is full, and we need to flush previous data we accumulated. We also create a new
+            // chunk for next writes.
+            if !chunk.contains_log_position(projected_next_logical_position) {
+                let physical_data_size = chunk.raw_position(position) as usize - CHUNK_HEADER_SIZE;
+                let footer = ChunkFooter {
+                    flags: FooterFlags::IS_COMPLETED,
+                    physical_data_size,
+                    logical_data_size: physical_data_size,
+                    hash: Default::default(),
+                };
 
-            position += chunk.remaining_space_from(position);
-            chunk = self.new_chunk();
+                footer.put(&mut self.buffer);
+                self.ongoing_chunk_mut().footer = Some(footer);
 
-            entry.position = position;
-            let local_offset = chunk.raw_position(position);
-            position += entry.size() as u64;
-            entry.put(&mut self.buffer);
-            self.storage
-                .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
+                self.storage.write_to(
+                    chunk.file_id(),
+                    (CHUNK_SIZE - CHUNK_FOOTER_SIZE) as u64,
+                    self.buffer.split().freeze(),
+                )?;
 
-            self.writer = position;
+                position += chunk.remaining_space_from(position);
+                chunk = self.new_chunk();
+
+                entry.position = position;
+                let local_offset = chunk.raw_position(position);
+                position += entry.size() as u64;
+                entry.put(&mut self.buffer);
+                self.storage.write_to(
+                    chunk.file_id(),
+                    local_offset,
+                    self.buffer.split().freeze(),
+                )?;
+
+                self.writer = position;
+            }
+
+            flush_writer_chk(&self.storage, self.writer)?;
         }
-
-        flush_writer_chk(&self.storage, self.writer)?;
 
         Ok(LogReceipt {
             start_position: starting_position,
