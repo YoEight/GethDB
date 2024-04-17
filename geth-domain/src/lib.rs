@@ -1,3 +1,6 @@
+use std::sync::{Arc, LockResult, Mutex, MutexGuard};
+
+use chrono::Utc;
 use flatbuffers::{FlatBufferBuilder, UnionWIPOffset, WIPOffset};
 use uuid::Uuid;
 
@@ -12,6 +15,146 @@ mod iter;
 mod tf_log;
 
 pub type PersistCommand<'a> = WIPOffset<binary::Command<'a>>;
+
+#[derive(Clone)]
+pub struct DomainRef {
+    pub inner: Arc<Mutex<Domain>>,
+}
+
+impl DomainRef {
+    pub fn new() -> Self {
+        Self {
+            inner: Arc::new(Mutex::new(Domain::new())),
+        }
+    }
+
+    pub fn lock(&self) -> LockResult<MutexGuard<'_, Domain>> {
+        self.inner.lock()
+    }
+}
+
+pub struct Domain {
+    builder: FlatBufferBuilder<'static>,
+}
+
+impl Domain {
+    pub fn new() -> Self {
+        Self {
+            builder: FlatBufferBuilder::with_capacity(4_096),
+        }
+    }
+
+    pub fn create_shared_string<'a: 'b, 'b>(
+        &'a mut self,
+        string: &'b str,
+    ) -> WIPOffset<&'static str> {
+        self.builder.create_shared_string(string)
+    }
+
+    pub fn create_string<'a: 'b, 'b>(&'a mut self, string: &'b str) -> WIPOffset<&'static str> {
+        self.builder.create_string(string)
+    }
+
+    pub fn commands<'a: 'b, 'b>(&'a mut self) -> CommandBuilder<'b> {
+        CommandBuilder { inner: self }
+    }
+
+    pub fn events<'a: 'b, 'b>(&'a mut self) -> EventBuilder<'b> {
+        EventBuilder { inner: self }
+    }
+}
+
+pub struct CommandBuilder<'a> {
+    inner: &'a mut Domain,
+}
+
+impl<'a> CommandBuilder<'a> {
+    pub fn append_stream(
+        self,
+        stream_name: &'a str,
+        expected: ExpectedRevision,
+    ) -> AppendStream<'a> {
+        AppendStream::new(self.inner, stream_name, expected)
+    }
+
+    pub fn delete_stream(
+        self,
+        stream_name: &'a str,
+        expected: ExpectedRevision,
+    ) -> DeleteStream<'a> {
+        DeleteStream::new(self.inner, stream_name, expected)
+    }
+}
+
+pub struct EventBuilder<'a> {
+    inner: &'a mut Domain,
+}
+
+impl<'a> EventBuilder<'a> {
+    pub fn recorded_event(
+        mut self,
+        id: Uuid,
+        stream_name: WIPOffset<&'a str>,
+        class: WIPOffset<&'a str>,
+        revision: u64,
+    ) -> &'a [u8] {
+        let created = Utc::now().timestamp();
+        let (most, least) = id.as_u64_pair();
+        let mut id = binary::Id::default();
+        id.set_high(most);
+        id.set_low(least);
+
+        let evt = binary::RecordedEvent::create(
+            &mut self.inner.builder,
+            &mut binary::RecordedEventArgs {
+                id: Some(&id),
+                revision,
+                stream_name: Some(stream_name),
+                class: Some(class),
+                created,
+                data: None,
+                metadata: None,
+            },
+        )
+        .as_union_value();
+
+        let evt = binary::Event::create(
+            &mut self.inner.builder,
+            &mut binary::EventArgs {
+                event_type: binary::Events::RecordedEvent,
+                event: Some(evt),
+            },
+        );
+
+        self.inner.builder.finish_minimal(evt);
+        self.inner.builder.finished_data()
+    }
+
+    pub fn stream_deleted(mut self, stream_name: &'a str, revision: u64) -> &'a [u8] {
+        let created = Utc::now().timestamp();
+        let stream_name = self.inner.builder.create_string(stream_name);
+        let evt = binary::StreamDeleted::create(
+            &mut self.inner.builder,
+            &mut binary::StreamDeletedArgs {
+                stream_name: Some(stream_name),
+                revision,
+                created,
+            },
+        )
+        .as_union_value();
+
+        let evt = binary::Event::create(
+            &mut self.inner.builder,
+            &mut binary::EventArgs {
+                event_type: binary::Events::StreamDeleted,
+                event: Some(evt),
+            },
+        );
+
+        self.inner.builder.finish_minimal(evt);
+        self.inner.builder.finished_data()
+    }
+}
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ExpectedRevision {
@@ -61,19 +204,15 @@ pub struct ProposedEvent<'a> {
 }
 
 pub struct AppendStream<'a> {
-    builder: &'a mut FlatBufferBuilder<'a>,
+    domain: &'a mut Domain,
     args: binary::AppendStreamArgs<'a>,
     stream_name: WIPOffset<&'a str>,
 }
 
 impl<'a> AppendStream<'a> {
-    pub fn new(
-        builder: &'a mut FlatBufferBuilder<'a>,
-        stream_name: &'a str,
-        expected: ExpectedRevision,
-    ) -> Self {
-        let stream_name = builder.create_shared_string(stream_name);
-        let (expectation_type, expectation) = expected.serialize(builder);
+    pub fn new(domain: &'a mut Domain, stream_name: &'a str, expected: ExpectedRevision) -> Self {
+        let stream_name = domain.builder.create_shared_string(stream_name);
+        let (expectation_type, expectation) = expected.serialize(&mut domain.builder);
 
         let args = binary::AppendStreamArgs {
             stream: Some(stream_name),
@@ -83,7 +222,7 @@ impl<'a> AppendStream<'a> {
         };
 
         Self {
-            builder,
+            domain,
             args,
             stream_name,
         }
@@ -97,10 +236,10 @@ impl<'a> AppendStream<'a> {
         let mut proposed_events = Vec::new();
 
         for event in events {
-            let class = self.builder.create_string(event.r#type);
-            let payload = self.builder.create_vector(event.payload);
+            let class = self.domain.builder.create_string(event.r#type);
+            let payload = self.domain.builder.create_vector(event.payload);
             let event = binary::ProposedEvent::create(
-                self.builder,
+                &mut self.domain.builder,
                 &mut binary::ProposedEventArgs {
                     class: Some(class),
                     stream: Some(self.stream_name),
@@ -112,6 +251,7 @@ impl<'a> AppendStream<'a> {
         }
 
         let events = self
+            .domain
             .builder
             .create_vector_from_iter(proposed_events.into_iter());
 
@@ -120,36 +260,33 @@ impl<'a> AppendStream<'a> {
     }
 
     pub fn finish(mut self) -> &'a [u8] {
-        let command = binary::AppendStream::create(self.builder, &mut self.args).as_union_value();
+        let command =
+            binary::AppendStream::create(&mut self.domain.builder, &mut self.args).as_union_value();
 
         let data = binary::Command::create(
-            self.builder,
+            &mut self.domain.builder,
             &binary::CommandArgs {
                 command_type: binary::Commands::AppendStream,
                 command: Some(command),
             },
         );
 
-        self.builder.finish_minimal(data);
-        self.builder.finished_data()
+        self.domain.builder.finish_minimal(data);
+        self.domain.builder.finished_data()
     }
 }
 
 pub struct DeleteStream<'a> {
-    builder: &'a mut FlatBufferBuilder<'a>,
+    domain: &'a mut Domain,
     args: binary::DeleteStreamArgs<'a>,
 }
 
 impl<'a> DeleteStream<'a> {
-    pub fn new(
-        builder: &'a mut FlatBufferBuilder<'a>,
-        stream_name: &'a str,
-        expected: ExpectedRevision,
-    ) -> Self {
-        let stream_name = builder.create_string(stream_name);
-        let (expectation_type, expectation) = expected.serialize(builder);
+    pub fn new(domain: &'a mut Domain, stream_name: &'a str, expected: ExpectedRevision) -> Self {
+        let stream_name = domain.builder.create_string(stream_name);
+        let (expectation_type, expectation) = expected.serialize(&mut domain.builder);
         Self {
-            builder,
+            domain,
             args: binary::DeleteStreamArgs {
                 stream: Some(stream_name),
                 expectation_type,
@@ -158,19 +295,20 @@ impl<'a> DeleteStream<'a> {
         }
     }
 
-    pub fn finish(mut self) -> &'a [u8] {
-        let command = binary::DeleteStream::create(self.builder, &mut self.args).as_union_value();
+    pub fn complete(mut self) -> &'a [u8] {
+        let command =
+            binary::DeleteStream::create(&mut self.domain.builder, &mut self.args).as_union_value();
 
         let data = binary::Command::create(
-            self.builder,
+            &mut self.domain.builder,
             &binary::CommandArgs {
                 command_type: binary::Commands::DeleteStream,
                 command: Some(command),
             },
         );
 
-        self.builder.finish_minimal(data);
-        self.builder.finished_data()
+        self.domain.builder.finish_minimal(data);
+        self.domain.builder.finished_data()
     }
 }
 
@@ -227,9 +365,11 @@ fn test_serde_expectation() {
 
 #[test]
 fn test_serde_append_stream() {
-    let mut builder = flatbuffers::FlatBufferBuilder::with_capacity(1024);
+    let mut domain = Domain::new();
 
-    let data = AppendStream::new(&mut builder, "foobar", ExpectedRevision::Revision(42))
+    let data = domain
+        .commands()
+        .append_stream("foobar", ExpectedRevision::Revision(42))
         .with_event(ProposedEvent {
             r#type: "user-created",
             payload: b"qwerty",
@@ -250,9 +390,13 @@ fn test_serde_append_stream() {
 
 #[test]
 fn test_serde_delete_stream() {
-    let mut builder = FlatBufferBuilder::with_capacity(1_024);
+    let mut domain = Domain::new();
 
-    let data = DeleteStream::new(&mut builder, "foobar", ExpectedRevision::Revision(42)).finish();
+    let data = domain
+        .commands()
+        .delete_stream("foobar", ExpectedRevision::Revision(42))
+        .complete();
+
     let actual = flatbuffers::root::<binary::Command>(data).unwrap();
     let actual_delete = actual.command_as_delete_stream().unwrap();
     let stream_name = actual_delete.stream().unwrap();

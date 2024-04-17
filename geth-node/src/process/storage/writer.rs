@@ -1,10 +1,9 @@
 use std::io;
 
-use chrono::Utc;
 use tokio::task::spawn_blocking;
-use uuid::Uuid;
 
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_domain::DomainRef;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
@@ -20,6 +19,7 @@ where
     wal: WALRef<WAL>,
     index: StorageIndex<S>,
     revision_cache: RevisionCache,
+    domain_ref: DomainRef,
 }
 
 impl<WAL, S> StorageWriter<WAL, S>
@@ -32,6 +32,7 @@ where
             wal,
             index,
             revision_cache,
+            domain_ref: DomainRef::new(),
         }
     }
 
@@ -39,6 +40,7 @@ where
         let wal = self.wal.clone();
         let index = self.index.clone();
         let revision_cache = self.revision_cache.clone();
+        let domain_ref = self.domain_ref.clone();
 
         let handle = spawn_blocking(move || {
             let current_revision = index.stream_current_revision(&params.stream_name)?;
@@ -51,30 +53,23 @@ where
                 return Ok(AppendStreamCompleted::Failure(e));
             }
 
-            let created = Utc::now().timestamp();
             let mut revision = current_revision.next_revision();
-            let transaction_id = Uuid::new_v4();
-            let mut transaction_offset = 0u16;
             let mut events = Vec::with_capacity(params.events.len());
+            let mut domain = domain_ref.lock().unwrap();
+            let stream_name = domain.create_shared_string(&params.stream_name);
 
-            for event in params.events {
-                events.push(StreamEventAppended {
-                    revision,
-                    event_stream_id: params.stream_name.clone(),
-                    transaction_id,
-                    transaction_offset,
-                    event_id: event.id,
-                    created,
-                    event_type: event.r#type,
-                    data: event.data,
-                    metadata: Default::default(),
-                });
+            for event in &params.events {
+                let class = domain.create_string(event.r#type.as_str());
+                let event = domain
+                    .events()
+                    .recorded_event(event.id, stream_name, class, revision);
+
+                events.push(event);
 
                 revision += 1;
-                transaction_offset += 1;
             }
 
-            let receipt = wal.append(events.as_slice())?;
+            let receipt = wal.append(events)?;
             index.chase(receipt.next_position);
 
             revision_cache.insert(params.stream_name, revision - 1);
@@ -90,10 +85,9 @@ where
             Err(_) => {
                 AppendStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
             }
-            Ok(result) => match result {
-                Err(e) => AppendStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e)),
-                Ok(v) => v,
-            },
+            Ok(result) => result.unwrap_or_else(|e| {
+                AppendStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e))
+            }),
         }
     }
 
@@ -101,19 +95,21 @@ where
         let index = self.index.clone();
         let revision_cache = self.revision_cache.clone();
         let wal = self.wal.clone();
+        let domain_ref = self.domain_ref.clone();
 
         let handle = spawn_blocking(move || {
             let current_revision = index.stream_current_revision(&params.stream_name)?;
+            let mut domain = domain_ref.lock().unwrap();
 
             if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
                 return Ok::<_, io::Error>(DeleteStreamCompleted::Failure(e));
             }
 
-            let receipt = wal.append(&[StreamDeleted {
-                revision: current_revision.next_revision(),
-                event_stream_id: params.stream_name.clone(),
-                created: Utc::now().timestamp(),
-            }])?;
+            let evt = domain
+                .events()
+                .stream_deleted(&params.stream_name, current_revision.next_revision());
+
+            let receipt = wal.append(vec![evt])?;
 
             revision_cache.insert(params.stream_name, u64::MAX);
             index.chase(receipt.next_position);
@@ -129,10 +125,9 @@ where
             Err(_) => {
                 DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
             }
-            Ok(result) => match result {
-                Err(e) => DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e)),
-                Ok(v) => v,
-            },
+            Ok(result) => result.unwrap_or_else(|e| {
+                DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e))
+            }),
         }
     }
 }
