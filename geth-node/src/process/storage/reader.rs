@@ -1,15 +1,14 @@
 use std::io;
 
 use chrono::{TimeZone, Utc};
-use flatbuffers::FlatBufferBuilder;
 use tokio::task::spawn_blocking;
 
 use geth_common::Position;
 use geth_domain::RecordedEvent;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{
-    hashing::mikoshi_hash, index::IteratorIO, storage::Storage, Entry, MikoshiStream,
+    Entry, hashing::mikoshi_hash, index::IteratorIO, MikoshiStream, storage::Storage,
 };
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::process::storage::index::StorageIndex;
@@ -21,7 +20,6 @@ where
 {
     wal: WALRef<WAL>,
     index: StorageIndex<S>,
-    builder: FlatBufferBuilder<'static>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -30,11 +28,7 @@ where
     S: Storage + Send + Sync + 'static,
 {
     pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>) -> Self {
-        Self {
-            wal,
-            index,
-            builder: FlatBufferBuilder::with_capacity(4_096),
-        }
+        Self { wal, index }
     }
 
     pub async fn read(&self, params: ReadStream) -> ReadStreamCompleted {
