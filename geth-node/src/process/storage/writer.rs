@@ -1,4 +1,4 @@
-use std::io;
+use std::{io, sync, thread};
 
 use chrono::Utc;
 use tokio::task::spawn_blocking;
@@ -12,8 +12,15 @@ use crate::process::storage::index::{CurrentRevision, StorageIndex};
 use crate::process::storage::RevisionCache;
 
 enum Msg {
-    Append(AppendStream),
-    Delete(DeleteStream),
+    Append(
+        AppendStream,
+        sync::mpsc::SyncSender<io::Result<AppendStreamCompleted>>,
+    ),
+
+    Delete(
+        DeleteStream,
+        sync::mpsc::SyncSender<io::Result<DeleteStreamCompleted>>,
+    ),
 }
 
 pub struct StorageWriterInternal<WAL, S>
@@ -40,7 +47,7 @@ where
         }
     }
 
-    fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
+    pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
         let current_revision = self.index.stream_current_revision(&params.stream_name)?;
 
         if current_revision.is_deleted() {
@@ -104,7 +111,7 @@ where
         }))
     }
 
-    fn delete(&mut self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+    pub fn delete(&mut self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
         let current_revision = self.index.stream_current_revision(&params.stream_name)?;
 
         if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
@@ -145,113 +152,83 @@ where
     }
 }
 
+pub fn new_storage_writer<WAL, S>(
+    wal: WALRef<WAL>,
+    index: StorageIndex<S>,
+    revision_cache: RevisionCache,
+) -> StorageWriter
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
+    let (sender, mut mailbox) = sync::mpsc::channel();
+    let mut internal = StorageWriterInternal {
+        wal,
+        index,
+        revision_cache,
+        builder: flatbuffers::FlatBufferBuilder::with_capacity(4_096),
+    };
+
+    thread::spawn(move || {
+        while let Some(msg) = mailbox.recv().ok() {
+            match msg {
+                Msg::Append(params, resp) => {
+                    let result = internal.append(params);
+                    let _ = resp.send(result);
+                }
+
+                Msg::Delete(params, resp) => {
+                    let result = internal.delete(params);
+                    let _ = resp.send(result);
+                }
+            }
+        }
+
+        tracing::info!("storage writer process exited");
+    });
+
+    StorageWriter { inner: sender }
+}
+
 #[derive(Clone)]
 pub struct StorageWriter {
-    inner: std::sync::mpsc::Sender<Msg>,
+    inner: sync::mpsc::Sender<Msg>,
 }
 
 impl StorageWriter {
-    /*pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>, revision_cache: RevisionCache) -> Self {
-        Self {
-            wal,
-            index,
-            revision_cache,
-            domain_ref: DomainRef::new(),
-        }
-    }*/
+    pub fn append(&self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
+        let (sender, resp) = sync::mpsc::sync_channel(1);
 
-    pub async fn append(&self, params: AppendStream) -> AppendStreamCompleted {
-        let wal = self.wal.clone();
-        let index = self.index.clone();
-        let revision_cache = self.revision_cache.clone();
-        let domain_ref = self.domain_ref.clone();
-
-        let handle = spawn_blocking(move || {
-            let current_revision = index.stream_current_revision(&params.stream_name)?;
-
-            if current_revision.is_deleted() {
-                return Ok::<_, io::Error>(AppendStreamCompleted::StreamDeleted);
+        if self.inner.send(Msg::Append(params, sender)).is_ok() {
+            if let Ok(result) = resp.recv() {
+                result
+            } else {
+                Ok(AppendStreamCompleted::Unexpected(eyre::eyre!(
+                    "storage writer process exited"
+                )))
             }
-
-            if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-                return Ok(AppendStreamCompleted::Failure(e));
-            }
-
-            let mut revision = current_revision.next_revision();
-            let mut events = Vec::with_capacity(params.events.len());
-            let mut domain = domain_ref.lock().unwrap();
-            let stream_name = domain.create_shared_string(&params.stream_name);
-
-            for event in &params.events {
-                let class = domain.create_string(event.r#type.as_str());
-                let event = domain
-                    .events()
-                    .recorded_event(event.id, stream_name, class, revision);
-
-                events.push(event);
-
-                revision += 1;
-            }
-
-            let receipt = wal.append(events)?;
-            index.chase(receipt.next_position);
-
-            revision_cache.insert(params.stream_name, revision - 1);
-
-            Ok(AppendStreamCompleted::Success(WriteResult {
-                next_expected_version: ExpectedRevision::Revision(revision),
-                position: Position(receipt.start_position),
-                next_logical_position: receipt.next_position,
-            }))
-        });
-
-        match handle.await {
-            Err(_) => {
-                AppendStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
-            }
-            Ok(result) => result.unwrap_or_else(|e| {
-                AppendStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e))
-            }),
+        } else {
+            Ok(AppendStreamCompleted::Unexpected(eyre::eyre!(
+                "storage writer process exited"
+            )))
         }
     }
 
-    pub async fn delete(&self, params: DeleteStream) -> DeleteStreamCompleted {
-        let index = self.index.clone();
-        let revision_cache = self.revision_cache.clone();
-        let wal = self.wal.clone();
-        let domain_ref = self.domain_ref.clone();
+    pub fn delete(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+        let (sender, resp) = sync::mpsc::sync_channel(1);
 
-        let handle = spawn_blocking(move || {
-            let current_revision = index.stream_current_revision(&params.stream_name)?;
-            let mut domain = domain_ref.lock().unwrap();
-
-            if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-                return Ok::<_, io::Error>(DeleteStreamCompleted::Failure(e));
+        if self.inner.send(Msg::Delete(params, sender)).is_ok() {
+            if let Ok(result) = resp.recv() {
+                result
+            } else {
+                Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!(
+                    "storage writer process exited"
+                )))
             }
-
-            let evt = domain
-                .events()
-                .stream_deleted(&params.stream_name, current_revision.next_revision());
-
-            let receipt = wal.append(vec![evt])?;
-
-            revision_cache.insert(params.stream_name, u64::MAX);
-            index.chase(receipt.next_position);
-
-            Ok(DeleteStreamCompleted::Success(WriteResult {
-                next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
-                position: Position(receipt.start_position),
-                next_logical_position: receipt.next_position,
-            }))
-        });
-
-        match handle.await {
-            Err(_) => {
-                DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O write operation became unbound"))
-            }
-            Ok(result) => result.unwrap_or_else(|e| {
-                DeleteStreamCompleted::Unexpected(eyre::eyre!("I/O error: {}", e))
-            }),
+        } else {
+            Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!(
+                "storage writer process exited"
+            )))
         }
     }
 }

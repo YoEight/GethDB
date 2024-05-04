@@ -1,3 +1,14 @@
+use std::io;
+
+use eyre::bail;
+use tokio::sync::oneshot;
+use uuid::Uuid;
+
+use geth_common::{ProgrammableStats, ProgrammableSummary};
+use geth_mikoshi::index::Lsm;
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
@@ -7,13 +18,6 @@ use crate::messages::{
 };
 use crate::process::storage::StorageService;
 use crate::process::subscriptions::SubscriptionsClient;
-use eyre::bail;
-use geth_common::{ProgrammableStats, ProgrammableSummary};
-use geth_mikoshi::index::Lsm;
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-use tokio::sync::oneshot;
-use uuid::Uuid;
 
 mod storage;
 mod subscriptions;
@@ -42,7 +46,7 @@ where
         }
     }
 
-    pub async fn append_stream(&self, params: AppendStream) -> AppendStreamCompleted {
+    pub async fn append_stream(&self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
         self.storage.append_stream(params).await
     }
 
@@ -50,7 +54,7 @@ where
         self.storage.read_stream(params).await
     }
 
-    pub async fn delete_stream(&self, params: DeleteStream) -> DeleteStreamCompleted {
+    pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
         self.storage.delete_stream(params).await
     }
 

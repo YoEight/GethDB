@@ -1,6 +1,4 @@
-mod index;
-pub mod reader;
-mod writer;
+use std::io;
 
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -12,15 +10,19 @@ use crate::messages::{
 };
 use crate::process::storage::index::StorageIndex;
 use crate::process::storage::reader::StorageReader;
-use crate::process::storage::writer::StorageWriter;
+use crate::process::storage::writer::{new_storage_writer, StorageWriter};
 use crate::process::subscriptions::SubscriptionsClient;
+
+mod index;
+pub mod reader;
+mod writer;
 
 #[derive(Clone)]
 pub struct StorageService<WAL, S>
 where
     S: Storage,
 {
-    writer: StorageWriter<WAL, S>,
+    writer: StorageWriter,
     reader: StorageReader<WAL, S>,
 }
 
@@ -40,7 +42,7 @@ where
         let index = StorageIndex::new(wal.clone(), index.clone(), client, revision_cache.clone());
 
         Self {
-            writer: StorageWriter::new(wal.clone(), index.clone(), revision_cache.clone()),
+            writer: new_storage_writer(wal.clone(), index.clone(), revision_cache.clone()),
             reader: StorageReader::new(wal, index),
         }
     }
@@ -49,11 +51,19 @@ where
         self.reader.read(params).await
     }
 
-    pub async fn append_stream(&self, params: AppendStream) -> AppendStreamCompleted {
-        self.writer.append(params).await
+    pub async fn append_stream(&self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
+        let writer = self.writer.clone();
+        match tokio::task::spawn_blocking(move || writer.append(params)).await {
+            Err(e) => Ok(AppendStreamCompleted::Unexpected(eyre::eyre!("{}", e))),
+            Ok(r) => r,
+        }
     }
 
-    pub async fn delete_stream(&self, params: DeleteStream) -> DeleteStreamCompleted {
-        self.writer.delete(params).await
+    pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+        let writer = self.writer.clone();
+        match tokio::task::spawn_blocking(move || writer.delete(params)).await {
+            Err(e) => Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!("{}", e))),
+            Ok(r) => r,
+        }
     }
 }

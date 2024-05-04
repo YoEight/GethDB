@@ -1,18 +1,28 @@
+use std::collections::HashMap;
+
+use futures::stream::BoxStream;
+use futures::TryStreamExt;
+use prost_types::Timestamp;
 use tonic::Request;
 use tonic::Response;
 use tonic::Status;
 use tonic::Streaming;
+use uuid::Uuid;
 
+use geth_common::{Direction, ExpectedRevision, Propose};
 use geth_common::protocol::{
     self,
-    streams::{
-        append_req, append_resp, delete_resp, list_progs_resp::ProgrammableSubscriptionSummary,
-        read_resp, server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp,
-        KillProgReq, KillProgResp, ListProgsResp, ProgStatsReq, ProgStatsResp, ReadEvent, ReadReq,
-        ReadResp, RecordedEvent, StreamOption, Success,
-    },
     Empty,
+    streams::{
+        append_req, append_resp, AppendReq, AppendResp,
+        CountOption, delete_resp, DeleteReq, DeleteResp, KillProgReq, KillProgResp, list_progs_resp::ProgrammableSubscriptionSummary,
+        ListProgsResp, ProgStatsReq, ProgStatsResp, read_resp, ReadEvent, ReadReq, ReadResp,
+        RecordedEvent, server::Streams, StreamOption, Success,
+    },
 };
+use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::WriteAheadLog;
 
 use crate::messages::{
     AppendStream, DeleteStream, DeleteStreamCompleted, ProcessTarget, ReadStream,
@@ -20,15 +30,6 @@ use crate::messages::{
 };
 use crate::messages::{AppendStreamCompleted, SubscribeTo};
 use crate::process::Processes;
-use futures::stream::BoxStream;
-use futures::TryStreamExt;
-use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
-use geth_common::{Direction, ExpectedRevision, Propose};
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::WriteAheadLog;
-use prost_types::Timestamp;
-use std::collections::HashMap;
-use uuid::Uuid;
 
 pub struct StreamsImpl<WAL, S>
 where
@@ -240,34 +241,38 @@ where
             .await;
 
         let resp = match resp {
-            AppendStreamCompleted::Success(result) => AppendResp {
-                result: Some(append_resp::Result::Success(Success {
-                    current_revision_option: Some(result.next_expected_version.into()),
-                    position_option: Some(append_resp::success::PositionOption::Position(
-                        result.position.into(),
-                    )),
-                })),
-            },
+            Err(e) => return Err(Status::unavailable(format!("Unexpected error: {}", e))),
 
-            AppendStreamCompleted::Failure(e) => AppendResp {
-                result: Some(append_resp::Result::WrongExpectedVersion(
-                    append_resp::WrongExpectedVersion {
-                        current_revision_option_20_6_0: None,
-                        expected_revision_option_20_6_0: None,
-                        current_revision_option: Some(e.current.into()),
-                        expected_revision_option: Some(e.expected.into()),
-                    },
-                )),
+            Ok(resp) => match resp {
+                AppendStreamCompleted::Success(result) => AppendResp {
+                    result: Some(append_resp::Result::Success(Success {
+                        current_revision_option: Some(result.next_expected_version.into()),
+                        position_option: Some(append_resp::success::PositionOption::Position(
+                            result.position.into(),
+                        )),
+                    })),
+                },
+
+                AppendStreamCompleted::Failure(e) => AppendResp {
+                    result: Some(append_resp::Result::WrongExpectedVersion(
+                        append_resp::WrongExpectedVersion {
+                            current_revision_option_20_6_0: None,
+                            expected_revision_option_20_6_0: None,
+                            current_revision_option: Some(e.current.into()),
+                            expected_revision_option: Some(e.expected.into()),
+                        },
+                    )),
+                },
+                AppendStreamCompleted::Unexpected(e) => {
+                    return Err(Status::unavailable(format!("Unexpected error: {}", e)))
+                }
+                AppendStreamCompleted::StreamDeleted => {
+                    return Err(Status::not_found(format!(
+                        "Stream '{}' is deleted",
+                        stream_name
+                    )))
+                }
             },
-            AppendStreamCompleted::Unexpected(e) => {
-                return Err(Status::unavailable(format!("Unexpected error: {}", e)))
-            }
-            AppendStreamCompleted::StreamDeleted => {
-                return Err(Status::not_found(format!(
-                    "Stream '{}' is deleted",
-                    stream_name
-                )))
-            }
         };
 
         Ok(Response::new(resp))
@@ -308,25 +313,31 @@ where
             })
             .await
         {
-            DeleteStreamCompleted::Success(result) => DeleteResp {
-                result: Some(delete_resp::Result::Position(delete_resp::Position {
-                    commit_position: result.position.raw(),
-                    prepare_position: result.position.raw(),
-                })),
-            },
-
-            DeleteStreamCompleted::Failure(e) => DeleteResp {
-                result: Some(delete_resp::Result::WrongExpectedVersion(
-                    delete_resp::WrongExpectedVersion {
-                        current_revision_option: Some(e.current.into()),
-                        expected_revision_option: Some(e.expected.into()),
-                    },
-                )),
-            },
-
-            DeleteStreamCompleted::Unexpected(e) => {
+            Err(e) => {
                 return Err(Status::unavailable(format!("Unexpected error: {}", e)));
             }
+
+            Ok(resp) => match resp {
+                DeleteStreamCompleted::Success(result) => DeleteResp {
+                    result: Some(delete_resp::Result::Position(delete_resp::Position {
+                        commit_position: result.position.raw(),
+                        prepare_position: result.position.raw(),
+                    })),
+                },
+
+                DeleteStreamCompleted::Failure(e) => DeleteResp {
+                    result: Some(delete_resp::Result::WrongExpectedVersion(
+                        delete_resp::WrongExpectedVersion {
+                            current_revision_option: Some(e.current.into()),
+                            expected_revision_option: Some(e.expected.into()),
+                        },
+                    )),
+                },
+
+                DeleteStreamCompleted::Unexpected(e) => {
+                    return Err(Status::unavailable(format!("Unexpected error: {}", e)));
+                }
+            },
         };
 
         Ok(Response::new(resp))
