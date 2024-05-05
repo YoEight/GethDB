@@ -13,7 +13,7 @@ use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::{new_storage_writer, StorageWriter};
 use crate::process::subscriptions::SubscriptionsClient;
 
-mod index;
+pub mod index;
 pub mod reader;
 mod writer;
 

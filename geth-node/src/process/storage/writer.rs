@@ -4,6 +4,7 @@ use chrono::Utc;
 use tokio::task::spawn_blocking;
 
 use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 

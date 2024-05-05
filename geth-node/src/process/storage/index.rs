@@ -1,15 +1,16 @@
 use std::io;
 
 use chrono::{TimeZone, Utc};
+use flatbuffers::InvalidFlatbuffer;
 
 use geth_common::{ExpectedRevision, Position};
-use geth_domain::binary::Events;
+use geth_domain::binary::{Event, Events};
 use geth_domain::parse_event;
+use geth_mikoshi::{Entry, IteratorIO};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-use geth_mikoshi::{Entry, IteratorIO};
 
 use crate::process::storage::RevisionCache;
 use crate::process::subscriptions::SubscriptionsClient;
@@ -161,4 +162,44 @@ where
     pub fn chase(&self, from_position: u64) {
         let _ = self.chase_sender.send(from_position);
     }
+}
+
+// TODO - We need to move the index out of mikoshi because after thinking about it, indexing is a
+// projection of the transaction log, not something related it. For example, the index can be
+// rebuilt at any given time.
+pub fn rebuild_index<S, WAL>(lsm: &Lsm<S>, wal: &WALRef<WAL>) -> io::Result<()>
+where
+    S: Storage + Send + Sync + 'static,
+    WAL: WriteAheadLog + Send,
+{
+    let logical_position = lsm.checkpoint();
+    let entries = wal.entries(logical_position).map_io(|entry| {
+        match flatbuffers::root::<Event>(&entry.payload) {
+            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+
+            Ok(evt) => {
+                if let Some(record) = evt.event_as_recorded_event() {
+                    let key = mikoshi_hash(record.stream_name().unwrap());
+                    return Ok((key, record.revision(), entry.position));
+                } else if let Some(deleted) = evt.event_as_stream_deleted() {
+                    let key = mikoshi_hash(&deleted.stream_name().unwrap());
+
+                    return Ok((key, u64::MAX, entry.position));
+                } else {
+                    // TODO - At some point we would need to use the `filter` method on `IteratorIO` instead
+                    // of raising an error.
+                    Err(io::Error::new(
+                        io::ErrorKind::InvalidData,
+                        "unsupported event in the transaction log",
+                    ))
+                }
+            }
+        }
+    });
+
+    lsm.put(entries)?;
+    let writer_checkpoint = wal.write_position();
+    lsm.set_checkpoint(writer_checkpoint);
+
+    Ok(())
 }

@@ -32,6 +32,14 @@ pub trait IteratorIO {
         MapIO { func, inner: self }
     }
 
+    fn filter<F>(self, func: F) -> Filter<F, Self>
+    where
+        Self: Sized,
+        F: FnMut(&Self::Item) -> bool,
+    {
+        Filter { func, inner: self }
+    }
+
     fn last(mut self) -> io::Result<Option<Self::Item>>
     where
         Self: Sized,
@@ -85,6 +93,31 @@ where
         }
 
         Ok(None)
+    }
+}
+
+pub struct Filter<F, I> {
+    func: F,
+    inner: I,
+}
+
+impl<F, I> IteratorIO for Filter<F, I>
+where
+    I: IteratorIO,
+    F: FnMut(&I::Item) -> bool,
+{
+    type Item = I::Item;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        loop {
+            if let Some(item) = self.inner.next()? {
+                if (self.func)(&item) {
+                    return Ok(Some(item));
+                }
+            } else {
+                return Ok(None);
+            }
+        }
     }
 }
 

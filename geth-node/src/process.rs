@@ -19,7 +19,7 @@ use crate::messages::{
 use crate::process::storage::StorageService;
 use crate::process::subscriptions::SubscriptionsClient;
 
-mod storage;
+pub mod storage;
 mod subscriptions;
 
 #[derive(Clone)]

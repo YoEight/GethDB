@@ -8,10 +8,10 @@ use uuid::Uuid;
 
 use geth_common::{Direction, Revision};
 
+use crate::index::{IteratorIO, IteratorIOExt, Merge};
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
-use crate::index::{IteratorIO, IteratorIOExt, Merge};
 use crate::storage::{FileId, Storage};
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
@@ -104,6 +104,11 @@ where
 
     pub fn checkpoint(&self) -> u64 {
         self.state.read().unwrap().logical_position
+    }
+
+    pub fn set_checkpoint(&self, position: u64) {
+        let mut state = self.state.write().unwrap();
+        state.logical_position = position;
     }
 
     pub fn load(settings: LsmSettings, storage: S) -> io::Result<Self> {
