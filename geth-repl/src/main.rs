@@ -1,31 +1,35 @@
-mod cli;
-mod utils;
+use std::{fs, fs::File, io, path::PathBuf};
+use std::collections::VecDeque;
+use std::path::Path;
 
+use bytes::BytesMut;
 use chrono::Utc;
 use directories::UserDirs;
 use glyph::{FileBackedInputs, Input, PromptOptions};
-use std::collections::VecDeque;
-use std::path::Path;
-use std::{fs, fs::File, io, path::PathBuf};
+use serde::Deserialize;
+use uuid::Uuid;
+
+use geth_client::Client;
+use geth_common::{
+    DeleteResult, Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
+};
+use geth_domain::{AppendProposes, parse_event, parse_event_io, RecordedEvent};
+use geth_domain::binary::events::Event;
+use geth_mikoshi::hashing::mikoshi_hash;
+use geth_mikoshi::index::{Lsm, LsmSettings};
+use geth_mikoshi::IteratorIO;
+use geth_mikoshi::storage::{FileSystemStorage, Storage};
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::wal::chunks::ChunkBasedWAL;
 
 use crate::cli::{
     Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,
     ProcessCommands, ReadStream, SubscribeCommands,
 };
 use crate::utils::expand_path;
-use geth_client::Client;
-use geth_common::{
-    DeleteResult, Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
-};
-use geth_mikoshi::domain::StreamEventAppended;
-use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::index::{Lsm, LsmSettings};
-use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::chunks::ChunkBasedWAL;
-use geth_mikoshi::wal::{LogEntryType, WALRef, WriteAheadLog};
-use geth_mikoshi::IteratorIO;
-use serde::Deserialize;
-use uuid::Uuid;
+
+mod cli;
+mod utils;
 
 #[tokio::main]
 async fn main() -> eyre::Result<()> {
@@ -100,7 +104,7 @@ async fn main() -> eyre::Result<()> {
                             Ok(m) => WALRef::new(m),
                         };
 
-                        if let Err(e) = index.rebuild(&wal) {
+                        if let Err(e) = rebuild_index {
                             println!("ERR: Error when rebuilding index: {}", e);
                             continue;
                         }
@@ -450,45 +454,41 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
+    let mut buffer = BytesMut::new();
     let stream_key = mikoshi_hash(&stream_name);
-    let created = Utc::now().timestamp();
-    let mut revision = index
+    let revision = index
         .highest_revision(stream_key)?
         .map_or_else(|| 0, |x| x + 1);
 
-    let transaction_id = Uuid::new_v4();
-    let mut transaction_offset = 0;
-    let mut events = Vec::with_capacity(proposes.len());
+    let len = proposes.len() as u64;
+    let events = AppendProposes::new(
+        stream_name.clone(),
+        Utc::now(),
+        revision,
+        &mut buffer,
+        proposes.into_iter(),
+    );
 
-    for event in proposes {
-        events.push(StreamEventAppended {
-            revision,
-            event_stream_id: stream_name.clone(),
-            transaction_id,
-            transaction_offset,
-            event_id: event.id,
-            created,
-            event_type: event.r#type,
-            data: event.data,
-            metadata: Default::default(),
-        });
-
-        revision += 1;
-        transaction_offset += 1;
-    }
-
-    let receipt = wal.append(events.as_slice())?;
+    let receipt = wal.append(events)?;
     let position = receipt.start_position;
     let result = WriteResult {
-        next_expected_version: ExpectedRevision::Revision(revision),
+        next_expected_version: ExpectedRevision::Revision(revision + len),
         position: Position(position),
         next_logical_position: receipt.next_position,
     };
 
-    let records = wal.data_events(position).map(|(position, record)| {
-        let key = mikoshi_hash(&record.event_stream_id);
+    let records = wal.entries(position).map_io(|entry| {
+        let event = parse_event_io(&entry.payload)?;
 
-        (key, record.revision, position)
+        if let Event::RecordedEvent(event) = event.event.unwrap() {
+            Ok((
+                mikoshi_hash(&event.stream_name),
+                event.revision,
+                entry.position,
+            ))
+        } else {
+            panic!("we are not dealing a recorded event")
+        }
     });
 
     index.put(records)?;
@@ -529,21 +529,22 @@ where
 
     while let Some(entry) = entries.next()? {
         let record = manager.read_at(entry.position)?;
-
-        if record.r#type != LogEntryType::UserData {
-            continue;
+        match parse_event(&record.payload) {
+            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+            Ok(event) => {
+                if let Event::RecordedEvent(event) = event.event.unwrap() {
+                    let event = RecordedEvent::from(event);
+                    records.push_back(Record {
+                        id: event.id,
+                        r#type: event.class,
+                        stream_name: event.stream_name,
+                        position: Position(record.position),
+                        revision: event.revision,
+                        data: event.data,
+                    });
+                }
+            }
         }
-
-        let event = record.unmarshall::<StreamEventAppended>();
-
-        records.push_back(Record {
-            id: event.event_id,
-            r#type: event.event_type,
-            stream_name: event.event_stream_id,
-            position: Position(record.position),
-            revision: event.revision,
-            data: event.data,
-        });
     }
 
     Ok(records)
@@ -557,21 +558,27 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
 {
     let mut records = VecDeque::new();
-    let mut iter = wal.data_events(0);
+    let mut iter = wal.entries(0);
 
-    while let Some((position, event)) = iter.next()? {
-        if event.event_stream_id != args.stream {
-            continue;
+    while let Some(entry) = iter.next()? {
+        let event = parse_event_io(&entry.payload)?;
+
+        if let Event::RecordedEvent(event) = event.event.unwrap() {
+            let event = RecordedEvent::from(event);
+
+            if event.stream_name != args.stream {
+                continue;
+            }
+
+            records.push_back(Record {
+                id: event.id,
+                r#type: event.class,
+                stream_name: event.stream_name,
+                position: Position(entry.position),
+                revision: event.revision,
+                data: event.data,
+            });
         }
-
-        records.push_back(Record {
-            id: event.event_id,
-            r#type: event.event_type,
-            stream_name: event.event_stream_id,
-            position: Position(position),
-            revision: event.revision,
-            data: event.data,
-        });
     }
 
     Ok(records)

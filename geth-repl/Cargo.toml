@@ -18,6 +18,9 @@ path = "../geth-common"
 [dependencies.geth-mikoshi]
 path = "../geth-mikoshi"
 
+[dependencies.geth-domain]
+path = "../geth-domain"
+
 [dependencies.tokio]
 version = "1"
 features = ["full"]
@@ -36,3 +39,4 @@ serde_json = "1"
 serde = "1"
 directories = "5"
 chrono = "0.4"
+bytes = "1.4.0"

@@ -1,10 +1,11 @@
 use std::{io, sync, thread};
 
-use bytes::{Bytes, BytesMut};
+use bytes::BytesMut;
 use chrono::Utc;
 use prost::Message;
 
-use geth_common::{ExpectedRevision, Position, Propose, WriteResult, WrongExpectedRevisionError};
+use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_domain::AppendProposes;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
@@ -51,16 +52,15 @@ where
         }
 
         let revision = current_revision.next_revision();
-        let created = Utc::now().timestamp();
         let len = params.events.len() as u64;
 
-        let events = AppendRecords {
-            events: params.events.into_iter(),
-            buffer: &mut self.buffer,
-            stream_name: params.stream_name.clone(),
-            created,
+        let events = AppendProposes::new(
+            params.stream_name.clone(),
+            Utc::now(),
             revision,
-        };
+            &mut self.buffer,
+            params.events.into_iter(),
+        );
 
         let receipt = self.wal.append(events)?;
         self.index.chase(receipt.next_position);
@@ -106,39 +106,6 @@ where
             position: Position(receipt.start_position),
             next_logical_position: receipt.next_position,
         }))
-    }
-}
-
-struct AppendRecords<'a> {
-    events: std::vec::IntoIter<Propose>,
-    buffer: &'a mut BytesMut,
-    stream_name: String,
-    created: i64,
-    revision: u64,
-}
-
-impl<'a> Iterator for AppendRecords<'a> {
-    type Item = Bytes;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        let propose = self.events.next()?;
-        let event = geth_domain::binary::events::RecordedEvent {
-            id: propose.id.into(),
-            revision: self.revision,
-            stream_name: self.stream_name.clone(),
-            class: propose.r#type,
-            created: self.created,
-            data: propose.data,
-            metadata: Default::default(),
-        };
-
-        self.revision += 1;
-        let event = geth_domain::binary::events::Events {
-            event: Some(geth_domain::binary::events::Event::RecordedEvent(event)),
-        };
-
-        event.encode(self.buffer).unwrap();
-        Some(self.buffer.split().freeze())
     }
 }
 

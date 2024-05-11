@@ -712,6 +712,7 @@ dependencies = [
  "bytes",
  "chrono",
  "eyre",
+ "geth-common",
  "geth-consensus",
  "geth-mikoshi",
  "prost",
@@ -775,12 +776,14 @@ dependencies = [
 name = "geth-repl"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "chrono",
  "clap",
  "directories",
  "eyre",
  "geth-client",
  "geth-common",
+ "geth-domain",
  "geth-mikoshi",
  "glyph",
  "serde",

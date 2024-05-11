@@ -1,10 +1,14 @@
+use std::io;
+
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use prost::Message;
 use uuid::Uuid;
 
+pub use crate::append_propose::AppendProposes;
 use crate::binary::events::Events;
 
+mod append_propose;
 pub mod binary;
 mod iter;
 
@@ -50,71 +54,6 @@ pub fn parse_event(payload: &[u8]) -> eyre::Result<Events> {
     Ok(evt)
 }
 
-#[test]
-fn test_serde_expectation() {
-    let mut builder = FlatBufferBuilder::with_capacity(1_024);
-    let (expectation_type, expectation) = ExpectedRevision::Any.serialize(&mut builder);
-
-    assert_eq!(binary::StreamExpectation::NONE, expectation_type);
-    assert!(expectation.is_none());
-
-    let (expectation_type, expectation) = ExpectedRevision::Exists.serialize(&mut builder);
-    assert_eq!(binary::StreamExpectation::ExpectExists, expectation_type);
-    assert!(expectation.is_none());
-
-    let (expectation_type, expectation) = ExpectedRevision::Empty.serialize(&mut builder);
-    assert_eq!(binary::StreamExpectation::ExpectEmpty, expectation_type);
-    assert!(expectation.is_none());
-
-    let (expectation_type, expectation) = ExpectedRevision::Revision(42).serialize(&mut builder);
-    assert_eq!(binary::StreamExpectation::ExpectRevision, expectation_type);
-
-    assert!(expectation.is_some());
-
-    // Right now, I don't see how to deserialize the expectation to a `ExpectRevision` table. We are
-    // not supposed to consume stream expectation in such fashion as each buffer uses them provide
-    // method to parse them.
-}
-
-#[test]
-fn test_serde_append_stream() {
-    let mut domain = Domain::new();
-
-    let data = domain
-        .commands()
-        .append_stream("foobar", ExpectedRevision::Revision(42))
-        .with_event(ProposedEvent {
-            r#type: "user-created",
-            payload: b"qwerty",
-        });
-
-    let actual = flatbuffers::root::<binary::Command>(data).unwrap();
-    let actual_app = actual.command_as_append_stream().unwrap();
-    let stream_name = actual_app.stream().unwrap_or_default();
-    let events = actual_app.events().unwrap();
-    let event = events.get(0);
-    let expectation = actual_app.expectation_as_expect_revision().unwrap();
-
-    assert_eq!("foobar", stream_name);
-    assert_eq!(42, expectation.revision());
-    assert_eq!("user-created", event.class().unwrap());
-    assert_eq!(b"qwerty", event.payload().unwrap().bytes());
-}
-
-#[test]
-fn test_serde_delete_stream() {
-    let mut domain = Domain::new();
-
-    let data = domain
-        .commands()
-        .delete_stream("foobar", ExpectedRevision::Revision(42))
-        .complete();
-
-    let actual = flatbuffers::root::<binary::Command>(data).unwrap();
-    let actual_delete = actual.command_as_delete_stream().unwrap();
-    let stream_name = actual_delete.stream().unwrap();
-    let expectation = actual_delete.expectation_as_expect_revision().unwrap();
-
-    assert_eq!("foobar", stream_name);
-    assert_eq!(42, expectation.revision());
+pub fn parse_event_io(payload: &[u8]) -> io::Result<Events> {
+    parse_event(payload).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }

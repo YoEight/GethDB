@@ -20,5 +20,8 @@ path = "../geth-mikoshi"
 [dependencies.geth-consensus]
 path = "../geth-consensus"
 
+[dependencies.geth-common]
+path = "../geth-common"
+
 [build-dependencies]
 prost-build = "0.12"
