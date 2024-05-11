@@ -5,7 +5,8 @@ edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 [dependencies]
-flatbuffers = "23.5.26"
+bytes = "1"
+prost = "0.12"
 eyre = "0.6.12"
 chrono = "0.4"
 
@@ -18,3 +19,6 @@ path = "../geth-mikoshi"
 
 [dependencies.geth-consensus]
 path = "../geth-consensus"
+
+[build-dependencies]
+prost-build = "0.12"

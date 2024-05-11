@@ -13,14 +13,14 @@ features = ["v4"]
 
 [dependencies]
 tokio = "1.20"
-tonic = "0.9"
-prost = "0.11"
-prost-types = "0.11"
-prost-derive = "0.11"
+tonic = "0.10"
+prost = "0.12"
+prost-types = "0.12"
+prost-derive = "0.12"
 byteorder = "1"
 eyre = "0.6"
 futures-util = "0.3"
 chrono = "0.4"
 
 [build-dependencies]
-tonic-build = "0.9"
+tonic-build = "0.10"

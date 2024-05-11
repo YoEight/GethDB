@@ -1,14 +1,11 @@
-use std::process::Command;
+use std::io;
 
-fn main() {
-    let files = &["commands", "events"];
+fn main() -> io::Result<()> {
+    prost_build::Config::new()
+        .bytes(&[".RecordedEvent.data", ".RecordedEvent.metadata"])
+        .format(true)
+        .default_package_filename("model")
+        .compile_protos(&["protos/events.proto"], &["protos/"])?;
 
-    for file in files {
-        Command::new("flatc")
-            .arg("--rust")
-            .current_dir("src")
-            .arg(format!("{}.fbs", file))
-            .output()
-            .unwrap();
-    }
+    Ok(())
 }

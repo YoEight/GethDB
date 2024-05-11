@@ -1,9 +1,9 @@
 use std::io;
 
-use chrono::{TimeZone, Utc};
 use tokio::task::spawn_blocking;
 
 use geth_common::Position;
+use geth_domain::binary::events::Event;
 use geth_domain::RecordedEvent;
 use geth_mikoshi::{
     Entry, hashing::mikoshi_hash, index::IteratorIO, MikoshiStream, storage::Storage,
@@ -59,7 +59,7 @@ where
                 let record = wal.read_at(entry.position)?;
 
                 let event = if let Ok(event) = geth_domain::parse_event(record.payload.as_ref()) {
-                    if let Some(event) = event.event_as_recorded_event() {
+                    if let Event::RecordedEvent(event) = event.event.unwrap() {
                         RecordedEvent::from(event)
                     } else {
                         panic!("We expected a record event at that log position");
@@ -75,7 +75,7 @@ where
                     revision: event.revision,
                     data: event.data.into(),
                     position: Position(record.position),
-                    created: Utc.timestamp_opt(event.created, 0).unwrap(),
+                    created: event.created,
                 };
 
                 // if failing means that we don't need to read form the transaction log.
@@ -87,9 +87,8 @@ where
             Ok(())
         });
 
-        match recv_result.await {
-            Err(_) => ReadStreamCompleted::Unexpected(eyre::eyre!("I/O operation became unbound")),
-            Ok(r) => r,
-        }
+        recv_result.await.unwrap_or_else(|_| {
+            ReadStreamCompleted::Unexpected(eyre::eyre!("I/O operation became unbound"))
+        })
     }
 }

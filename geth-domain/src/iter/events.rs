@@ -1,9 +1,10 @@
 use std::io;
 
+use geth_mikoshi::IteratorIO;
 use geth_mikoshi::wal::entries::EntryIter;
 use geth_mikoshi::wal::WriteAheadLog;
-use geth_mikoshi::IteratorIO;
 
+use crate::binary::events::Event;
 use crate::parse_event;
 
 pub struct EventIter<WAL> {
@@ -16,7 +17,7 @@ impl<WAL: WriteAheadLog> IteratorIO for EventIter<WAL> {
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         loop {
             if let Some(item) = self.inner.next()? {
-                let event = match parse_event(item.payload.as_ref()) {
+                let event = match parse_event(&item.payload) {
                     Err(e) => {
                         return Err(io::Error::new(io::ErrorKind::InvalidData, e.to_string()))
                     }
@@ -24,7 +25,7 @@ impl<WAL: WriteAheadLog> IteratorIO for EventIter<WAL> {
                     Ok(event) => event,
                 };
 
-                if let Some(event) = event.event_as_recorded_event() {
+                if let Event::RecordedEvent(event) = event.event.unwrap() {
                     return Ok(Some((item.position, crate::RecordedEvent::from(event))));
                 }
             }

@@ -27,9 +27,9 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append<'a, I>(&self, entries: I) -> io::Result<LogReceipt>
+    pub fn append<I>(&self, entries: I) -> io::Result<LogReceipt>
     where
-        I: IntoIterator<Item = &'a [u8]>,
+        I: IntoIterator<Item = Bytes>,
     {
         let mut inner = self.inner.write().unwrap();
         inner.append(entries)
@@ -56,9 +56,9 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
 }
 
 pub trait WriteAheadLog {
-    fn append<'a, I>(&mut self, entries: I) -> io::Result<LogReceipt>
+    fn append<I>(&mut self, entries: I) -> io::Result<LogReceipt>
     where
-        I: IntoIterator<Item = &'a [u8]>;
+        I: IntoIterator<Item = Bytes>;
     fn read_at(&self, position: u64) -> io::Result<LogEntry>;
     fn write_position(&self) -> u64;
 }

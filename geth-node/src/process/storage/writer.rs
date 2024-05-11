@@ -1,10 +1,10 @@
 use std::{io, sync, thread};
 
+use bytes::{Bytes, BytesMut};
 use chrono::Utc;
-use tokio::task::spawn_blocking;
+use prost::Message;
 
-use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
-use geth_mikoshi::index::Lsm;
+use geth_common::{ExpectedRevision, Position, Propose, WriteResult, WrongExpectedRevisionError};
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
@@ -31,7 +31,7 @@ where
     wal: WALRef<WAL>,
     index: StorageIndex<S>,
     revision_cache: RevisionCache,
-    builder: flatbuffers::FlatBufferBuilder<'static>,
+    buffer: BytesMut,
 }
 
 impl<WAL, S> StorageWriterInternal<WAL, S>
@@ -39,15 +39,6 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>, revision_cache: RevisionCache) -> Self {
-        Self {
-            wal,
-            index,
-            revision_cache,
-            builder: flatbuffers::FlatBufferBuilder::with_capacity(4_096),
-        }
-    }
-
     pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
         let current_revision = self.index.stream_current_revision(&params.stream_name)?;
 
@@ -59,54 +50,28 @@ where
             return Ok(AppendStreamCompleted::Failure(e));
         }
 
-        let mut revision = current_revision.next_revision();
-        let mut events = Vec::with_capacity(params.events.len());
-        let stream_name = self.builder.create_shared_string(&params.stream_name);
+        let revision = current_revision.next_revision();
         let created = Utc::now().timestamp();
+        let len = params.events.len() as u64;
 
-        for event in &params.events {
-            let class = self.builder.create_string(&event.r#type);
-            let (most, least) = event.id.as_u64_pair();
-            let mut id = geth_domain::binary::Id::default();
-
-            id.set_high(most);
-            id.set_low(least);
-
-            let wire_event = geth_domain::binary::RecordedEvent::create(
-                &mut self.builder,
-                &mut geth_domain::binary::RecordedEventArgs {
-                    id: Some(&id),
-                    revision,
-                    stream_name: Some(stream_name),
-                    class: Some(class),
-                    created,
-                    data: Some(self.builder.create_vector(&event.data)),
-                    metadata: None,
-                },
-            )
-            .as_union_value();
-
-            let serialized = geth_domain::binary::Event::create(
-                &mut self.builder,
-                &mut geth_domain::binary::EventArgs {
-                    event_type: geth_domain::binary::Events::RecordedEvent,
-                    event: Some(wire_event),
-                },
-            );
-
-            self.builder.finish_minimal(serialized);
-            events.push(self.builder.finished_data());
-
-            revision += 1;
-        }
+        let events = AppendRecords {
+            events: params.events.into_iter(),
+            buffer: &mut self.buffer,
+            stream_name: params.stream_name.clone(),
+            created,
+            revision,
+        };
 
         let receipt = self.wal.append(events)?;
         self.index.chase(receipt.next_position);
 
-        self.revision_cache.insert(params.stream_name, revision - 1);
+        if len > 0 {
+            self.revision_cache
+                .insert(params.stream_name, revision + len - 1);
+        }
 
         Ok(AppendStreamCompleted::Success(WriteResult {
-            next_expected_version: ExpectedRevision::Revision(revision),
+            next_expected_version: ExpectedRevision::Revision(revision + len),
             position: Position(receipt.start_position),
             next_logical_position: receipt.next_position,
         }))
@@ -120,27 +85,18 @@ where
         }
 
         let created = Utc::now().timestamp();
-        let stream_name = self.builder.create_string(&params.stream_name);
-        let wire_event = geth_domain::binary::StreamDeleted::create(
-            &mut self.builder,
-            &mut geth_domain::binary::StreamDeletedArgs {
-                stream_name: Some(stream_name),
-                revision: current_revision.next_revision(),
-                created,
-            },
-        )
-        .as_union_value();
+        let event = geth_domain::binary::events::StreamDeleted {
+            stream_name: params.stream_name.clone(),
+            revision: current_revision.next_revision(),
+            created,
+        };
 
-        let serialized = geth_domain::binary::Event::create(
-            &mut self.builder,
-            &mut geth_domain::binary::EventArgs {
-                event_type: geth_domain::binary::Events::StreamDeleted,
-                event: Some(wire_event),
-            },
-        );
+        let event = geth_domain::binary::events::Events {
+            event: Some(geth_domain::binary::events::Event::StreamDeleted(event)),
+        };
 
-        self.builder.finish_minimal(serialized);
-        let receipt = self.wal.append(vec![self.builder.finished_data()])?;
+        event.encode(&mut self.buffer).unwrap();
+        let receipt = self.wal.append(vec![self.buffer.split().freeze()])?;
 
         self.revision_cache.insert(params.stream_name, u64::MAX);
         self.index.chase(receipt.next_position);
@@ -153,6 +109,39 @@ where
     }
 }
 
+struct AppendRecords<'a> {
+    events: std::vec::IntoIter<Propose>,
+    buffer: &'a mut BytesMut,
+    stream_name: String,
+    created: i64,
+    revision: u64,
+}
+
+impl<'a> Iterator for AppendRecords<'a> {
+    type Item = Bytes;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        let propose = self.events.next()?;
+        let event = geth_domain::binary::events::RecordedEvent {
+            id: propose.id.into(),
+            revision: self.revision,
+            stream_name: self.stream_name.clone(),
+            class: propose.r#type,
+            created: self.created,
+            data: propose.data,
+            metadata: Default::default(),
+        };
+
+        self.revision += 1;
+        let event = geth_domain::binary::events::Events {
+            event: Some(geth_domain::binary::events::Event::RecordedEvent(event)),
+        };
+
+        event.encode(self.buffer).unwrap();
+        Some(self.buffer.split().freeze())
+    }
+}
+
 pub fn new_storage_writer<WAL, S>(
     wal: WALRef<WAL>,
     index: StorageIndex<S>,
@@ -162,12 +151,12 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    let (sender, mut mailbox) = sync::mpsc::channel();
+    let (sender, mailbox) = sync::mpsc::channel();
     let mut internal = StorageWriterInternal {
         wal,
         index,
         revision_cache,
-        builder: flatbuffers::FlatBufferBuilder::with_capacity(4_096),
+        buffer: BytesMut::with_capacity(4_096),
     };
 
     thread::spawn(move || {

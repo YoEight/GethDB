@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::{FileCategory, FileId, Storage};
+use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;
@@ -139,15 +139,15 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append<'a, I>(&mut self, entries: I) -> io::Result<LogReceipt>
+    fn append<I>(&mut self, entries: I) -> io::Result<LogReceipt>
     where
-        I: IntoIterator<Item = &'a [u8]>,
+        I: IntoIterator<Item = Bytes>,
     {
         let mut position = self.writer;
         let starting_position = position;
 
         for entry in entries {
-            self.buffer.put_slice(entry);
+            self.buffer.put(entry);
 
             let mut entry = LogEntry {
                 position,

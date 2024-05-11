@@ -1,10 +1,7 @@
 use std::io;
 
-use chrono::{TimeZone, Utc};
-use flatbuffers::InvalidFlatbuffer;
-
 use geth_common::{ExpectedRevision, Position};
-use geth_domain::binary::{Event, Events};
+use geth_domain::binary::events::Event;
 use geth_domain::parse_event;
 use geth_mikoshi::{Entry, IteratorIO};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -90,33 +87,30 @@ where
                     let event = parse_event(&entry.payload)
                         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e.to_string()))?;
 
-                    if let Some(event) = event.event_as_recorded_event() {
-                        let key = mikoshi_hash(event.stream_name().unwrap());
-                        let event = geth_domain::RecordedEvent::from(event);
-                        let revision = event.revision;
-                        let _ = subscriptions.event_committed(Entry {
-                            id: event.id,
-                            r#type: event.class,
-                            stream_name: event.stream_name,
-                            revision: event.revision,
-                            data: event.data.into(),
-                            position: Position(entry.position),
-                            created: Utc.timestamp_opt(event.created, 0).unwrap(),
-                        });
+                    match event.event.unwrap() {
+                        Event::RecordedEvent(event) => {
+                            let key = mikoshi_hash(&event.stream_name);
+                            let event = geth_domain::RecordedEvent::from(event);
+                            let revision = event.revision;
+                            let _ = subscriptions.event_committed(Entry {
+                                id: event.id,
+                                r#type: event.class,
+                                stream_name: event.stream_name,
+                                revision: event.revision,
+                                data: event.data.into(),
+                                position: Position(entry.position),
+                                created: event.created,
+                            });
 
-                        return Ok((key, revision, entry.position));
+                            Ok((key, revision, entry.position))
+                        }
+
+                        Event::StreamDeleted(event) => {
+                            let key = mikoshi_hash(&event.stream_name);
+
+                            Ok((key, event.revision, u64::MAX))
+                        }
                     }
-
-                    if let Some(event) = event.event_as_stream_deleted() {
-                        let key = mikoshi_hash(event.stream_name().unwrap());
-
-                        return Ok((key, event.revision(), u64::MAX));
-                    }
-
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidInput,
-                        "dealing with an event that we don't support",
-                    ))
                 });
 
                 if let Err(e) = chase_index.put(records) {
@@ -173,29 +167,24 @@ where
     WAL: WriteAheadLog + Send,
 {
     let logical_position = lsm.checkpoint();
-    let entries = wal.entries(logical_position).map_io(|entry| {
-        match flatbuffers::root::<Event>(&entry.payload) {
+    let entries = wal
+        .entries(logical_position)
+        .map_io(|entry| match parse_event(&entry.payload) {
             Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
 
-            Ok(evt) => {
-                if let Some(record) = evt.event_as_recorded_event() {
-                    let key = mikoshi_hash(record.stream_name().unwrap());
-                    return Ok((key, record.revision(), entry.position));
-                } else if let Some(deleted) = evt.event_as_stream_deleted() {
-                    let key = mikoshi_hash(&deleted.stream_name().unwrap());
-
-                    return Ok((key, u64::MAX, entry.position));
-                } else {
-                    // TODO - At some point we would need to use the `filter` method on `IteratorIO` instead
-                    // of raising an error.
-                    Err(io::Error::new(
-                        io::ErrorKind::InvalidData,
-                        "unsupported event in the transaction log",
-                    ))
+            Ok(evt) => match evt.event.unwrap() {
+                Event::RecordedEvent(event) => {
+                    let key = mikoshi_hash(&event.stream_name);
+                    Ok((key, event.revision, entry.position))
                 }
-            }
-        }
-    });
+
+                Event::StreamDeleted(event) => {
+                    let key = mikoshi_hash(&event.stream_name);
+
+                    Ok((key, u64::MAX, entry.position))
+                }
+            },
+        });
 
     lsm.put(entries)?;
     let writer_checkpoint = wal.write_position();
