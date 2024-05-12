@@ -1,11 +1,15 @@
+use std::io;
+
+use bytes::BytesMut;
+
+use geth_common::IteratorIO;
+use geth_mikoshi::FileSystemStorage;
+use geth_mikoshi::InMemoryStorage;
+
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
-use crate::index::{IteratorIO, Merge};
-use crate::storage::fs::FileSystemStorage;
-use crate::storage::in_mem::InMemoryStorage;
-use bytes::BytesMut;
-use std::io;
+use crate::index::Merge;
 
 mod fs;
 mod in_mem;

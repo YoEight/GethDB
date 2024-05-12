@@ -5,7 +5,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use geth_common::{ProgrammableStats, ProgrammableSummary};
-use geth_mikoshi::index::Lsm;
+use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 

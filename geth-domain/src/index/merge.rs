@@ -1,7 +1,9 @@
-use crate::index::block::BlockEntry;
-use crate::IteratorIO;
 use std::cmp::Ordering;
 use std::io;
+
+use geth_common::IteratorIO;
+
+use crate::index::block::BlockEntry;
 
 pub struct Merge<I> {
     pub iters: Vec<I>,

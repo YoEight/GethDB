@@ -6,13 +6,17 @@ use std::sync::{Arc, RwLock};
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{Direction, Revision};
+use geth_common::{Direction, IteratorIO, IteratorIOExt, Revision};
+use geth_mikoshi::hashing::mikoshi_hash;
+use geth_mikoshi::storage::{FileId, Storage};
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::index::{IteratorIO, IteratorIOExt, Merge};
+use crate::binary::events::Event;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
-use crate::storage::{FileId, Storage};
+use crate::index::Merge;
+use crate::parse_event_io;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
@@ -137,24 +141,23 @@ where
         })
     }
 
-    // Rebuilding the index is now something that requires geth-domain as we see indexing as a
-    // projection now.
-    /*pub fn rebuild<WAL: WriteAheadLog>(&self, wal: &WALRef<WAL>) -> io::Result<()> {
+    pub fn rebuild<WAL: WriteAheadLog>(&self, wal: &WALRef<WAL>) -> io::Result<()> {
         let logical_position = self.state.read().unwrap().logical_position;
-        let records = wal
-            .records(logical_position)
-            .map(|(position, record)| match record {
-                Records::StreamEventAppended(record) => {
-                    let key = mikoshi_hash(&record.event_stream_id);
-                    (key, record.revision, position)
-                }
+        let records = wal.entries(logical_position).map_io(|entry| {
+            let event = parse_event_io(&entry.payload)?;
 
-                Records::StreamDeleted(record) => {
-                    let key = mikoshi_hash(&record.event_stream_id);
+            match event.event.unwrap() {
+                Event::RecordedEvent(event) => Ok((
+                    mikoshi_hash(&event.stream_name),
+                    event.revision,
+                    entry.position,
+                )),
 
-                    (key, u64::MAX, position)
+                Event::StreamDeleted(event) => {
+                    Ok((mikoshi_hash(&event.stream_name), u64::MAX, entry.position))
                 }
-            });
+            }
+        });
 
         self.put(records)?;
 
@@ -163,7 +166,7 @@ where
         state.logical_position = writer_checkpoint;
 
         Ok(())
-    }*/
+    }
 
     pub fn ss_table_count(&self) -> usize {
         let state = self.state.read().unwrap();

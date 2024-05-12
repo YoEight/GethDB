@@ -132,13 +132,6 @@ impl<A> TestDispatch<A> {
             inner: Arc::new(Mutex::new(Vec::new())),
         }
     }
-
-    pub fn take(&self) -> Vec<A> {
-        let mut inner = self.inner.lock().unwrap();
-        let result = std::mem::take(inner.as_mut());
-
-        result
-    }
 }
 
 impl<A> CommandDispatch for TestDispatch<A>

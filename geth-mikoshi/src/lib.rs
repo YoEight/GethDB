@@ -4,11 +4,12 @@ use tokio::sync::mpsc;
 use uuid::Uuid;
 
 use geth_common::{Position, Record};
-pub use index::IteratorIO;
+
+pub use crate::storage::fs::FileSystemStorage;
+pub use crate::storage::in_mem::InMemoryStorage;
 
 mod constants;
 pub mod hashing;
-pub mod index;
 pub mod marshalling;
 pub mod storage;
 pub mod wal;

@@ -1,6 +1,6 @@
 use std::io;
 
-use geth_mikoshi::IteratorIO;
+use geth_common::IteratorIO;
 use geth_mikoshi::wal::entries::EntryIter;
 use geth_mikoshi::wal::WriteAheadLog;
 

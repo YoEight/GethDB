@@ -1,6 +1,9 @@
-use crate::index::tests::{build_mem_table, check_merge_io_result};
-use crate::index::{IteratorIOExt, Merge};
 use std::io;
+
+use geth_common::IteratorIOExt;
+
+use crate::index::tests::{build_mem_table, check_merge_io_result};
+use crate::index::Merge;
 
 #[test]
 fn test_merge_io_mem_table_1() -> io::Result<()> {

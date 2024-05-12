@@ -1,6 +1,6 @@
-use std::{fs, fs::File, io, path::PathBuf};
 use std::collections::VecDeque;
 use std::path::Path;
+use std::{fs, fs::File, io, path::PathBuf};
 
 use bytes::BytesMut;
 use chrono::Utc;
@@ -11,16 +11,15 @@ use uuid::Uuid;
 
 use geth_client::Client;
 use geth_common::{
-    DeleteResult, Direction, ExpectedRevision, Position, Propose, Record, Revision, WriteResult,
+    DeleteResult, Direction, ExpectedRevision, IteratorIO, Position, Propose, Record, Revision,
+    WriteResult,
 };
-use geth_domain::{AppendProposes, parse_event, parse_event_io, RecordedEvent};
 use geth_domain::binary::events::Event;
+use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings, RecordedEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::index::{Lsm, LsmSettings};
-use geth_mikoshi::IteratorIO;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::cli::{
     Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,
@@ -104,7 +103,7 @@ async fn main() -> eyre::Result<()> {
                             Ok(m) => WALRef::new(m),
                         };
 
-                        if let Err(e) = rebuild_index {
+                        if let Err(e) = index.rebuild(&wal) {
                             println!("ERR: Error when rebuilding index: {}", e);
                             continue;
                         }

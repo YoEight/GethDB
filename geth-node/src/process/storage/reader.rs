@@ -2,13 +2,11 @@ use std::io;
 
 use tokio::task::spawn_blocking;
 
-use geth_common::Position;
+use geth_common::{IteratorIO, Position};
 use geth_domain::binary::events::Event;
 use geth_domain::RecordedEvent;
-use geth_mikoshi::{
-    Entry, hashing::mikoshi_hash, index::IteratorIO, MikoshiStream, storage::Storage,
-};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::{hashing::mikoshi_hash, storage::Storage, Entry, MikoshiStream};
 
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::process::storage::index::StorageIndex;

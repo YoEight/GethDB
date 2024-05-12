@@ -1,11 +1,13 @@
+use std::io;
+
+use bytes::BytesMut;
+
+use geth_common::{Direction, IteratorIO, Revision};
+use geth_mikoshi::InMemoryStorage;
+
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
-use crate::index::IteratorIO;
-use crate::storage::in_mem::InMemoryStorage;
-use bytes::BytesMut;
-use geth_common::{Direction, Revision};
-use std::io;
 
 #[test]
 fn test_mem_table_get() {

@@ -3,10 +3,14 @@ use std::{fmt::Display, string::FromUtf8Error};
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
-use protocol::streams::append_resp;
-use protocol::streams::delete_resp;
 use thiserror::Error;
 use uuid::Uuid;
+
+pub use io::{IteratorIO, IteratorIOExt};
+use protocol::streams::append_resp;
+use protocol::streams::delete_resp;
+
+mod io;
 
 mod google {
     pub mod rpc {
@@ -44,6 +48,7 @@ pub mod protocol {
                 ReadEvent,
             },
         };
+
         pub mod server {
             pub use super::super::super::geth::protocol::streams::streams_server::*;
         }

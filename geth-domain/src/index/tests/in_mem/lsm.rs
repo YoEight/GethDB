@@ -1,9 +1,10 @@
+use std::io;
+
+use geth_common::{Direction, IteratorIO, Revision};
+use geth_mikoshi::InMemoryStorage;
+
 use crate::index::lsm::{Lsm, LsmSettings};
 use crate::index::mem_table::MEM_TABLE_ENTRY_SIZE;
-use crate::index::IteratorIO;
-use crate::storage::in_mem::InMemoryStorage;
-use geth_common::{Direction, Revision};
-use std::io;
 
 #[test]
 fn test_in_mem_lsm_get() -> io::Result<()> {

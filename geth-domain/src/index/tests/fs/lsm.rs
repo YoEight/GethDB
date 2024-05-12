@@ -1,13 +1,15 @@
+use std::io;
+use std::path::PathBuf;
+
+use bytes::BytesMut;
+use temp_testdir::TempDir;
+
+use geth_common::{Direction, IteratorIO, Revision};
+use geth_mikoshi::FileSystemStorage;
+
 use crate::index::lsm::{Lsm, LsmSettings};
 use crate::index::mem_table::MEM_TABLE_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
-use crate::index::IteratorIO;
-use crate::storage::fs::FileSystemStorage;
-use bytes::BytesMut;
-use geth_common::{Direction, Revision};
-use std::io;
-use std::path::PathBuf;
-use temp_testdir::TempDir;
 
 #[test]
 fn test_fs_lsm_get() -> io::Result<()> {

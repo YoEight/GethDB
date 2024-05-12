@@ -25,3 +25,6 @@ path = "../geth-common"
 
 [build-dependencies]
 prost-build = "0.12"
+
+[dev-dependencies]
+temp_testdir = "0.2"

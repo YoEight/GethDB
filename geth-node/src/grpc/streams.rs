@@ -9,18 +9,18 @@ use tonic::Status;
 use tonic::Streaming;
 use uuid::Uuid;
 
-use geth_common::{Direction, ExpectedRevision, Propose};
+use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
 use geth_common::protocol::{
     self,
-    Empty,
     streams::{
-        append_req, append_resp, AppendReq, AppendResp,
-        CountOption, delete_resp, DeleteReq, DeleteResp, KillProgReq, KillProgResp, list_progs_resp::ProgrammableSubscriptionSummary,
-        ListProgsResp, ProgStatsReq, ProgStatsResp, read_resp, ReadEvent, ReadReq, ReadResp,
-        RecordedEvent, server::Streams, StreamOption, Success,
+        append_req, append_resp, delete_resp, list_progs_resp::ProgrammableSubscriptionSummary,
+        read_resp, server::Streams, AppendReq, AppendResp, CountOption, DeleteReq, DeleteResp,
+        KillProgReq, KillProgResp, ListProgsResp, ProgStatsReq, ProgStatsResp, ReadEvent, ReadReq,
+        ReadResp, RecordedEvent, StreamOption, Success,
     },
+    Empty,
 };
-use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
+use geth_common::{Direction, ExpectedRevision, Propose};
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::WriteAheadLog;
 

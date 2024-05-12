@@ -5,11 +5,14 @@ use chrono::{DateTime, TimeZone, Utc};
 use prost::Message;
 use uuid::Uuid;
 
+pub use index::{Lsm, LsmSettings};
+
 pub use crate::append_propose::AppendProposes;
 use crate::binary::events::Events;
 
 mod append_propose;
 pub mod binary;
+mod index;
 mod iter;
 
 #[derive(Copy, Clone, Eq, PartialEq)]

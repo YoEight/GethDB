@@ -1,13 +1,12 @@
 use std::io;
 
-use geth_common::{ExpectedRevision, Position};
+use geth_common::{ExpectedRevision, IteratorIO, Position};
 use geth_domain::binary::events::Event;
-use geth_domain::parse_event;
-use geth_mikoshi::{Entry, IteratorIO};
+use geth_domain::{parse_event, Lsm};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::index::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::Entry;
 
 use crate::process::storage::RevisionCache;
 use crate::process::subscriptions::SubscriptionsClient;

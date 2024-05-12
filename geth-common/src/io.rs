@@ -1,16 +1,5 @@
 use std::io;
 
-pub use lsm::{Lsm, LsmSettings};
-pub use merge::Merge;
-
-pub(crate) mod block;
-pub(crate) mod lsm;
-mod mem_table;
-mod merge;
-mod ss_table;
-#[cfg(test)]
-mod tests;
-
 pub trait IteratorIO {
     type Item;
 
@@ -159,10 +148,4 @@ where
     fn lift(self) -> Lift<Self> {
         Lift { inner: self }
     }
-}
-
-#[derive(Copy, Clone)]
-pub struct IndexedPosition {
-    pub revision: u64,
-    pub position: u64,
 }
