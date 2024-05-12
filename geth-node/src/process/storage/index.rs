@@ -156,38 +156,3 @@ where
         let _ = self.chase_sender.send(from_position);
     }
 }
-
-// TODO - We need to move the index out of mikoshi because after thinking about it, indexing is a
-// projection of the transaction log, not something related it. For example, the index can be
-// rebuilt at any given time.
-pub fn rebuild_index<S, WAL>(lsm: &Lsm<S>, wal: &WALRef<WAL>) -> io::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-    WAL: WriteAheadLog + Send,
-{
-    let logical_position = lsm.checkpoint();
-    let entries = wal
-        .entries(logical_position)
-        .map_io(|entry| match parse_event(&entry.payload) {
-            Err(e) => Err(io::Error::new(io::ErrorKind::InvalidData, e)),
-
-            Ok(evt) => match evt.event.unwrap() {
-                Event::RecordedEvent(event) => {
-                    let key = mikoshi_hash(&event.stream_name);
-                    Ok((key, event.revision, entry.position))
-                }
-
-                Event::StreamDeleted(event) => {
-                    let key = mikoshi_hash(&event.stream_name);
-
-                    Ok((key, u64::MAX, entry.position))
-                }
-            },
-        });
-
-    lsm.put(entries)?;
-    let writer_checkpoint = wal.write_position();
-    lsm.set_checkpoint(writer_checkpoint);
-
-    Ok(())
-}

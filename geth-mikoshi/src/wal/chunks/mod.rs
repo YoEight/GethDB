@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::{FileCategory, FileId, Storage};
-use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
+use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;

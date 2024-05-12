@@ -8,7 +8,6 @@ use geth_mikoshi::storage::FileSystemStorage;
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
 use geth_mikoshi::wal::WALRef;
 
-use crate::process::storage::index::rebuild_index;
 use crate::process::Processes;
 
 mod bus;
@@ -28,7 +27,7 @@ async fn main() -> eyre::Result<()> {
     let index = Lsm::load(LsmSettings::default(), storage.clone())?;
 
     let wal = WALRef::new(ChunkBasedWAL::load(storage)?);
-    rebuild_index(&index, &wal)?;
+    index.rebuild(&wal)?;
 
     let processes = Processes::new(wal, index);
     grpc::start_server(processes).await?;
