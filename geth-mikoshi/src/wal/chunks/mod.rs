@@ -5,10 +5,10 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::{FileCategory, FileId, Storage};
+use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;
@@ -179,22 +179,19 @@ where
 
                 position += chunk.remaining_space_from(position);
                 chunk = self.new_chunk();
-
-                entry.position = position;
-                let local_offset = chunk.raw_position(position);
-                position += entry.size() as u64;
-                entry.put(&mut self.buffer);
-                self.storage.write_to(
-                    chunk.file_id(),
-                    local_offset,
-                    self.buffer.split().freeze(),
-                )?;
-
-                self.writer = position;
             }
 
-            flush_writer_chk(&self.storage, self.writer)?;
+            entry.position = position;
+            let local_offset = chunk.raw_position(position);
+            position += entry.size() as u64;
+            entry.put(&mut self.buffer);
+            self.storage
+                .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
+
+            self.writer = position;
         }
+
+        flush_writer_chk(&self.storage, self.writer)?;
 
         Ok(LogReceipt {
             start_position: starting_position,
