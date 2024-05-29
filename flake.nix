@@ -26,11 +26,18 @@
       devShells = forEachSupportedSystem ({ pkgs }: {
         default = pkgs.mkShell {
           packages = with pkgs; [
-	    rustup
+	    # rustup
+	    rustToolchain
             openssl
             pkg-config
+	    cargo-deny
+	    cargo-edit
+	    cargo-watch
+	    rust-analyzer
 	    protobuf_26
           ];
+
+	  RUST_SRC_PATH = "${pkgs.rust.packages.stable.rustPlatform.rustLibSrc}";
         };
       });
     };
