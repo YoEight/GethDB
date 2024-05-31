@@ -180,6 +180,25 @@ impl From<ReadStream> for operation_in::ReadStream {
     }
 }
 
+pub struct SubscribeToProgram {
+    pub name: String,
+    pub source: String,
+}
+
+impl From<SubscribeToProgram> for operation_in::subscribe::Program {
+    fn from(value: SubscribeToProgram) -> Self {
+        Self {
+            name: value.name,
+            source: value.source,
+        }
+    }
+}
+
+pub struct SubscribeToStream {
+    pub stream_name: String,
+    pub start: Revision<u64>,
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Revision<A> {
     Start,
@@ -211,6 +230,16 @@ impl From<Revision<u64>> for operation_in::read_stream::Start {
             Revision::Start => operation_in::read_stream::Start::Beginning(()),
             Revision::End => operation_in::read_stream::Start::End(()),
             Revision::Revision(r) => operation_in::read_stream::Start::Revision(r),
+        }
+    }
+}
+
+impl From<Revision<u64>> for operation_in::subscribe::stream::Start {
+    fn from(value: Revision<u64>) -> Self {
+        match value {
+            Revision::Start => operation_in::subscribe::stream::Start::Beginning(()),
+            Revision::End => operation_in::subscribe::stream::Start::End(()),
+            Revision::Revision(r) => operation_in::subscribe::stream::Start::Revision(r),
         }
     }
 }
