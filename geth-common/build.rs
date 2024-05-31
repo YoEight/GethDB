@@ -2,7 +2,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     tonic_build::configure()
         .build_server(true)
         .build_client(true)
-        .compile(&["../protos/streams.proto"], &["../protos/"])?;
+        .bytes([
+            ".geth.OperationIn.AppendStream.Propose.payload",
+            ".geth.OperationIn.AppendStream.Propose.metadata",
+        ])
+        .compile(
+            &["../protos/streams.proto", "../protos/protocol.proto"],
+            &["../protos/"],
+        )?;
 
     Ok(())
 }

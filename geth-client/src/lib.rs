@@ -1,31 +1,34 @@
-mod types;
+use std::collections::HashMap;
 
 use chrono::{TimeZone, Utc};
 use futures_util::TryStreamExt;
-use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
-use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
-use geth_common::protocol::streams::{
-    delete_req, delete_resp, DeleteReq, KillProgReq, ProgStatsReq,
+use tonic::{
+    codegen::StdError,
+    Request,
+    Streaming, transport::{self, Channel, Endpoint},
 };
-use geth_common::protocol::Empty;
+use uuid::Uuid;
+
 use geth_common::{
+    DeleteResult,
+    Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary, Propose,
     protocol::streams::{
         append_req::{self, ProposedMessage},
         append_resp,
+        AppendReq,
         client::StreamsClient,
-        read_req::{self, options::StreamOptions},
-        read_resp, AppendReq, ReadReq, ReadResp,
-    },
-    DeleteResult, Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary,
-    Propose, Record, Revision, WriteResult, WrongExpectedRevisionError,
+        read_req::{self, options::StreamOptions}, read_resp, ReadReq, ReadResp,
+    }, Record, Revision, WriteResult, WrongExpectedRevisionError,
 };
-use std::collections::HashMap;
-use tonic::{
-    codegen::StdError,
-    transport::{self, Channel, Endpoint},
-    Request, Streaming,
+use geth_common::protocol::Empty;
+use geth_common::protocol::streams::{
+    delete_req, delete_resp, DeleteReq, KillProgReq, ProgStatsReq,
 };
-use uuid::Uuid;
+use geth_common::protocol::streams::read_req::options::{Programmable, SubscriptionOptions};
+use geth_common::protocol::streams::read_req::options::subscription_options::SubKind;
+
+mod next;
+mod types;
 
 #[derive(Clone)]
 pub struct Client {

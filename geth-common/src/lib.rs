@@ -10,6 +10,9 @@ pub use io::{IteratorIO, IteratorIOExt};
 use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
+use crate::generated::next;
+use crate::generated::next::protocol::operation_in;
+
 mod io;
 
 mod google {
@@ -18,7 +21,13 @@ mod google {
     }
 }
 
-mod geth {
+pub mod generated {
+    pub mod next {
+        pub mod protocol {
+            include!(concat!(env!("OUT_DIR"), "/geth.rs"));
+        }
+    }
+
     pub mod protocol {
         include!(concat!(env!("OUT_DIR"), "/event_store.client.rs"));
         pub mod streams {
@@ -28,34 +37,47 @@ mod geth {
 }
 
 pub mod protocol {
-    pub use super::geth::protocol::{Empty, StreamIdentifier, Uuid};
+    pub use super::generated::protocol::{Empty, StreamIdentifier, Uuid};
 
     pub mod uuid {
-        pub use super::super::geth::protocol::uuid::*;
+        pub use super::super::generated::protocol::uuid::*;
     }
 
     pub mod streams {
-        pub use super::super::geth::protocol::streams::read_req::options::{
-            stream_options::RevisionOption, CountOption, StreamOption,
-        };
-        pub use super::super::geth::protocol::streams::*;
-        pub use super::super::geth::protocol::streams::{
+        pub use super::super::generated::protocol::streams::*;
+        pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, success::CurrentRevisionOption, Success},
+            append_resp::{self, Success, success::CurrentRevisionOption},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
         };
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            CountOption, stream_options::RevisionOption, StreamOption,
+        };
 
         pub mod server {
-            pub use super::super::super::geth::protocol::streams::streams_server::*;
+            pub use super::super::super::generated::protocol::streams::streams_server::*;
         }
 
         pub mod client {
-            pub use super::super::super::geth::protocol::streams::streams_client::*;
+            pub use super::super::super::generated::protocol::streams::streams_client::*;
         }
+    }
+}
+
+impl From<Uuid> for next::protocol::Ident {
+    fn from(value: Uuid) -> Self {
+        let (most, least) = value.as_u64_pair();
+        Self { most, least }
+    }
+}
+
+impl From<next::protocol::Ident> for Uuid {
+    fn from(value: next::protocol::Ident) -> Self {
+        Uuid::from_u64_pair(value.most, value.least)
     }
 }
 
@@ -110,6 +132,54 @@ fn grpc_to_uuid(value: protocol::Uuid) -> Result<Uuid, uuid::Error> {
     }
 }
 
+pub struct AppendStream {
+    pub stream_name: String,
+    pub events: Vec<Propose>,
+    pub expected_revision: ExpectedRevision,
+}
+
+impl From<AppendStream> for operation_in::AppendStream {
+    fn from(value: AppendStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            events: value.events.into_iter().map(|p| p.into()).collect(),
+            expected_revision: Some(value.expected_revision.into()),
+        }
+    }
+}
+
+pub struct DeleteStream {
+    pub stream_name: String,
+    pub expected_revision: ExpectedRevision,
+}
+
+impl From<DeleteStream> for operation_in::DeleteStream {
+    fn from(value: DeleteStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            expected_revision: Some(value.expected_revision.into()),
+        }
+    }
+}
+
+pub struct ReadStream {
+    pub stream_name: String,
+    pub direction: Direction,
+    pub revision: Revision<u64>,
+    pub max_count: u64,
+}
+
+impl From<ReadStream> for operation_in::ReadStream {
+    fn from(value: ReadStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            max_count: value.max_count,
+            direction: Some(value.direction.into()),
+            start: Some(value.revision.into()),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum Revision<A> {
     Start,
@@ -135,6 +205,16 @@ impl Revision<u64> {
     }
 }
 
+impl From<Revision<u64>> for operation_in::read_stream::Start {
+    fn from(value: Revision<u64>) -> Self {
+        match value {
+            Revision::Start => operation_in::read_stream::Start::Beginning(()),
+            Revision::End => operation_in::read_stream::Start::End(()),
+            Revision::Revision(r) => operation_in::read_stream::Start::Revision(r),
+        }
+    }
+}
+
 impl<D: Display> Display for Revision<D> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -149,6 +229,15 @@ impl<D: Display> Display for Revision<D> {
 pub enum Direction {
     Forward,
     Backward,
+}
+
+impl From<Direction> for operation_in::read_stream::Direction {
+    fn from(value: Direction) -> Self {
+        match value {
+            Direction::Forward => operation_in::read_stream::Direction::Forwards(()),
+            Direction::Backward => operation_in::read_stream::Direction::Backwards(()),
+        }
+    }
 }
 
 impl TryFrom<i32> for Direction {
@@ -179,6 +268,17 @@ pub struct Propose {
     pub id: Uuid,
     pub r#type: String,
     pub data: Bytes,
+}
+
+impl From<Propose> for next::protocol::operation_in::append_stream::Propose {
+    fn from(value: Propose) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            class: value.r#type,
+            payload: value.data,
+            metadata: Default::default(),
+        }
+    }
 }
 
 #[derive(Debug)]
@@ -217,6 +317,40 @@ impl Display for ExpectedRevision {
             ExpectedRevision::NoStream => write!(f, "NoStream"),
             ExpectedRevision::Any => write!(f, "Any"),
             ExpectedRevision::StreamExists => write!(f, "StreamExists"),
+        }
+    }
+}
+
+impl From<ExpectedRevision> for operation_in::append_stream::ExpectedRevision {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(r) => {
+                operation_in::append_stream::ExpectedRevision::Revision(r)
+            }
+            ExpectedRevision::NoStream => {
+                operation_in::append_stream::ExpectedRevision::NoStream(())
+            }
+            ExpectedRevision::Any => operation_in::append_stream::ExpectedRevision::Any(()),
+            ExpectedRevision::StreamExists => {
+                operation_in::append_stream::ExpectedRevision::StreamExists(())
+            }
+        }
+    }
+}
+
+impl From<ExpectedRevision> for operation_in::delete_stream::ExpectedRevision {
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(r) => {
+                operation_in::delete_stream::ExpectedRevision::Revision(r)
+            }
+            ExpectedRevision::NoStream => {
+                operation_in::delete_stream::ExpectedRevision::NoStream(())
+            }
+            ExpectedRevision::Any => operation_in::delete_stream::ExpectedRevision::Any(()),
+            ExpectedRevision::StreamExists => {
+                operation_in::delete_stream::ExpectedRevision::StreamExists(())
+            }
         }
     }
 }
