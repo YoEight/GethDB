@@ -148,8 +148,10 @@ message OperationOut {
         Ident id = 1;
         string stream_name = 2;
         string class = 3;
-        bytes payload = 4;
-        bytes metadata = 5;
+        uint64 revision = 4;
+        uint64 position = 5;
+        bytes payload = 6;
+        bytes metadata = 7;
       }
     }
 

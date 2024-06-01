@@ -11,7 +11,9 @@ use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::operation_in;
+use crate::generated::next::protocol::{operation_in, operation_out};
+use crate::generated::next::protocol::operation_out::append_stream_completed;
+use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
 
 mod io;
 
@@ -180,6 +182,25 @@ impl From<ReadStream> for operation_in::ReadStream {
     }
 }
 
+pub enum Subscribe {
+    ToProgram(SubscribeToProgram),
+    ToStream(SubscribeToStream),
+}
+
+impl From<Subscribe> for operation_in::Subscribe {
+    fn from(value: Subscribe) -> Self {
+        match value {
+            Subscribe::ToProgram(v) => operation_in::Subscribe {
+                to: Some(operation_in::subscribe::To::Program(v.into())),
+            },
+
+            Subscribe::ToStream(v) => operation_in::Subscribe {
+                to: Some(operation_in::subscribe::To::Stream(v.into())),
+            },
+        }
+    }
+}
+
 pub struct SubscribeToProgram {
     pub name: String,
     pub source: String,
@@ -197,6 +218,15 @@ impl From<SubscribeToProgram> for operation_in::subscribe::Program {
 pub struct SubscribeToStream {
     pub stream_name: String,
     pub start: Revision<u64>,
+}
+
+impl From<SubscribeToStream> for operation_in::subscribe::Stream {
+    fn from(value: SubscribeToStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            start: Some(value.start.into()),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug)]
@@ -240,6 +270,23 @@ impl From<Revision<u64>> for operation_in::subscribe::stream::Start {
             Revision::Start => operation_in::subscribe::stream::Start::Beginning(()),
             Revision::End => operation_in::subscribe::stream::Start::End(()),
             Revision::Revision(r) => operation_in::subscribe::stream::Start::Revision(r),
+        }
+    }
+}
+
+impl From<append_stream_completed::error::wrong_expected_revision::CurrentRevision>
+    for ExpectedRevision
+{
+    fn from(
+        value: append_stream_completed::error::wrong_expected_revision::CurrentRevision,
+    ) -> Self {
+        match value {
+            append_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+                _,
+            ) => ExpectedRevision::NoStream,
+            append_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+                v,
+            ) => ExpectedRevision::Revision(v),
         }
     }
 }
@@ -320,6 +367,19 @@ pub struct Record {
     pub data: Bytes,
 }
 
+impl From<operation_out::stream_read::events_appeared::RecordedEvent> for Record {
+    fn from(value: operation_out::stream_read::events_appeared::RecordedEvent) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            r#type: value.class,
+            stream_name: value.stream_name,
+            position: Position(value.position),
+            revision: value.revision,
+            data: value.payload,
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ExpectedRevision {
     Revision(u64),
@@ -380,6 +440,29 @@ impl From<ExpectedRevision> for operation_in::delete_stream::ExpectedRevision {
             ExpectedRevision::StreamExists => {
                 operation_in::delete_stream::ExpectedRevision::StreamExists(())
             }
+        }
+    }
+}
+
+impl From<append_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+    for ExpectedRevision
+{
+    fn from(
+        value: append_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+    ) -> Self {
+        match value {
+            append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+                ExpectedRevision::Any
+            }
+            append_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+                ExpectedRevision::StreamExists
+            }
+            append_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+                _,
+            ) => ExpectedRevision::NoStream,
+            append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+                v,
+            ) => ExpectedRevision::Revision(v),
         }
     }
 }
@@ -809,3 +892,57 @@ pub struct ProgrammableSummary {
     pub name: String,
     pub started: DateTime<Utc>,
 }
+
+pub enum AppendStreamCompleted {
+    WriteResult(WriteResult),
+    Error(AppendError),
+}
+
+pub enum AppendError {
+    WrongExpectedRevision(WrongExpectedRevisionError),
+}
+
+impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
+    fn from(value: operation_out::AppendStreamCompleted) -> Self {
+        match value.append_result.unwrap() {
+            AppendResult::WriteResult(r) => AppendStreamCompleted::WriteResult(WriteResult {
+                next_expected_version: ExpectedRevision::Revision(r.next_revision),
+                position: Position(r.position),
+                next_logical_position: 0,
+            }),
+
+            AppendResult::Error(e) => match e.error.unwrap() {
+                append_stream_completed::error::Error::WrongRevision(e) => {
+                    AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
+                        WrongExpectedRevisionError {
+                            expected: e.expected_revision.unwrap().into(),
+                            current: e.current_revision.unwrap().into(),
+                        },
+                    ))
+                }
+            },
+        }
+    }
+}
+
+pub enum StreamRead {
+    EndOfStream,
+    EventsAppeared(Vec<Record>),
+    Error(StreamReadError),
+}
+
+impl From<operation_out::StreamRead> for StreamRead {
+    fn from(value: operation_out::StreamRead) -> Self {
+        match value.read_result.unwrap() {
+            operation_out::stream_read::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
+            operation_out::stream_read::ReadResult::EventsAppeared(e) => {
+                StreamRead::EventsAppeared(e.events.into_iter().map(|r| r.into()).collect())
+            }
+            operation_out::stream_read::ReadResult::Error(_) => {
+                StreamRead::Error(StreamReadError {})
+            }
+        }
+    }
+}
+
+pub struct StreamReadError {}
