@@ -5,8 +5,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .bytes([
             ".geth.OperationIn.AppendStream.Propose.payload",
             ".geth.OperationIn.AppendStream.Propose.metadata",
-            ".geth.OperationOut.StreamRead.EventsAppeared.RecordedEvent.payload",
-            ".geth.OperationOut.StreamRead.EventsAppeared.RecordedEvent.metadata",
+            ".geth.RecordedEvent.payload",
+            ".geth.RecordedEvent.metadata",
         ])
         .compile(
             &["../protos/streams.proto", "../protos/protocol.proto"],

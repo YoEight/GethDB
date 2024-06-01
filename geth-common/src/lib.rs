@@ -12,7 +12,9 @@ use protocol::streams::delete_resp;
 
 use crate::generated::next;
 use crate::generated::next::protocol::{operation_in, operation_out};
-use crate::generated::next::protocol::operation_out::append_stream_completed;
+use crate::generated::next::protocol::operation_out::{
+    append_stream_completed, subscription_event,
+};
 use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
 
 mod io;
@@ -367,8 +369,8 @@ pub struct Record {
     pub data: Bytes,
 }
 
-impl From<operation_out::stream_read::events_appeared::RecordedEvent> for Record {
-    fn from(value: operation_out::stream_read::events_appeared::RecordedEvent) -> Self {
+impl From<next::protocol::RecordedEvent> for Record {
+    fn from(value: next::protocol::RecordedEvent) -> Self {
         Self {
             id: value.id.unwrap().into(),
             r#type: value.class,
@@ -946,3 +948,43 @@ impl From<operation_out::StreamRead> for StreamRead {
 }
 
 pub struct StreamReadError {}
+
+pub enum SubscriptionEvent {
+    Confirmation(SubscriptionConfirmation),
+    EventsAppeared(Vec<Record>),
+    CaughtUp,
+    Error(SubscriptionError),
+}
+
+pub enum SubscriptionConfirmation {
+    StreamName(String),
+    ProcessId(Uuid),
+}
+
+pub struct SubscriptionError {}
+
+impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
+    fn from(value: operation_out::SubscriptionEvent) -> Self {
+        match value.event.unwrap() {
+            subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
+                subscription_event::confirmation::Kind::StreamName(s) => {
+                    SubscriptionEvent::Confirmation(SubscriptionConfirmation::StreamName(s))
+                }
+                subscription_event::confirmation::Kind::ProcessId(p) => {
+                    SubscriptionEvent::Confirmation(SubscriptionConfirmation::ProcessId(p.into()))
+                }
+            },
+            subscription_event::Event::EventsAppeared(ea) => {
+                SubscriptionEvent::EventsAppeared(ea.events.into_iter().map(|r| r.into()).collect())
+            }
+            subscription_event::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
+            subscription_event::Event::Error(e) => SubscriptionEvent::Error(e.into()),
+        }
+    }
+}
+
+impl From<subscription_event::Error> for SubscriptionError {
+    fn from(_: subscription_event::Error) -> Self {
+        SubscriptionError {}
+    }
+}

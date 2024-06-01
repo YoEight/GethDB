@@ -2,6 +2,7 @@ use tokio::sync::mpsc::UnboundedReceiver;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, ReadStream, StreamRead, Subscribe,
+    SubscriptionEvent,
 };
 
 enum Msg {
@@ -19,6 +20,7 @@ enum Request {
 enum Response {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
+    SubscriptionEvent(SubscriptionEvent),
 }
 
 async fn multiplex_loop(mut receiver: UnboundedReceiver<Msg>) {

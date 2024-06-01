@@ -12,6 +12,16 @@ message Ident {
   uint64 least = 2;
 }
 
+message RecordedEvent {
+  Ident id = 1;
+  string stream_name = 2;
+  string class = 3;
+  uint64 revision = 4;
+  uint64 position = 5;
+  bytes payload = 6;
+  bytes metadata = 7;
+}
+
 message OperationIn {
   Ident correlation = 1;
 
@@ -143,16 +153,6 @@ message OperationOut {
 
     message EventsAppeared {
       repeated RecordedEvent events = 1;
-
-      message RecordedEvent {
-        Ident id = 1;
-        string stream_name = 2;
-        string class = 3;
-        uint64 revision = 4;
-        uint64 position = 5;
-        bytes payload = 6;
-        bytes metadata = 7;
-      }
     }
 
     message Error {
@@ -177,14 +177,6 @@ message OperationOut {
 
     message EventsAppeared {
       repeated RecordedEvent events = 1;
-
-      message RecordedEvent {
-        Ident id = 1;
-        string stream_name = 2;
-        string class = 3;
-        bytes payload = 4;
-        bytes metadata = 5;
-      }
     }
 
     message CaughtUp {}
