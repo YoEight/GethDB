@@ -11,7 +11,7 @@ use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::{operation_in, operation_out};
+use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
 use crate::generated::next::protocol::operation_out::{
     append_stream_completed, subscription_event,
 };
@@ -134,6 +134,11 @@ fn grpc_to_uuid(value: protocol::Uuid) -> Result<Uuid, uuid::Error> {
 
         protocol::uuid::Value::String(s) => Uuid::try_from(s.as_str()),
     }
+}
+
+pub struct EndPoint {
+    pub host: String,
+    pub port: u16,
 }
 
 pub struct AppendStream {
@@ -287,6 +292,23 @@ impl From<append_stream_completed::error::wrong_expected_revision::CurrentRevisi
                 _,
             ) => ExpectedRevision::NoStream,
             append_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+                v,
+            ) => ExpectedRevision::Revision(v),
+        }
+    }
+}
+
+impl From<delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
+for ExpectedRevision
+{
+    fn from(
+        value: delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
+    ) -> Self {
+        match value {
+            delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+                _,
+            ) => ExpectedRevision::NoStream,
+            delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -469,6 +491,28 @@ impl From<append_stream_completed::error::wrong_expected_revision::ExpectedRevis
     }
 }
 
+impl From<delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+for ExpectedRevision
+{
+    fn from(
+        value: delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+    ) -> Self {
+        match value {
+            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+                ExpectedRevision::Any
+            }
+            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+                ExpectedRevision::StreamExists
+            }
+            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+                _,
+            ) => ExpectedRevision::NoStream,
+            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+                v,
+            ) => ExpectedRevision::Revision(v),
+        }
+    }
+}
 #[derive(Error, Debug)]
 pub struct WrongExpectedRevisionError {
     pub expected: ExpectedRevision,
@@ -986,5 +1030,43 @@ impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
 impl From<subscription_event::Error> for SubscriptionError {
     fn from(_: subscription_event::Error) -> Self {
         SubscriptionError {}
+    }
+}
+
+pub enum DeleteStreamCompleted {
+    DeleteResult(WriteResult),
+    Error(DeleteError),
+}
+pub enum DeleteError {
+    WrongExpectedRevision(WrongExpectedRevisionError),
+    NotLeaderException(EndPoint),
+}
+
+impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
+    fn from(value: next::protocol::DeleteStreamCompleted) -> Self {
+        match value.result.unwrap() {
+            delete_stream_completed::Result::WriteResult(r) => DeleteStreamCompleted::DeleteResult(WriteResult {
+                next_expected_version: ExpectedRevision::Revision(r.next_revision),
+                position: Position(r.position),
+                next_logical_position: 0,
+            }),
+
+            delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
+                delete_stream_completed::error::Error::WrongRevision(e) => {
+                    DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
+                        WrongExpectedRevisionError {
+                            expected: e.expected_revision.unwrap().into(),
+                            current: e.current_revision.unwrap().into(),
+                        },
+                    ))
+                }
+                delete_stream_completed::error::Error::NotLeader(e) => {
+                    DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
+                        host: e.leader_host,
+                        port: e.leader_port as u16,
+                    }))
+                }
+            },
+        }
     }
 }
