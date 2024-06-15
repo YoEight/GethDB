@@ -1,28 +1,32 @@
 use futures_util::StreamExt;
-use tokio::sync::{mpsc, oneshot};
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::{mpsc, oneshot};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
+use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
+use geth_common::generated::next::protocol::{operation_out, OperationIn};
 use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, EndPoint, ReadStream,
     StreamRead, Subscribe, SubscriptionEvent,
 };
-use geth_common::generated::next::protocol::{operation_out, OperationIn};
-use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
+
+mod driver;
 
 enum Msg {
-    Request(Request),
-    Response(Response),
+    Command(Command),
+    Event(Event),
 }
 
-pub struct Request {
+#[derive(Clone)]
+pub struct Command {
     pub correlation: Uuid,
     pub operation: Operation,
-    pub resp: oneshot::Sender<Response>,
+    pub resp: UnboundedSender<Event>,
 }
 
+#[derive(Clone)]
 enum Operation {
     AppendStream(AppendStream),
     DeleteStream(DeleteStream),
@@ -30,7 +34,7 @@ enum Operation {
     Subscribe(Subscribe),
 }
 
-struct Response {
+struct Event {
     correlation: Uuid,
     response: Reply,
 }
@@ -40,12 +44,13 @@ enum Reply {
     StreamRead(StreamRead),
     SubscriptionEvent(SubscriptionEvent),
     DeleteStreamCompleted(DeleteStreamCompleted),
+    Errored,
 }
 
 type Connection = UnboundedSender<OperationIn>;
 type Mailbox = UnboundedSender<Msg>;
 
-async fn set_up_connection(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
+async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
     let mut client = ProtocolClient::connect(uri).await?;
     let (connection, stream_request) = mpsc::unbounded_channel();
 
@@ -62,32 +67,33 @@ async fn set_up_connection(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connectio
                     break;
                 }
 
-                Ok(reply) => match reply.operation.unwrap() {
-                    operation_out::Operation::AppendCompleted(resp) => {
-                        // mailbox.send(Msg::Response(Response {
-                        //     correlation: resp.correlation,
-                        //     response: Reply::AppendStreamCompleted(resp),
-                        // }));
+                Ok(reply) => {
+                    let correlation = reply.correlation.unwrap().into();
+                    let reply = match reply.operation.unwrap() {
+                        operation_out::Operation::AppendCompleted(resp) => {
+                            Reply::AppendStreamCompleted(resp.into())
+                        }
+                        operation_out::Operation::StreamRead(resp) => {
+                            Reply::StreamRead(resp.into())
+                        }
+                        operation_out::Operation::SubscriptionEvent(resp) => {
+                            Reply::SubscriptionEvent(resp.into())
+                        }
+                        operation_out::Operation::DeleteCompleted(resp) => {
+                            Reply::DeleteStreamCompleted(resp.into())
+                        }
+                    };
+
+                    let response = Event {
+                        correlation,
+                        response: reply,
+                    };
+
+                    if mailbox.send(Msg::Event(response)).is_err() {
+                        tracing::warn!("seems main connection is closed");
+                        break;
                     }
-                    operation_out::Operation::StreamRead(resp) => {
-                        // mailbox.send(Msg::Response(Response {
-                        //     correlation: resp.correlation,
-                        //     response: Reply::StreamRead(resp),
-                        // }));
-                    }
-                    operation_out::Operation::SubscriptionEvent(resp) => {
-                        // mailbox.send(Msg::Response(Response {
-                        //     correlation: resp.correlation,
-                        //     response: Reply::SubscriptionEvent(resp),
-                        // }));
-                    }
-                    operation_out::Operation::DeleteCompleted(resp) => {
-                        // mailbox.send(Msg::Response(Response {
-                        //     correlation: resp.correlation,
-                        //     response: Reply::DeleteStreamCompleted(resp),
-                        // }));
-                    }
-                },
+                }
             }
         }
     });
@@ -110,7 +116,7 @@ async fn multiplex_loop(mut endpoint: EndPoint, mut receiver: UnboundedReceiver<
 
     while let Some(msg) = receiver.recv().await {
         match msg {
-            Msg::Request(req) => {
+            Msg::Command(req) => {
                 match req.operation {
                     Operation::AppendStream(req) => {
                         // handle append stream request
@@ -126,7 +132,7 @@ async fn multiplex_loop(mut endpoint: EndPoint, mut receiver: UnboundedReceiver<
                     }
                 }
             }
-            Msg::Response(_) => {}
+            Msg::Event(_) => {}
         }
     }
 }

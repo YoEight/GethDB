@@ -11,11 +11,11 @@ use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
+use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
 use crate::generated::next::protocol::operation_out::{
     append_stream_completed, subscription_event,
 };
-use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
+use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
 
 mod io;
 
@@ -48,18 +48,18 @@ pub mod protocol {
     }
 
     pub mod streams {
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            stream_options::RevisionOption, CountOption, StreamOption,
+        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, Success, success::CurrentRevisionOption},
+            append_resp::{self, success::CurrentRevisionOption, Success},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
-        };
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {
@@ -141,6 +141,7 @@ pub struct EndPoint {
     pub port: u16,
 }
 
+#[derive(Clone)]
 pub struct AppendStream {
     pub stream_name: String,
     pub events: Vec<Propose>,
@@ -157,6 +158,13 @@ impl From<AppendStream> for operation_in::AppendStream {
     }
 }
 
+impl From<AppendStream> for operation_in::Operation {
+    fn from(value: AppendStream) -> Self {
+        operation_in::Operation::AppendStream(value.into())
+    }
+}
+
+#[derive(Clone)]
 pub struct DeleteStream {
     pub stream_name: String,
     pub expected_revision: ExpectedRevision,
@@ -171,6 +179,13 @@ impl From<DeleteStream> for operation_in::DeleteStream {
     }
 }
 
+impl From<DeleteStream> for operation_in::Operation {
+    fn from(value: DeleteStream) -> Self {
+        operation_in::Operation::DeleteStream(value.into())
+    }
+}
+
+#[derive(Clone)]
 pub struct ReadStream {
     pub stream_name: String,
     pub direction: Direction,
@@ -189,6 +204,13 @@ impl From<ReadStream> for operation_in::ReadStream {
     }
 }
 
+impl From<ReadStream> for operation_in::Operation {
+    fn from(value: ReadStream) -> Self {
+        operation_in::Operation::ReadStream(value.into())
+    }
+}
+
+#[derive(Clone)]
 pub enum Subscribe {
     ToProgram(SubscribeToProgram),
     ToStream(SubscribeToStream),
@@ -208,6 +230,13 @@ impl From<Subscribe> for operation_in::Subscribe {
     }
 }
 
+impl From<Subscribe> for operation_in::Operation {
+    fn from(value: Subscribe) -> Self {
+        operation_in::Operation::Subscribe(value.into())
+    }
+}
+
+#[derive(Clone)]
 pub struct SubscribeToProgram {
     pub name: String,
     pub source: String,
@@ -222,6 +251,7 @@ impl From<SubscribeToProgram> for operation_in::subscribe::Program {
     }
 }
 
+#[derive(Clone)]
 pub struct SubscribeToStream {
     pub stream_name: String,
     pub start: Revision<u64>,
@@ -299,7 +329,7 @@ impl From<append_stream_completed::error::wrong_expected_revision::CurrentRevisi
 }
 
 impl From<delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
@@ -492,7 +522,7 @@ impl From<append_stream_completed::error::wrong_expected_revision::ExpectedRevis
 }
 
 impl From<delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
@@ -1045,11 +1075,13 @@ pub enum DeleteError {
 impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
     fn from(value: next::protocol::DeleteStreamCompleted) -> Self {
         match value.result.unwrap() {
-            delete_stream_completed::Result::WriteResult(r) => DeleteStreamCompleted::DeleteResult(WriteResult {
-                next_expected_version: ExpectedRevision::Revision(r.next_revision),
-                position: Position(r.position),
-                next_logical_position: 0,
-            }),
+            delete_stream_completed::Result::WriteResult(r) => {
+                DeleteStreamCompleted::DeleteResult(WriteResult {
+                    next_expected_version: ExpectedRevision::Revision(r.next_revision),
+                    position: Position(r.position),
+                    next_logical_position: 0,
+                })
+            }
 
             delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
                 delete_stream_completed::error::Error::WrongRevision(e) => {
