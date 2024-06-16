@@ -6,16 +6,17 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
+pub use client::Client;
 pub use io::{IteratorIO, IteratorIOExt};
 use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
+use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
 use crate::generated::next::protocol::operation_out::{
     append_stream_completed, subscription_event,
 };
-use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
+use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
 
 mod client;
 mod io;
@@ -49,18 +50,18 @@ pub mod protocol {
     }
 
     pub mod streams {
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            stream_options::RevisionOption, CountOption, StreamOption,
+        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, Success, success::CurrentRevisionOption},
+            append_resp::{self, success::CurrentRevisionOption, Success},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
-        };
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {
@@ -137,6 +138,7 @@ fn grpc_to_uuid(value: protocol::Uuid) -> Result<Uuid, uuid::Error> {
     }
 }
 
+#[derive(Clone)]
 pub struct EndPoint {
     pub host: String,
     pub port: u16,
@@ -1023,6 +1025,12 @@ impl From<operation_out::StreamRead> for StreamRead {
 }
 
 pub struct StreamReadError {}
+
+impl Display for StreamReadError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "StreamReadError")
+    }
+}
 
 pub enum SubscriptionEvent {
     Confirmation(SubscriptionConfirmation),

@@ -1,22 +1,23 @@
 use futures_util::StreamExt;
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
+use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
+use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
 use geth_common::{
-    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, EndPoint, ReadStream,
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
     StreamRead, Subscribe, SubscriptionEvent,
 };
-use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
-use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
 
 use crate::next::driver::Driver;
 
 mod driver;
+pub mod grpc;
 
-enum Msg {
+pub enum Msg {
     Command(Command),
     Event(Event),
 }
@@ -29,7 +30,7 @@ pub struct Command {
 }
 
 #[derive(Clone)]
-enum Operation {
+pub enum Operation {
     AppendStream(AppendStream),
     DeleteStream(DeleteStream),
     ReadStream(ReadStream),
@@ -47,14 +48,14 @@ impl From<Operation> for operation_in::Operation {
     }
 }
 
-struct Event {
-    correlation: Uuid,
-    response: Reply,
+pub struct Event {
+    pub correlation: Uuid,
+    pub reply: Reply,
 }
 
 impl Event {
     pub fn is_subscription_related(&self) -> bool {
-        match &self.response {
+        match &self.reply {
             Reply::SubscriptionEvent(event) => match event {
                 SubscriptionEvent::Error(_) => false,
                 _ => true,
@@ -65,7 +66,7 @@ impl Event {
     }
 }
 
-enum Reply {
+pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
     SubscriptionEvent(SubscriptionEvent),
@@ -76,7 +77,7 @@ enum Reply {
 type Connection = UnboundedSender<OperationIn>;
 type Mailbox = UnboundedSender<Msg>;
 
-async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
+pub(crate) async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
     let mut client = ProtocolClient::connect(uri).await?;
     let (connection, stream_request) = mpsc::unbounded_channel();
 
@@ -110,10 +111,7 @@ async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection>
                         }
                     };
 
-                    let response = Event {
-                        correlation,
-                        response: reply,
-                    };
+                    let response = Event { correlation, reply };
 
                     if mailbox.send(Msg::Event(response)).is_err() {
                         tracing::warn!("seems main connection is closed");
@@ -127,7 +125,7 @@ async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection>
     Ok(connection)
 }
 
-async fn multiplex_loop(mut driver: Driver, mut receiver: UnboundedReceiver<Msg>) {
+pub(crate) async fn multiplex_loop(mut driver: Driver, mut receiver: UnboundedReceiver<Msg>) {
     while let Some(msg) = receiver.recv().await {
         match msg {
             Msg::Command(cmd) => {

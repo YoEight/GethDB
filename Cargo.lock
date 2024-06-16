@@ -666,6 +666,7 @@ dependencies = [
 name = "geth-client"
 version = "0.1.0"
 dependencies = [
+ "async-stream",
  "byteorder",
  "chrono",
  "eyre",
@@ -688,6 +689,8 @@ dependencies = [
  "byteorder",
  "bytes",
  "chrono",
+ "eyre",
+ "futures",
  "prost",
  "prost-derive",
  "prost-types",

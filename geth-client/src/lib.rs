@@ -26,6 +26,7 @@ use geth_common::{
     DeleteResult, Direction, ExpectedRevision, Position, ProgrammableStats, ProgrammableSummary,
     Propose, Record, Revision, WriteResult, WrongExpectedRevisionError,
 };
+pub use next::grpc::GrpcClient;
 
 mod next;
 mod types;

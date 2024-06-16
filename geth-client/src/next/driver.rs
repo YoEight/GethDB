@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::EndPoint;
 use geth_common::generated::next::protocol::OperationIn;
+use geth_common::EndPoint;
 
-use crate::next::{Command, connect_to_node, Connection, Event, Mailbox};
+use crate::next::{connect_to_node, Command, Connection, Event, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -31,7 +31,16 @@ impl Driver {
         loop {
             if self.connection.is_none() {
                 self.connect().await?;
-                // TODO - We need to re-send passed inflight commands.
+
+                if did_we_reconnect {
+                    tracing::info!(
+                        "reconnected to node {}:{}",
+                        self.endpoint.host,
+                        self.endpoint.port,
+                    );
+                    // TODO - We need to re-send passed inflight commands.
+                    did_we_reconnect = false;
+                }
             }
 
             let correlation = command.correlation;
@@ -46,16 +55,17 @@ impl Driver {
                 return Ok(());
             }
 
-            // If we can't send the operation, it means we lost the connection.
-            self.connection = None;
-            did_we_reconnect = true;
-
             tracing::error!(
                 "lost connection to node {}:{} when pushing command. Retrying... {}/inf",
                 self.endpoint.host,
                 self.endpoint.port,
                 retries,
             );
+
+            // If we can't send the operation, it means we lost the connection.
+            self.connection = None;
+            did_we_reconnect = true;
+            retries += 1;
         }
     }
 
