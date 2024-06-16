@@ -1,16 +1,18 @@
 use futures_util::StreamExt;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::sync::{mpsc, oneshot};
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
-use geth_common::generated::next::protocol::{operation_out, OperationIn};
 use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, EndPoint, ReadStream,
     StreamRead, Subscribe, SubscriptionEvent,
 };
+use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
+use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
+
+use crate::next::driver::Driver;
 
 mod driver;
 
@@ -34,9 +36,33 @@ enum Operation {
     Subscribe(Subscribe),
 }
 
+impl From<Operation> for operation_in::Operation {
+    fn from(operation: Operation) -> Self {
+        match operation {
+            Operation::AppendStream(req) => operation_in::Operation::AppendStream(req.into()),
+            Operation::DeleteStream(req) => operation_in::Operation::DeleteStream(req.into()),
+            Operation::ReadStream(req) => operation_in::Operation::ReadStream(req.into()),
+            Operation::Subscribe(req) => operation_in::Operation::Subscribe(req.into()),
+        }
+    }
+}
+
 struct Event {
     correlation: Uuid,
     response: Reply,
+}
+
+impl Event {
+    pub fn is_subscription_related(&self) -> bool {
+        match &self.response {
+            Reply::SubscriptionEvent(event) => match event {
+                SubscriptionEvent::Error(_) => false,
+                _ => true,
+            },
+
+            _ => false,
+        }
+    }
 }
 
 enum Reply {
@@ -101,38 +127,16 @@ async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection>
     Ok(connection)
 }
 
-async fn multiplex_loop(mut endpoint: EndPoint, mut receiver: UnboundedReceiver<Msg>) {
-    let uri = format!("http://{}:{}", endpoint.host, endpoint.port)
-        .parse::<Uri>()
-        .unwrap();
-    let mut client = ProtocolClient::connect(uri).await.unwrap();
-    let (mailbox, stream_request) = mpsc::unbounded_channel();
-
-    let stream_response = client
-        .multiplex(UnboundedReceiverStream::new(stream_request))
-        .await
-        .unwrap()
-        .into_inner();
-
+async fn multiplex_loop(mut driver: Driver, mut receiver: UnboundedReceiver<Msg>) {
     while let Some(msg) = receiver.recv().await {
         match msg {
-            Msg::Command(req) => {
-                match req.operation {
-                    Operation::AppendStream(req) => {
-                        // handle append stream request
-                    }
-                    Operation::DeleteStream(req) => {
-                        // handle delete stream request
-                    }
-                    Operation::ReadStream(req) => {
-                        // handle read stream request
-                    }
-                    Operation::Subscribe(req) => {
-                        // handle subscribe request
-                    }
+            Msg::Command(cmd) => {
+                if let Err(e) = driver.handle_command(cmd).await {
+                    tracing::error!("expected error when dealing command: {:?}", e);
                 }
             }
-            Msg::Event(_) => {}
+
+            Msg::Event(event) => driver.handle_event(event),
         }
     }
 }
