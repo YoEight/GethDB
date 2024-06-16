@@ -12,11 +12,11 @@ use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
+use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
 use crate::generated::next::protocol::operation_out::{
     append_stream_completed, subscription_event,
 };
-use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
+use crate::generated::next::protocol::operation_out::append_stream_completed::AppendResult;
 
 mod client;
 mod io;
@@ -50,18 +50,18 @@ pub mod protocol {
     }
 
     pub mod streams {
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            stream_options::RevisionOption, CountOption, StreamOption,
-        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, success::CurrentRevisionOption, Success},
+            append_resp::{self, Success, success::CurrentRevisionOption},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
+        };
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {
@@ -460,9 +460,9 @@ impl Display for ExpectedRevision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             ExpectedRevision::Revision(v) => write!(f, "{}", v),
-            ExpectedRevision::NoStream => write!(f, "NoStream"),
-            ExpectedRevision::Any => write!(f, "Any"),
-            ExpectedRevision::StreamExists => write!(f, "StreamExists"),
+            ExpectedRevision::NoStream => write!(f, "'no stream'"),
+            ExpectedRevision::Any => write!(f, "'any'"),
+            ExpectedRevision::StreamExists => write!(f, "'stream exists'"),
         }
     }
 }
@@ -979,6 +979,20 @@ pub enum AppendStreamCompleted {
 
 pub enum AppendError {
     WrongExpectedRevision(WrongExpectedRevisionError),
+}
+
+impl Display for AppendError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppendError::WrongExpectedRevision(e) => {
+                write!(
+                    f,
+                    "expected revision {} but got {} instead",
+                    e.expected, e.current
+                )
+            }
+        }
+    }
 }
 
 impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {

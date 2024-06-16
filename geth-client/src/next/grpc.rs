@@ -6,12 +6,12 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use geth_common::{
-    Client, Direction, EndPoint, ExpectedRevision, Propose, ReadStream, Record, Revision,
-    StreamRead, WriteResult,
+    AppendStream, AppendStreamCompleted, Client, Direction, EndPoint, ExpectedRevision, Propose,
+    ReadStream, Record, Revision, StreamRead, WriteResult,
 };
 
+use crate::next::{Command, Msg, multiplex_loop, Operation, Reply};
 use crate::next::driver::Driver;
-use crate::next::{multiplex_loop, Command, Msg, Operation, Reply};
 
 pub struct GrpcClient {
     endpoint: EndPoint,
@@ -39,7 +39,41 @@ impl Client for GrpcClient {
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
     ) -> eyre::Result<WriteResult> {
-        todo!()
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::AppendStream(AppendStream {
+                stream_name: stream_id.to_string(),
+                events: proposes,
+                expected_revision,
+            }),
+            resp: tx,
+        }));
+
+        if outcome.is_err() {
+            eyre::bail!("connection is permanently closed");
+        }
+
+        if let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::AppendStreamCompleted(resp) => match resp {
+                    AppendStreamCompleted::WriteResult(result) => {
+                        return Ok(result);
+                    }
+                    AppendStreamCompleted::Error(e) => {
+                        eyre::bail!("error when appending events to '{}': {}", stream_id, e);
+                    }
+                },
+                Reply::Errored => eyre::bail!("error when appending events to '{}'", stream_id),
+                _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
+            }
+        } else {
+            eyre::bail!(
+                "unexpected code path when appending events to '{}'",
+                stream_id
+            );
+        }
     }
 
     fn read_stream(
