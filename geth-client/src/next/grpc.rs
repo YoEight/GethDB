@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, Direction, EndPoint, ExpectedRevision, Propose,
-    ReadStream, Record, Revision, StreamRead, WriteResult,
+    ReadStream, Record, Revision, StreamRead, Subscribe, SubscribeToStream, SubscriptionEvent,
+    SubscriptionEventIR, WriteResult,
 };
 
 use crate::next::{Command, Msg, multiplex_loop, Operation, Reply};
@@ -124,6 +125,51 @@ impl Client for GrpcClient {
                     _ => {
                         unexpected_reply_when_reading(stream_id)?;
                     }
+                }
+            }
+        }
+    }
+
+    fn subscribe_to_stream(
+        &self,
+        stream_id: &str,
+        start: Revision<u64>,
+    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::Subscribe(Subscribe::ToStream(SubscribeToStream {
+                stream_name: stream_id.to_string(),
+                start,
+            })),
+            resp: tx,
+        }));
+
+        async_stream::try_stream! {
+            if outcome.is_err() {
+                read_error(stream_id, "connection is permanently closed")?;
+            }
+
+            while let Some(event) = rx.recv().await {
+                match event.reply {
+                    Reply::SubscriptionEvent(event) => {
+                        match event {
+                            SubscriptionEventIR::EventsAppeared(events) => {
+                                for record in events {
+                                    yield SubscriptionEvent::EventAppeared(record);
+                                }
+                            }
+
+                            SubscriptionEventIR::Confirmation(confirm) => yield SubscriptionEvent::Confirmed(confirm),
+                            SubscriptionEventIR::CaughtUp => yield SubscriptionEvent::CaughtUp,
+                            SubscriptionEventIR::Error(e) => read_error(stream_id, e)?,
+                        }
+                    }
+
+                    Reply::Errored => read_error(stream_id, "")?,
+
+                    _ => unexpected_reply_when_reading(stream_id)?,
                 }
             }
         }

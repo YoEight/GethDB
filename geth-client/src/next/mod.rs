@@ -5,12 +5,12 @@ use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Uri;
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
-use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
 use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
-    StreamRead, Subscribe, SubscriptionEvent,
+    StreamRead, Subscribe, SubscriptionEventIR,
 };
+use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
+use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
 
 use crate::next::driver::Driver;
 
@@ -57,7 +57,7 @@ impl Event {
     pub fn is_subscription_related(&self) -> bool {
         match &self.reply {
             Reply::SubscriptionEvent(event) => match event {
-                SubscriptionEvent::Error(_) => false,
+                SubscriptionEventIR::Error(_) => false,
                 _ => true,
             },
 
@@ -69,7 +69,7 @@ impl Event {
 pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
-    SubscriptionEvent(SubscriptionEvent),
+    SubscriptionEvent(SubscriptionEventIR),
     DeleteStreamCompleted(DeleteStreamCompleted),
     Errored,
 }

@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use client::Client;
+pub use client::{Client, SubscriptionEvent};
 pub use io::{IteratorIO, IteratorIOExt};
 use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
@@ -1046,7 +1046,7 @@ impl Display for StreamReadError {
     }
 }
 
-pub enum SubscriptionEvent {
+pub enum SubscriptionEventIR {
     Confirmation(SubscriptionConfirmation),
     EventsAppeared(Vec<Record>),
     CaughtUp,
@@ -1060,22 +1060,28 @@ pub enum SubscriptionConfirmation {
 
 pub struct SubscriptionError {}
 
-impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
+impl Display for SubscriptionError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "SubscriptionError")
+    }
+}
+
+impl From<operation_out::SubscriptionEvent> for SubscriptionEventIR {
     fn from(value: operation_out::SubscriptionEvent) -> Self {
         match value.event.unwrap() {
             subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
                 subscription_event::confirmation::Kind::StreamName(s) => {
-                    SubscriptionEvent::Confirmation(SubscriptionConfirmation::StreamName(s))
+                    SubscriptionEventIR::Confirmation(SubscriptionConfirmation::StreamName(s))
                 }
                 subscription_event::confirmation::Kind::ProcessId(p) => {
-                    SubscriptionEvent::Confirmation(SubscriptionConfirmation::ProcessId(p.into()))
+                    SubscriptionEventIR::Confirmation(SubscriptionConfirmation::ProcessId(p.into()))
                 }
             },
-            subscription_event::Event::EventsAppeared(ea) => {
-                SubscriptionEvent::EventsAppeared(ea.events.into_iter().map(|r| r.into()).collect())
-            }
-            subscription_event::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
-            subscription_event::Event::Error(e) => SubscriptionEvent::Error(e.into()),
+            subscription_event::Event::EventsAppeared(ea) => SubscriptionEventIR::EventsAppeared(
+                ea.events.into_iter().map(|r| r.into()).collect(),
+            ),
+            subscription_event::Event::CaughtUp(_) => SubscriptionEventIR::CaughtUp,
+            subscription_event::Event::Error(e) => SubscriptionEventIR::Error(e.into()),
         }
     }
 }
