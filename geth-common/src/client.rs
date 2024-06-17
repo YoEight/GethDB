@@ -3,7 +3,8 @@
 use futures::Stream;
 
 use crate::{
-    Direction, ExpectedRevision, Propose, Record, Revision, SubscriptionConfirmation, WriteResult,
+    Direction, ExpectedRevision, Propose, Record, Revision, SubscriptionConfirmation,
+    WriteResult,
 };
 
 pub enum SubscriptionEvent {
@@ -45,4 +46,10 @@ pub trait Client {
         name: &str,
         source_code: &str,
     ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>>;
+
+    async fn delete_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+    ) -> eyre::Result<WriteResult>;
 }

@@ -1101,6 +1101,23 @@ pub enum DeleteError {
     NotLeaderException(EndPoint),
 }
 
+impl Display for DeleteError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            DeleteError::WrongExpectedRevision(e) => {
+                write!(
+                    f,
+                    "expected revision {} but got {} instead",
+                    e.expected, e.current
+                )
+            }
+            DeleteError::NotLeaderException(e) => {
+                write!(f, "Not leader exception: {}:{}", e.host, e.port)
+            }
+        }
+    }
+}
+
 impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
     fn from(value: next::protocol::DeleteStreamCompleted) -> Self {
         match value.result.unwrap() {

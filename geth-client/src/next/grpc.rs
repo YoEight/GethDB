@@ -6,9 +6,10 @@ use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use geth_common::{
-    AppendStream, AppendStreamCompleted, Client, Direction, EndPoint, ExpectedRevision, Propose,
-    ReadStream, Record, Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream,
-    SubscriptionEvent, SubscriptionEventIR, UnsubscribeReason, WriteResult,
+    AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
+    EndPoint, ExpectedRevision, Propose, ReadStream, Record, Revision, StreamRead, Subscribe,
+    SubscribeToProgram, SubscribeToStream, SubscriptionEvent, SubscriptionEventIR,
+    UnsubscribeReason, WriteResult,
 };
 
 use crate::next::{Command, Event, Msg, multiplex_loop, Operation, Reply};
@@ -174,6 +175,47 @@ impl Client for GrpcClient {
             .map_err(|e| eyre::eyre!("connection is permanently closed"));
 
         produce_subscription_stream(format!("process '{}'", name), rx)
+    }
+
+    async fn delete_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+    ) -> eyre::Result<WriteResult> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::DeleteStream(DeleteStream {
+                stream_name: stream_id.to_string(),
+                expected_revision,
+            }),
+            resp: tx,
+        }));
+
+        if outcome.is_err() {
+            eyre::bail!("connection is permanently closed");
+        }
+
+        if let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::DeleteStreamCompleted(resp) => match resp {
+                    DeleteStreamCompleted::DeleteResult(result) => {
+                        return Ok(result);
+                    }
+                    DeleteStreamCompleted::Error(e) => {
+                        eyre::bail!("error when appending events to '{}': {}", stream_id, e);
+                    }
+                },
+                Reply::Errored => eyre::bail!("error when appending events to '{}'", stream_id),
+                _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
+            }
+        }
+
+        eyre::bail!(
+            "unexpected code path when appending events to '{}'",
+            stream_id
+        );
     }
 }
 
