@@ -30,6 +30,7 @@ message OperationIn {
     DeleteStream delete_stream = 3;
     ReadStream read_stream = 4;
     Subscribe subscribe = 5;
+    ListPrograms list_programs = 6;
   }
 
   message AppendStream {
@@ -100,6 +101,10 @@ message OperationIn {
       string source = 2;
     }
   }
+
+  message ListPrograms {
+    google.protobuf.Empty empty = 1;
+  }
 }
 
 message OperationOut {
@@ -110,6 +115,7 @@ message OperationOut {
     DeleteStreamCompleted delete_completed = 3;
     StreamRead stream_read = 4;
     SubscriptionEvent subscription_event = 5;
+    ProgramsListed programs_listed = 6;
   }
 
   message AppendStreamCompleted {
@@ -182,6 +188,16 @@ message OperationOut {
     message CaughtUp {}
 
     message Error {}
+  }
+
+  message ProgramsListed {
+    repeated ProgramSummary programs = 1;
+
+    message ProgramSummary {
+      Ident id = 1;
+      string name = 2;
+      int64 started_at = 3;
+    }
   }
 }
 
