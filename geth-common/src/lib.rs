@@ -6,7 +6,7 @@ use chrono::{DateTime, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use client::{Client, SubscriptionEvent};
+pub use client::{Client, SubscriptionEvent, UnsubscribeReason};
 pub use io::{IteratorIO, IteratorIOExt};
 use protocol::streams::append_resp;
 use protocol::streams::delete_resp;

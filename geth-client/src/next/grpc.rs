@@ -7,11 +7,11 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, Direction, EndPoint, ExpectedRevision, Propose,
-    ReadStream, Record, Revision, StreamRead, Subscribe, SubscribeToStream, SubscriptionEvent,
-    SubscriptionEventIR, WriteResult,
+    ReadStream, Record, Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream,
+    SubscriptionEvent, SubscriptionEventIR, UnsubscribeReason, WriteResult,
 };
 
-use crate::next::{Command, Msg, multiplex_loop, Operation, Reply};
+use crate::next::{Command, Event, Msg, multiplex_loop, Operation, Reply};
 use crate::next::driver::Driver;
 
 pub struct GrpcClient {
@@ -146,33 +146,66 @@ impl Client for GrpcClient {
             resp: tx,
         }));
 
-        async_stream::try_stream! {
-            if outcome.is_err() {
-                read_error(stream_id, "connection is permanently closed")?;
-            }
+        let rx = outcome
+            .map(|_| rx)
+            .map_err(|e| eyre::eyre!("connection is permanently closed"));
 
-            while let Some(event) = rx.recv().await {
-                match event.reply {
-                    Reply::SubscriptionEvent(event) => {
-                        match event {
-                            SubscriptionEventIR::EventsAppeared(events) => {
-                                for record in events {
-                                    yield SubscriptionEvent::EventAppeared(record);
-                                }
+        produce_subscription_stream(stream_id.to_string(), rx)
+    }
+
+    fn subscribe_to_process(
+        &self,
+        name: &str,
+        source_code: &str,
+    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+        let (tx, rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::Subscribe(Subscribe::ToProgram(SubscribeToProgram {
+                name: name.to_string(),
+                source: source_code.to_string(),
+            })),
+            resp: tx,
+        }));
+
+        let rx = outcome
+            .map(|_| rx)
+            .map_err(|e| eyre::eyre!("connection is permanently closed"));
+
+        produce_subscription_stream(format!("process '{}'", name), rx)
+    }
+}
+
+fn produce_subscription_stream(
+    ident: String,
+    rx: eyre::Result<mpsc::UnboundedReceiver<Event>>,
+) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+    async_stream::try_stream! {
+        let mut rx = rx?;
+        while let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::SubscriptionEvent(event) => {
+                    match event {
+                        SubscriptionEventIR::EventsAppeared(events) => {
+                            for record in events {
+                                yield SubscriptionEvent::EventAppeared(record);
                             }
-
-                            SubscriptionEventIR::Confirmation(confirm) => yield SubscriptionEvent::Confirmed(confirm),
-                            SubscriptionEventIR::CaughtUp => yield SubscriptionEvent::CaughtUp,
-                            SubscriptionEventIR::Error(e) => read_error(stream_id, e)?,
                         }
+
+                        SubscriptionEventIR::Confirmation(confirm) => yield SubscriptionEvent::Confirmed(confirm),
+                        SubscriptionEventIR::CaughtUp => yield SubscriptionEvent::CaughtUp,
+                        SubscriptionEventIR::Error(e) => read_error(&ident, e)?,
                     }
-
-                    Reply::Errored => read_error(stream_id, "")?,
-
-                    _ => unexpected_reply_when_reading(stream_id)?,
                 }
+
+                Reply::Errored => read_error(&ident, "")?,
+
+                _ => unexpected_reply_when_reading(&ident)?,
             }
         }
+
+        yield SubscriptionEvent::Unsubscribed(UnsubscribeReason::User);
     }
 }
 
@@ -181,5 +214,5 @@ fn unexpected_reply_when_reading(stream_id: &str) -> eyre::Result<()> {
 }
 
 fn read_error<T: Display>(stream_id: &str, e: T) -> eyre::Result<()> {
-    eyre::bail!("error when reading stream {}: {}", stream_id, e)
+    eyre::bail!("error when reading '{}': {}", stream_id, e)
 }

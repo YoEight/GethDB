@@ -39,4 +39,10 @@ pub trait Client {
         stream_id: &str,
         start: Revision<u64>,
     ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>>;
+
+    fn subscribe_to_process(
+        &self,
+        name: &str,
+        source_code: &str,
+    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>>;
 }
