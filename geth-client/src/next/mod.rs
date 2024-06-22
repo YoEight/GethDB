@@ -1,3 +1,4 @@
+use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -6,8 +7,9 @@ use tonic::transport::Uri;
 use uuid::Uuid;
 
 use geth_common::{
-    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
-    StreamRead, Subscribe, SubscriptionEventIR,
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, GetProgram,
+    KillProgram, ListPrograms, ProgramKilled, ProgramListed, ProgramObtained, ProgramSummary,
+    ReadStream, StreamRead, Subscribe, SubscriptionEventIR,
 };
 use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
 use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
@@ -35,6 +37,9 @@ pub enum Operation {
     DeleteStream(DeleteStream),
     ReadStream(ReadStream),
     Subscribe(Subscribe),
+    ListPrograms(ListPrograms),
+    GetProgram(GetProgram),
+    KillProgram(KillProgram),
 }
 
 impl From<Operation> for operation_in::Operation {
@@ -44,6 +49,9 @@ impl From<Operation> for operation_in::Operation {
             Operation::DeleteStream(req) => operation_in::Operation::DeleteStream(req.into()),
             Operation::ReadStream(req) => operation_in::Operation::ReadStream(req.into()),
             Operation::Subscribe(req) => operation_in::Operation::Subscribe(req.into()),
+            Operation::ListPrograms(req) => operation_in::Operation::ListPrograms(req.into()),
+            Operation::GetProgram(req) => operation_in::Operation::GetProgram(req.into()),
+            Operation::KillProgram(req) => operation_in::Operation::KillProgram(req.into()),
         }
     }
 }
@@ -71,6 +79,9 @@ pub enum Reply {
     StreamRead(StreamRead),
     SubscriptionEvent(SubscriptionEventIR),
     DeleteStreamCompleted(DeleteStreamCompleted),
+    ProgramsListed(ProgramListed),
+    ProgramKilled(ProgramKilled),
+    ProgramObtained(ProgramObtained),
     Errored,
 }
 
@@ -108,6 +119,17 @@ pub(crate) async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<
                         }
                         operation_out::Operation::DeleteCompleted(resp) => {
                             Reply::DeleteStreamCompleted(resp.into())
+                        }
+                        operation_out::Operation::ProgramsListed(resp) => {
+                            Reply::ProgramsListed(resp.into())
+                        }
+
+                        operation_out::Operation::ProgramKilled(resp) => {
+                            Reply::ProgramKilled(resp.into())
+                        }
+
+                        operation_out::Operation::ProgramGot(resp) => {
+                            Reply::ProgramObtained(resp.into())
                         }
                     };
 

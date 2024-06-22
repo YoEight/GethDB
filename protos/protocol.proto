@@ -31,6 +31,8 @@ message OperationIn {
     ReadStream read_stream = 4;
     Subscribe subscribe = 5;
     ListPrograms list_programs = 6;
+    KillProgram kill_program = 7;
+    GetProgram get_program = 8;
   }
 
   message AppendStream {
@@ -105,6 +107,14 @@ message OperationIn {
   message ListPrograms {
     google.protobuf.Empty empty = 1;
   }
+
+  message KillProgram {
+    Ident id = 1;
+  }
+
+  message GetProgram {
+    Ident id = 1;
+  }
 }
 
 message OperationOut {
@@ -116,6 +126,8 @@ message OperationOut {
     StreamRead stream_read = 4;
     SubscriptionEvent subscription_event = 5;
     ProgramsListed programs_listed = 6;
+    ProgramKilled program_killed = 7;
+    ProgramObtained program_got = 8;
   }
 
   message AppendStreamCompleted {
@@ -197,6 +209,41 @@ message OperationOut {
       Ident id = 1;
       string name = 2;
       int64 started_at = 3;
+    }
+  }
+
+  message ProgramKilled {
+    oneof result {
+      google.protobuf.Empty success = 1;
+      Error error = 2;
+    }
+
+    message Error {
+      oneof error {
+        google.protobuf.Empty NotExists = 1;
+      }
+    }
+  }
+
+  message ProgramObtained {
+    oneof result {
+      ProgramStats program = 1;
+      Error error = 2;
+    }
+
+    message ProgramStats {
+      Ident id = 1;
+      string name = 2;
+      string source_code = 3;
+      repeated string subscriptions = 4;
+      uint64 pushed_events = 5;
+      int64 started_at = 6;
+    }
+
+    message Error {
+      oneof error {
+        google.protobuf.Empty NotExists = 1;
+      }
     }
   }
 }

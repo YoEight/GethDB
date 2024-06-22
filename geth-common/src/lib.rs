@@ -2,7 +2,7 @@ use std::{fmt::Display, string::FromUtf8Error};
 
 use byteorder::{BigEndian, ByteOrder};
 use bytes::Bytes;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, TimeZone, Utc};
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -1096,6 +1096,7 @@ pub enum DeleteStreamCompleted {
     DeleteResult(WriteResult),
     Error(DeleteError),
 }
+
 pub enum DeleteError {
     WrongExpectedRevision(WrongExpectedRevisionError),
     NotLeaderException(EndPoint),
@@ -1143,6 +1144,134 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
                         host: e.leader_host,
                         port: e.leader_port as u16,
                     }))
+                }
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ListPrograms {}
+
+impl From<ListPrograms> for operation_in::ListPrograms {
+    fn from(_: ListPrograms) -> Self {
+        Self { empty: None }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct GetProgram {
+    pub id: Uuid,
+}
+
+impl From<GetProgram> for operation_in::GetProgram {
+    fn from(value: GetProgram) -> Self {
+        Self {
+            id: Some(value.id.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct KillProgram {
+    pub id: Uuid,
+}
+
+impl From<KillProgram> for operation_in::KillProgram {
+    fn from(value: KillProgram) -> Self {
+        Self {
+            id: Some(value.id.into()),
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramListed {
+    pub programs: Vec<ProgramSummary>,
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramSummary {
+    pub id: Uuid,
+    pub name: String,
+    pub started_at: DateTime<Utc>,
+}
+
+impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
+    fn from(value: operation_out::programs_listed::ProgramSummary) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            name: value.name,
+            started_at: Utc.timestamp_opt(value.started_at, 0).unwrap(),
+        }
+    }
+}
+
+impl From<operation_out::ProgramsListed> for ProgramListed {
+    fn from(value: operation_out::ProgramsListed) -> Self {
+        Self {
+            programs: value.programs.into_iter().map(|p| p.into()).collect(),
+        }
+    }
+}
+
+pub enum ProgramKilled {
+    Success,
+    Error(eyre::Report),
+}
+
+impl From<operation_out::ProgramKilled> for ProgramKilled {
+    fn from(value: operation_out::ProgramKilled) -> Self {
+        match value.result.unwrap() {
+            operation_out::program_killed::Result::Success(_) => ProgramKilled::Success,
+            operation_out::program_killed::Result::Error(e) => match e.error.unwrap() {
+                operation_out::program_killed::error::Error::NotExists(_) => {
+                    ProgramKilled::Error(eyre::eyre!("program not exists"))
+                }
+            },
+        }
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct ProgramStats {
+    pub id: Uuid,
+    pub name: String,
+    pub source_code: String,
+    pub subscriptions: Vec<String>,
+    pub pushed_events: usize,
+    pub started: DateTime<Utc>,
+}
+
+impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
+    fn from(value: operation_out::program_obtained::ProgramStats) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            name: value.name,
+            source_code: value.source_code,
+            subscriptions: value.subscriptions,
+            pushed_events: value.pushed_events as usize,
+            started: Utc.timestamp_opt(value.started_at, 0).unwrap(),
+        }
+    }
+}
+
+#[derive(Debug)]
+pub enum ProgramObtained {
+    Success(ProgramStats),
+    Error(eyre::Report),
+}
+
+impl From<operation_out::ProgramObtained> for ProgramObtained {
+    fn from(value: operation_out::ProgramObtained) -> Self {
+        match value.result.unwrap() {
+            operation_out::program_obtained::Result::Program(stats) => {
+                ProgramObtained::Success(stats.into())
+            }
+
+            operation_out::program_obtained::Result::Error(e) => match e.error.unwrap() {
+                operation_out::program_obtained::error::Error::NotExists(_) => {
+                    ProgramObtained::Error(eyre::eyre!("program not found"))
                 }
             },
         }
