@@ -1,10 +1,11 @@
 #![allow(async_fn_in_trait)]
 
 use futures::Stream;
+use uuid::Uuid;
 
 use crate::{
-    Direction, ExpectedRevision, Propose, Record, Revision, SubscriptionConfirmation,
-    WriteResult,
+    Direction, ExpectedRevision, ProgramStats, ProgramSummary, Propose, Record, Revision,
+    SubscriptionConfirmation, WriteResult,
 };
 
 pub enum SubscriptionEvent {
@@ -52,4 +53,10 @@ pub trait Client {
         stream_id: &str,
         expected_revision: ExpectedRevision,
     ) -> eyre::Result<WriteResult>;
+
+    async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>>;
+
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats>;
+
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<()>;
 }

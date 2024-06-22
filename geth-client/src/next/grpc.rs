@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, Propose, ReadStream, Record, Revision, StreamRead, Subscribe,
+    EndPoint, ExpectedRevision, GetProgram, ListPrograms, ProgramKilled, ProgramObtained,
+    ProgramStats, ProgramSummary, Propose, ReadStream, Record, Revision, StreamRead, Subscribe,
     SubscribeToProgram, SubscribeToStream, SubscriptionEvent, SubscriptionEventIR,
     UnsubscribeReason, WriteResult,
 };
@@ -216,6 +217,90 @@ impl Client for GrpcClient {
             "unexpected code path when appending events to '{}'",
             stream_id
         );
+    }
+
+    async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::ListPrograms(ListPrograms {}),
+            resp: tx,
+        }));
+
+        if outcome.is_err() {
+            eyre::bail!("connection is permanently closed");
+        }
+
+        if let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::ProgramsListed(resp) => {
+                    return Ok(resp.programs);
+                }
+                Reply::Errored => eyre::bail!("error when listing programs"),
+                _ => eyre::bail!("unexpected reply when listing programs"),
+            }
+        }
+
+        eyre::bail!("unexpected code path when listing programs");
+    }
+
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::GetProgram(GetProgram { id }),
+            resp: tx,
+        }));
+
+        if outcome.is_err() {
+            eyre::bail!("connection is permanently closed");
+        }
+
+        if let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::ProgramObtained(resp) => {
+                    return match resp {
+                        ProgramObtained::Error(e) => Err(e),
+                        ProgramObtained::Success(stats) => Ok(stats),
+                    }
+                }
+                Reply::Errored => eyre::bail!("error when getting program {}", id),
+                _ => eyre::bail!("unexpected reply when getting program {}", id),
+            }
+        }
+
+        eyre::bail!("unexpected code path when getting program {}", id);
+    }
+
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<()> {
+        let (tx, mut rx) = mpsc::unbounded_channel();
+
+        let outcome = self.mailbox.send(Msg::Command(Command {
+            correlation: Uuid::new_v4(),
+            operation: Operation::GetProgram(GetProgram { id }),
+            resp: tx,
+        }));
+
+        if outcome.is_err() {
+            eyre::bail!("connection is permanently closed");
+        }
+
+        if let Some(event) = rx.recv().await {
+            match event.reply {
+                Reply::ProgramKilled(resp) => {
+                    return match resp {
+                        ProgramKilled::Error(e) => Err(e),
+                        ProgramKilled::Success => Ok(()),
+                    }
+                }
+                Reply::Errored => eyre::bail!("error when killing program {}", id),
+                _ => eyre::bail!("unexpected reply when killing program {}", id),
+            }
+        }
+
+        eyre::bail!("unexpected code path when killing program {}", id);
     }
 }
 
