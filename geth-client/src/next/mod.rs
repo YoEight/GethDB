@@ -1,3 +1,5 @@
+use std::marker::PhantomData;
+
 use chrono::{DateTime, Utc};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
@@ -11,7 +13,9 @@ use geth_common::{
     KillProgram, ListPrograms, ProgramKilled, ProgramListed, ProgramObtained, ProgramSummary,
     ReadStream, StreamRead, Subscribe, SubscriptionEventIR,
 };
-use geth_common::generated::next::protocol::{operation_in, operation_out, OperationIn};
+use geth_common::generated::next;
+use geth_common::generated::next::protocol;
+use geth_common::generated::next::protocol::{operation_in, operation_out};
 use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
 
 use crate::next::driver::Driver;
@@ -24,11 +28,51 @@ pub enum Msg {
     Event(Event),
 }
 
+pub type Callback = UnboundedReceiver<Event>;
+pub type Package = (Callback, Msg);
+
 #[derive(Clone)]
 pub struct Command {
+    pub operation_in: OperationIn,
+    pub resp: UnboundedSender<Event>,
+}
+
+#[derive(Clone)]
+pub struct OperationIn {
     pub correlation: Uuid,
     pub operation: Operation,
-    pub resp: UnboundedSender<Event>,
+}
+
+impl From<protocol::OperationIn> for OperationIn {
+    fn from(operation: protocol::OperationIn) -> Self {
+        let correlation = operation.correlation.unwrap().into();
+        let operation = match operation.operation.unwrap() {
+            operation_in::Operation::AppendStream(req) => Operation::AppendStream(req.into()),
+            operation_in::Operation::DeleteStream(req) => Operation::DeleteStream(req.into()),
+            operation_in::Operation::ReadStream(req) => Operation::ReadStream(req.into()),
+            operation_in::Operation::Subscribe(req) => Operation::Subscribe(req.into()),
+            operation_in::Operation::ListPrograms(req) => Operation::ListPrograms(req.into()),
+            operation_in::Operation::GetProgram(req) => Operation::GetProgram(req.into()),
+            operation_in::Operation::KillProgram(req) => Operation::KillProgram(req.into()),
+        };
+
+        Self {
+            correlation,
+            operation,
+        }
+    }
+}
+
+impl From<OperationIn> for protocol::OperationIn {
+    fn from(operation: OperationIn) -> Self {
+        let correlation = Some(operation.correlation.into());
+        let operation = Some(operation.operation.into());
+
+        Self {
+            correlation,
+            operation,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -64,7 +108,7 @@ pub struct Event {
 impl Event {
     pub fn is_subscription_related(&self) -> bool {
         match &self.reply {
-            Reply::SubscriptionEvent(event) => match event {
+            Reply::Success(OperationOut::SubscriptionEvent(event)) => match event {
                 SubscriptionEventIR::Error(_) => false,
                 _ => true,
             },
@@ -74,7 +118,7 @@ impl Event {
     }
 }
 
-pub enum Reply {
+pub enum OperationOut {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
     SubscriptionEvent(SubscriptionEventIR),
@@ -82,10 +126,14 @@ pub enum Reply {
     ProgramsListed(ProgramListed),
     ProgramKilled(ProgramKilled),
     ProgramObtained(ProgramObtained),
+}
+
+pub enum Reply {
+    Success(OperationOut),
     Errored,
 }
 
-type Connection = UnboundedSender<OperationIn>;
+type Connection = UnboundedSender<protocol::OperationIn>;
 type Mailbox = UnboundedSender<Msg>;
 
 pub(crate) async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
@@ -109,27 +157,27 @@ pub(crate) async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<
                     let correlation = reply.correlation.unwrap().into();
                     let reply = match reply.operation.unwrap() {
                         operation_out::Operation::AppendCompleted(resp) => {
-                            Reply::AppendStreamCompleted(resp.into())
+                            Reply::Success(OperationOut::AppendStreamCompleted(resp.into()))
                         }
                         operation_out::Operation::StreamRead(resp) => {
-                            Reply::StreamRead(resp.into())
+                            Reply::Success(OperationOut::StreamRead(resp.into()))
                         }
                         operation_out::Operation::SubscriptionEvent(resp) => {
-                            Reply::SubscriptionEvent(resp.into())
+                            Reply::Success(OperationOut::SubscriptionEvent(resp.into()))
                         }
                         operation_out::Operation::DeleteCompleted(resp) => {
-                            Reply::DeleteStreamCompleted(resp.into())
+                            Reply::Success(OperationOut::DeleteStreamCompleted(resp.into()))
                         }
                         operation_out::Operation::ProgramsListed(resp) => {
-                            Reply::ProgramsListed(resp.into())
+                            Reply::Success(OperationOut::ProgramsListed(resp.into()))
                         }
 
                         operation_out::Operation::ProgramKilled(resp) => {
-                            Reply::ProgramKilled(resp.into())
+                            Reply::Success(OperationOut::ProgramKilled(resp.into()))
                         }
 
                         operation_out::Operation::ProgramGot(resp) => {
-                            Reply::ProgramObtained(resp.into())
+                            Reply::Success(OperationOut::ProgramObtained(resp.into()))
                         }
                     };
 

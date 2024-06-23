@@ -161,6 +161,16 @@ impl From<AppendStream> for operation_in::AppendStream {
     }
 }
 
+impl From<operation_in::AppendStream> for AppendStream {
+    fn from(value: operation_in::AppendStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            events: value.events.into_iter().map(|p| p.into()).collect(),
+            expected_revision: value.expected_revision.unwrap().into(),
+        }
+    }
+}
+
 impl From<AppendStream> for operation_in::Operation {
     fn from(value: AppendStream) -> Self {
         operation_in::Operation::AppendStream(value.into())
@@ -403,13 +413,23 @@ pub struct Propose {
     pub data: Bytes,
 }
 
-impl From<Propose> for next::protocol::operation_in::append_stream::Propose {
+impl From<Propose> for operation_in::append_stream::Propose {
     fn from(value: Propose) -> Self {
         Self {
             id: Some(value.id.into()),
             class: value.r#type,
             payload: value.data,
             metadata: Default::default(),
+        }
+    }
+}
+
+impl From<operation_in::append_stream::Propose> for Propose {
+    fn from(value: operation_in::append_stream::Propose) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            r#type: value.class,
+            data: value.payload,
         }
     }
 }
@@ -479,6 +499,23 @@ impl From<ExpectedRevision> for operation_in::append_stream::ExpectedRevision {
             ExpectedRevision::Any => operation_in::append_stream::ExpectedRevision::Any(()),
             ExpectedRevision::StreamExists => {
                 operation_in::append_stream::ExpectedRevision::StreamExists(())
+            }
+        }
+    }
+}
+
+impl From<operation_in::append_stream::ExpectedRevision> for ExpectedRevision {
+    fn from(value: operation_in::append_stream::ExpectedRevision) -> Self {
+        match value {
+            operation_in::append_stream::ExpectedRevision::Revision(r) => {
+                ExpectedRevision::Revision(r)
+            }
+            operation_in::append_stream::ExpectedRevision::NoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            operation_in::append_stream::ExpectedRevision::Any(_) => ExpectedRevision::Any,
+            operation_in::append_stream::ExpectedRevision::StreamExists(_) => {
+                ExpectedRevision::StreamExists
             }
         }
     }

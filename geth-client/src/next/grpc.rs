@@ -2,35 +2,90 @@ use std::fmt::Display;
 
 use futures_util::Stream;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgram, ListPrograms, ProgramKilled, ProgramObtained,
-    ProgramStats, ProgramSummary, Propose, ReadStream, Record, Revision, StreamRead, Subscribe,
-    SubscribeToProgram, SubscribeToStream, SubscriptionEvent, SubscriptionEventIR,
-    UnsubscribeReason, WriteResult,
+    EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, ProgramKilled,
+    ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Revision,
+    StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
+    SubscriptionEventIR, UnsubscribeReason, WriteResult,
 };
 
-use crate::next::{Command, Event, Msg, multiplex_loop, Operation, Reply};
+use crate::next::{
+    Command, Event, Msg, multiplex_loop, Operation, OperationIn, OperationOut, Reply,
+};
 use crate::next::driver::Driver;
+
+pub struct Unary;
+pub struct Multi;
+
+pub struct Task {
+    rx: UnboundedReceiver<Event>,
+}
+
+impl Task {
+    pub async fn recv(&mut self) -> eyre::Result<Option<OperationOut>> {
+        if let Some(event) = self.rx.recv().await {
+            match event.reply {
+                Reply::Errored => eyre::bail!("error when processing task"),
+                Reply::Success(out) => return Ok(Some(out)),
+            }
+        }
+
+        Ok(None)
+    }
+}
+
+pub struct Mailbox {
+    tx: UnboundedSender<Msg>,
+}
+
+impl Mailbox {
+    pub fn new(tx: UnboundedSender<Msg>) -> Self {
+        Self { tx }
+    }
+
+    async fn send(&self, msg: Msg) -> eyre::Result<()> {
+        self.tx
+            .send(msg)
+            .map_err(|_| eyre::eyre!("connection is permanently closed"))?;
+
+        Ok(())
+    }
+
+    pub async fn send_operation(&self, operation: Operation) -> eyre::Result<Task> {
+        let (resp, rx) = mpsc::unbounded_channel();
+
+        self.send(Msg::Command(Command {
+            operation_in: OperationIn {
+                correlation: Uuid::new_v4(),
+                operation,
+            },
+            resp,
+        }))
+        .await?;
+
+        Ok(Task { rx })
+    }
+}
 
 pub struct GrpcClient {
     endpoint: EndPoint,
-    mailbox: UnboundedSender<Msg>,
+    mailbox: Mailbox,
 }
 
 impl GrpcClient {
     pub fn new(endpoint: EndPoint) -> Self {
-        let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+        let (tx, rx) = mpsc::unbounded_channel();
         let driver = Driver::new(endpoint.clone(), tx.clone());
 
         tokio::spawn(multiplex_loop(driver, rx));
 
         Self {
             endpoint,
-            mailbox: tx,
+            mailbox: Mailbox::new(tx),
         }
     }
 }
@@ -42,25 +97,18 @@ impl Client for GrpcClient {
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
     ) -> eyre::Result<WriteResult> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::AppendStream(AppendStream {
+        let mut task = self
+            .mailbox
+            .send_operation(Operation::AppendStream(AppendStream {
                 stream_name: stream_id.to_string(),
                 events: proposes,
                 expected_revision,
-            }),
-            resp: tx,
-        }));
+            }))
+            .await?;
 
-        if outcome.is_err() {
-            eyre::bail!("connection is permanently closed");
-        }
-
-        if let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::AppendStreamCompleted(resp) => match resp {
+        if let Some(out) = task.recv().await? {
+            match out {
+                OperationOut::AppendStreamCompleted(resp) => match resp {
                     AppendStreamCompleted::WriteResult(result) => {
                         return Ok(result);
                     }
@@ -68,7 +116,6 @@ impl Client for GrpcClient {
                         eyre::bail!("error when appending events to '{}': {}", stream_id, e);
                     }
                 },
-                Reply::Errored => eyre::bail!("error when appending events to '{}'", stream_id),
                 _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
             }
         } else {
@@ -79,34 +126,28 @@ impl Client for GrpcClient {
         }
     }
 
-    fn read_stream(
+    async fn read_stream(
         &self,
         stream_id: &str,
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
     ) -> impl Stream<Item = eyre::Result<Record>> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::ReadStream(ReadStream {
+        let outcome = self
+            .mailbox
+            .send_operation(Operation::ReadStream(ReadStream {
                 stream_name: stream_id.to_string(),
                 direction,
                 revision,
                 max_count,
-            }),
-            resp: tx,
-        }));
+            }))
+            .await;
 
         async_stream::try_stream! {
-             if outcome.is_err() {
-                read_error(stream_id, "connection is permanently closed")?;
-            }
-
-            while let Some(event) = rx.recv().await {
-                match event.reply {
-                    Reply::StreamRead(read) => match read {
+            let mut task = outcome?;
+            while let Some(event) = task.recv().await? {
+                match event {
+                    OperationOut::StreamRead(read) => match read {
                         StreamRead::EventsAppeared(records) => {
                             for record in records {
                                 yield record;
@@ -120,10 +161,6 @@ impl Client for GrpcClient {
                         StreamRead::EndOfStream => break,
                     }
 
-                    Reply::Errored => {
-                        read_error(stream_id, "")?;
-                    }
-
                     _ => {
                         unexpected_reply_when_reading(stream_id)?;
                     }
@@ -132,50 +169,40 @@ impl Client for GrpcClient {
         }
     }
 
-    fn subscribe_to_stream(
+    async fn subscribe_to_stream(
         &self,
         stream_id: &str,
         start: Revision<u64>,
     ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let outcome = self
+            .mailbox
+            .send_operation(Operation::Subscribe(Subscribe::ToStream(
+                SubscribeToStream {
+                    stream_name: stream_id.to_string(),
+                    start,
+                },
+            )))
+            .await;
 
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::Subscribe(Subscribe::ToStream(SubscribeToStream {
-                stream_name: stream_id.to_string(),
-                start,
-            })),
-            resp: tx,
-        }));
-
-        let rx = outcome
-            .map(|_| rx)
-            .map_err(|e| eyre::eyre!("connection is permanently closed"));
-
-        produce_subscription_stream(stream_id.to_string(), rx)
+        produce_subscription_stream(stream_id.to_string(), outcome)
     }
 
-    fn subscribe_to_process(
+    async fn subscribe_to_process(
         &self,
         name: &str,
         source_code: &str,
     ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
-        let (tx, rx) = mpsc::unbounded_channel();
+        let outcome = self
+            .mailbox
+            .send_operation(Operation::Subscribe(Subscribe::ToProgram(
+                SubscribeToProgram {
+                    name: name.to_string(),
+                    source: source_code.to_string(),
+                },
+            )))
+            .await;
 
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::Subscribe(Subscribe::ToProgram(SubscribeToProgram {
-                name: name.to_string(),
-                source: source_code.to_string(),
-            })),
-            resp: tx,
-        }));
-
-        let rx = outcome
-            .map(|_| rx)
-            .map_err(|e| eyre::eyre!("connection is permanently closed"));
-
-        produce_subscription_stream(format!("process '{}'", name), rx)
+        produce_subscription_stream(format!("process '{}'", name), outcome)
     }
 
     async fn delete_stream(
@@ -183,61 +210,42 @@ impl Client for GrpcClient {
         stream_id: &str,
         expected_revision: ExpectedRevision,
     ) -> eyre::Result<WriteResult> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
-
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::DeleteStream(DeleteStream {
+        let mut task = self
+            .mailbox
+            .send_operation(Operation::DeleteStream(DeleteStream {
                 stream_name: stream_id.to_string(),
                 expected_revision,
-            }),
-            resp: tx,
-        }));
+            }))
+            .await?;
 
-        if outcome.is_err() {
-            eyre::bail!("connection is permanently closed");
-        }
-
-        if let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::DeleteStreamCompleted(resp) => match resp {
+        if let Some(event) = task.recv().await? {
+            match event {
+                OperationOut::DeleteStreamCompleted(resp) => match resp {
                     DeleteStreamCompleted::DeleteResult(result) => {
                         return Ok(result);
                     }
                     DeleteStreamCompleted::Error(e) => {
-                        eyre::bail!("error when appending events to '{}': {}", stream_id, e);
+                        eyre::bail!("error when deleting stream '{}': {}", stream_id, e);
                     }
                 },
-                Reply::Errored => eyre::bail!("error when appending events to '{}'", stream_id),
-                _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
+                _ => eyre::bail!("unexpected reply when deleting stream '{}'", stream_id),
             }
         }
 
-        eyre::bail!(
-            "unexpected code path when appending events to '{}'",
-            stream_id
-        );
+        eyre::bail!("unexpected code path when deleting stream '{}'", stream_id);
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut task = self
+            .mailbox
+            .send_operation(Operation::ListPrograms(ListPrograms {}))
+            .await?;
 
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::ListPrograms(ListPrograms {}),
-            resp: tx,
-        }));
-
-        if outcome.is_err() {
-            eyre::bail!("connection is permanently closed");
-        }
-
-        if let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::ProgramsListed(resp) => {
+        if let Some(event) = task.recv().await? {
+            match event {
+                OperationOut::ProgramsListed(resp) => {
                     return Ok(resp.programs);
                 }
-                Reply::Errored => eyre::bail!("error when listing programs"),
                 _ => eyre::bail!("unexpected reply when listing programs"),
             }
         }
@@ -246,27 +254,19 @@ impl Client for GrpcClient {
     }
 
     async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut task = self
+            .mailbox
+            .send_operation(Operation::GetProgram(GetProgram { id }))
+            .await?;
 
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::GetProgram(GetProgram { id }),
-            resp: tx,
-        }));
-
-        if outcome.is_err() {
-            eyre::bail!("connection is permanently closed");
-        }
-
-        if let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::ProgramObtained(resp) => {
+        if let Some(event) = task.recv().await? {
+            match event {
+                OperationOut::ProgramObtained(resp) => {
                     return match resp {
                         ProgramObtained::Error(e) => Err(e),
                         ProgramObtained::Success(stats) => Ok(stats),
                     }
                 }
-                Reply::Errored => eyre::bail!("error when getting program {}", id),
                 _ => eyre::bail!("unexpected reply when getting program {}", id),
             }
         }
@@ -275,27 +275,19 @@ impl Client for GrpcClient {
     }
 
     async fn kill_program(&self, id: Uuid) -> eyre::Result<()> {
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let mut task = self
+            .mailbox
+            .send_operation(Operation::KillProgram(KillProgram { id }))
+            .await?;
 
-        let outcome = self.mailbox.send(Msg::Command(Command {
-            correlation: Uuid::new_v4(),
-            operation: Operation::GetProgram(GetProgram { id }),
-            resp: tx,
-        }));
-
-        if outcome.is_err() {
-            eyre::bail!("connection is permanently closed");
-        }
-
-        if let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::ProgramKilled(resp) => {
+        if let Some(event) = task.recv().await? {
+            match event {
+                OperationOut::ProgramKilled(resp) => {
                     return match resp {
                         ProgramKilled::Error(e) => Err(e),
                         ProgramKilled::Success => Ok(()),
                     }
                 }
-                Reply::Errored => eyre::bail!("error when killing program {}", id),
                 _ => eyre::bail!("unexpected reply when killing program {}", id),
             }
         }
@@ -306,13 +298,13 @@ impl Client for GrpcClient {
 
 fn produce_subscription_stream(
     ident: String,
-    rx: eyre::Result<mpsc::UnboundedReceiver<Event>>,
+    outcome: eyre::Result<Task>,
 ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
     async_stream::try_stream! {
-        let mut rx = rx?;
-        while let Some(event) = rx.recv().await {
-            match event.reply {
-                Reply::SubscriptionEvent(event) => {
+        let mut task = outcome?;
+        while let Some(event) = task.recv().await? {
+            match event {
+                OperationOut::SubscriptionEvent(event) => {
                     match event {
                         SubscriptionEventIR::EventsAppeared(events) => {
                             for record in events {
@@ -325,8 +317,6 @@ fn produce_subscription_stream(
                         SubscriptionEventIR::Error(e) => read_error(&ident, e)?,
                     }
                 }
-
-                Reply::Errored => read_error(&ident, "")?,
 
                 _ => unexpected_reply_when_reading(&ident)?,
             }

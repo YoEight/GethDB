@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol::OperationIn;
 use geth_common::EndPoint;
+use geth_common::generated::next::protocol;
 
-use crate::next::{connect_to_node, Command, Connection, Event, Mailbox};
+use crate::next::{Command, connect_to_node, Connection, Event, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -43,14 +43,16 @@ impl Driver {
                 }
             }
 
-            let correlation = command.correlation;
-            let operation = command.operation.clone().into();
-            let input = OperationIn {
-                correlation: Some(correlation.into()),
-                operation: Some(operation),
-            };
+            let correlation = command.operation_in.correlation;
+            let operation_in: protocol::OperationIn = command.operation_in.clone().into();
 
-            if self.connection.as_ref().unwrap().send(input).is_ok() {
+            if self
+                .connection
+                .as_ref()
+                .unwrap()
+                .send(operation_in.into())
+                .is_ok()
+            {
                 self.registry.insert(correlation, command);
                 return Ok(());
             }
@@ -74,7 +76,8 @@ impl Driver {
             // If we are dealing with a subscription, it means we need to keep that command in the
             // registry until the user decides to unsubscribe or the server disconnects.
             if event.is_subscription_related() && command.resp.send(event).is_ok() {
-                self.registry.insert(command.correlation, command);
+                self.registry
+                    .insert(command.operation_in.correlation, command);
             }
 
             return;

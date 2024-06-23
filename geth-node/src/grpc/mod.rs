@@ -1,10 +1,13 @@
-mod streams;
+use tonic::transport::{self, Server};
 
-use crate::process::Processes;
 use geth_common::protocol::streams::server::StreamsServer;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::WriteAheadLog;
-use tonic::transport::{self, Server};
+
+use crate::process::Processes;
+
+mod protocol;
+mod streams;
 
 pub async fn start_server<WAL, S>(processes: Processes<WAL, S>) -> Result<(), transport::Error>
 where

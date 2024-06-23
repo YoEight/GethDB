@@ -28,7 +28,7 @@ pub trait Client {
         proposes: Vec<Propose>,
     ) -> eyre::Result<WriteResult>;
 
-    fn read_stream(
+    async fn read_stream(
         &self,
         stream_id: &str,
         direction: Direction,
@@ -36,13 +36,13 @@ pub trait Client {
         max_count: u64,
     ) -> impl Stream<Item = eyre::Result<Record>>;
 
-    fn subscribe_to_stream(
+    async fn subscribe_to_stream(
         &self,
         stream_id: &str,
         start: Revision<u64>,
     ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>>;
 
-    fn subscribe_to_process(
+    async fn subscribe_to_process(
         &self,
         name: &str,
         source_code: &str,
