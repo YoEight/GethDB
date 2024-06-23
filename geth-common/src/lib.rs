@@ -145,6 +145,121 @@ pub struct EndPoint {
 }
 
 #[derive(Clone)]
+pub struct OperationIn {
+    pub correlation: Uuid,
+    pub operation: Operation,
+}
+
+#[derive(Clone)]
+pub enum Operation {
+    AppendStream(AppendStream),
+    DeleteStream(DeleteStream),
+    ReadStream(ReadStream),
+    Subscribe(Subscribe),
+    ListPrograms(ListPrograms),
+    GetProgram(GetProgram),
+    KillProgram(KillProgram),
+}
+
+impl From<Operation> for operation_in::Operation {
+    fn from(operation: Operation) -> Self {
+        match operation {
+            Operation::AppendStream(req) => operation_in::Operation::AppendStream(req.into()),
+            Operation::DeleteStream(req) => operation_in::Operation::DeleteStream(req.into()),
+            Operation::ReadStream(req) => operation_in::Operation::ReadStream(req.into()),
+            Operation::Subscribe(req) => operation_in::Operation::Subscribe(req.into()),
+            Operation::ListPrograms(req) => operation_in::Operation::ListPrograms(req.into()),
+            Operation::GetProgram(req) => operation_in::Operation::GetProgram(req.into()),
+            Operation::KillProgram(req) => operation_in::Operation::KillProgram(req.into()),
+        }
+    }
+}
+impl From<OperationIn> for next::protocol::OperationIn {
+    fn from(operation: OperationIn) -> Self {
+        let correlation = Some(operation.correlation.into());
+        let operation = Some(operation.operation.into());
+
+        Self {
+            correlation,
+            operation,
+        }
+    }
+}
+
+impl From<next::protocol::OperationIn> for OperationIn {
+    fn from(operation: next::protocol::OperationIn) -> Self {
+        let correlation = operation.correlation.unwrap().into();
+        let operation = match operation.operation.unwrap() {
+            operation_in::Operation::AppendStream(req) => Operation::AppendStream(req.into()),
+            operation_in::Operation::DeleteStream(req) => Operation::DeleteStream(req.into()),
+            operation_in::Operation::ReadStream(req) => Operation::ReadStream(req.into()),
+            operation_in::Operation::Subscribe(req) => Operation::Subscribe(req.into()),
+            operation_in::Operation::ListPrograms(req) => Operation::ListPrograms(req.into()),
+            operation_in::Operation::GetProgram(req) => Operation::GetProgram(req.into()),
+            operation_in::Operation::KillProgram(req) => Operation::KillProgram(req.into()),
+        };
+
+        Self {
+            correlation,
+            operation,
+        }
+    }
+}
+
+pub enum Reply {
+    AppendStreamCompleted(AppendStreamCompleted),
+    StreamRead(StreamRead),
+    SubscriptionEvent(SubscriptionEventIR),
+    DeleteStreamCompleted(DeleteStreamCompleted),
+    ProgramsListed(ProgramListed),
+    ProgramKilled(ProgramKilled),
+    ProgramObtained(ProgramObtained),
+}
+
+pub struct OperationOut {
+    pub correlation: Uuid,
+    pub reply: Reply,
+}
+
+impl OperationOut {
+    pub fn is_subscription_related(&self) -> bool {
+        match &self.reply {
+            Reply::SubscriptionEvent(event) => match event {
+                SubscriptionEventIR::Error(_) => false,
+                _ => true,
+            },
+
+            _ => false,
+        }
+    }
+}
+
+impl From<next::protocol::OperationOut> for OperationOut {
+    fn from(value: next::protocol::OperationOut) -> Self {
+        let correlation = value.correlation.unwrap().into();
+        let reply = match value.operation.unwrap() {
+            operation_out::Operation::AppendCompleted(resp) => {
+                Reply::AppendStreamCompleted(resp.into())
+            }
+            operation_out::Operation::StreamRead(resp) => Reply::StreamRead(resp.into()),
+            operation_out::Operation::SubscriptionEvent(resp) => {
+                Reply::SubscriptionEvent(resp.into())
+            }
+            operation_out::Operation::DeleteCompleted(resp) => {
+                Reply::DeleteStreamCompleted(resp.into())
+            }
+            operation_out::Operation::ProgramsListed(resp) => Reply::ProgramsListed(resp.into()),
+
+            operation_out::Operation::ProgramKilled(resp) => Reply::ProgramKilled(resp.into()),
+
+            operation_out::Operation::ProgramGot(resp) => Reply::ProgramObtained(resp.into()),
+        };
+
+        Self { correlation, reply }
+    }
+}
+
+#[derive(Clone)]
 pub struct AppendStream {
     pub stream_name: String,
     pub events: Vec<Propose>,
@@ -198,6 +313,15 @@ impl From<DeleteStream> for operation_in::Operation {
     }
 }
 
+impl From<operation_in::DeleteStream> for DeleteStream {
+    fn from(value: operation_in::DeleteStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            expected_revision: value.expected_revision.unwrap().into(),
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct ReadStream {
     pub stream_name: String,
@@ -223,6 +347,17 @@ impl From<ReadStream> for operation_in::Operation {
     }
 }
 
+impl From<operation_in::ReadStream> for ReadStream {
+    fn from(value: operation_in::ReadStream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            direction: value.direction.unwrap().into(),
+            revision: value.start.unwrap().into(),
+            max_count: value.max_count,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub enum Subscribe {
     ToProgram(SubscribeToProgram),
@@ -239,6 +374,15 @@ impl From<Subscribe> for operation_in::Subscribe {
             Subscribe::ToStream(v) => operation_in::Subscribe {
                 to: Some(operation_in::subscribe::To::Stream(v.into())),
             },
+        }
+    }
+}
+
+impl From<operation_in::Subscribe> for Subscribe {
+    fn from(value: operation_in::Subscribe) -> Self {
+        match value.to.unwrap() {
+            operation_in::subscribe::To::Program(v) => Subscribe::ToProgram(v.into()),
+            operation_in::subscribe::To::Stream(v) => Subscribe::ToStream(v.into()),
         }
     }
 }
@@ -264,6 +408,15 @@ impl From<SubscribeToProgram> for operation_in::subscribe::Program {
     }
 }
 
+impl From<operation_in::subscribe::Program> for SubscribeToProgram {
+    fn from(value: operation_in::subscribe::Program) -> Self {
+        Self {
+            name: value.name,
+            source: value.source,
+        }
+    }
+}
+
 #[derive(Clone)]
 pub struct SubscribeToStream {
     pub stream_name: String,
@@ -275,6 +428,15 @@ impl From<SubscribeToStream> for operation_in::subscribe::Stream {
         Self {
             stream_name: value.stream_name,
             start: Some(value.start.into()),
+        }
+    }
+}
+
+impl From<operation_in::subscribe::Stream> for SubscribeToStream {
+    fn from(value: operation_in::subscribe::Stream) -> Self {
+        Self {
+            stream_name: value.stream_name,
+            start: value.start.unwrap().into(),
         }
     }
 }
@@ -310,6 +472,26 @@ impl From<Revision<u64>> for operation_in::read_stream::Start {
             Revision::Start => operation_in::read_stream::Start::Beginning(()),
             Revision::End => operation_in::read_stream::Start::End(()),
             Revision::Revision(r) => operation_in::read_stream::Start::Revision(r),
+        }
+    }
+}
+
+impl From<operation_in::read_stream::Start> for Revision<u64> {
+    fn from(value: operation_in::read_stream::Start) -> Self {
+        match value {
+            operation_in::read_stream::Start::Beginning(_) => Revision::Start,
+            operation_in::read_stream::Start::End(_) => Revision::End,
+            operation_in::read_stream::Start::Revision(r) => Revision::Revision(r),
+        }
+    }
+}
+
+impl From<operation_in::subscribe::stream::Start> for Revision<u64> {
+    fn from(value: operation_in::subscribe::stream::Start) -> Self {
+        match value {
+            operation_in::subscribe::stream::Start::Beginning(_) => Revision::Start,
+            operation_in::subscribe::stream::Start::End(_) => Revision::End,
+            operation_in::subscribe::stream::Start::Revision(r) => Revision::Revision(r),
         }
     }
 }
@@ -379,6 +561,15 @@ impl From<Direction> for operation_in::read_stream::Direction {
         match value {
             Direction::Forward => operation_in::read_stream::Direction::Forwards(()),
             Direction::Backward => operation_in::read_stream::Direction::Backwards(()),
+        }
+    }
+}
+
+impl From<operation_in::read_stream::Direction> for Direction {
+    fn from(value: operation_in::read_stream::Direction) -> Self {
+        match value {
+            operation_in::read_stream::Direction::Forwards(_) => Direction::Forward,
+            operation_in::read_stream::Direction::Backwards(_) => Direction::Backward,
         }
     }
 }
@@ -515,6 +706,23 @@ impl From<operation_in::append_stream::ExpectedRevision> for ExpectedRevision {
             }
             operation_in::append_stream::ExpectedRevision::Any(_) => ExpectedRevision::Any,
             operation_in::append_stream::ExpectedRevision::StreamExists(_) => {
+                ExpectedRevision::StreamExists
+            }
+        }
+    }
+}
+
+impl From<operation_in::delete_stream::ExpectedRevision> for ExpectedRevision {
+    fn from(value: operation_in::delete_stream::ExpectedRevision) -> Self {
+        match value {
+            operation_in::delete_stream::ExpectedRevision::Revision(r) => {
+                ExpectedRevision::Revision(r)
+            }
+            operation_in::delete_stream::ExpectedRevision::NoStream(_) => {
+                ExpectedRevision::NoStream
+            }
+            operation_in::delete_stream::ExpectedRevision::Any(_) => ExpectedRevision::Any,
+            operation_in::delete_stream::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
         }
@@ -1196,6 +1404,12 @@ impl From<ListPrograms> for operation_in::ListPrograms {
     }
 }
 
+impl From<operation_in::ListPrograms> for ListPrograms {
+    fn from(_: operation_in::ListPrograms) -> Self {
+        Self {}
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct GetProgram {
     pub id: Uuid,
@@ -1209,6 +1423,14 @@ impl From<GetProgram> for operation_in::GetProgram {
     }
 }
 
+impl From<operation_in::GetProgram> for GetProgram {
+    fn from(value: operation_in::GetProgram) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct KillProgram {
     pub id: Uuid,
@@ -1218,6 +1440,14 @@ impl From<KillProgram> for operation_in::KillProgram {
     fn from(value: KillProgram) -> Self {
         Self {
             id: Some(value.id.into()),
+        }
+    }
+}
+
+impl From<operation_in::KillProgram> for KillProgram {
+    fn from(value: operation_in::KillProgram) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
         }
     }
 }

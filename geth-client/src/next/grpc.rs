@@ -7,31 +7,24 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, ProgramKilled,
-    ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Revision,
+    EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
+    ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Reply, Revision,
     StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
     SubscriptionEventIR, UnsubscribeReason, WriteResult,
 };
 
-use crate::next::{
-    Command, Event, Msg, multiplex_loop, Operation, OperationIn, OperationOut, Reply,
-};
+use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
 use crate::next::driver::Driver;
 
-pub struct Unary;
-pub struct Multi;
-
 pub struct Task {
-    rx: UnboundedReceiver<Event>,
+    rx: UnboundedReceiver<OperationOut>,
 }
 
 impl Task {
-    pub async fn recv(&mut self) -> eyre::Result<Option<OperationOut>> {
+    // FIXME: There would be some general error at that level.
+    pub async fn recv(&mut self) -> eyre::Result<Option<Reply>> {
         if let Some(event) = self.rx.recv().await {
-            match event.reply {
-                Reply::Errored => eyre::bail!("error when processing task"),
-                Reply::Success(out) => return Ok(Some(out)),
-            }
+            return Ok(Some(event.reply));
         }
 
         Ok(None)
@@ -72,19 +65,17 @@ impl Mailbox {
 }
 
 pub struct GrpcClient {
-    endpoint: EndPoint,
     mailbox: Mailbox,
 }
 
 impl GrpcClient {
     pub fn new(endpoint: EndPoint) -> Self {
         let (tx, rx) = mpsc::unbounded_channel();
-        let driver = Driver::new(endpoint.clone(), tx.clone());
+        let driver = Driver::new(endpoint, tx.clone());
 
         tokio::spawn(multiplex_loop(driver, rx));
 
         Self {
-            endpoint,
             mailbox: Mailbox::new(tx),
         }
     }
@@ -108,7 +99,7 @@ impl Client for GrpcClient {
 
         if let Some(out) = task.recv().await? {
             match out {
-                OperationOut::AppendStreamCompleted(resp) => match resp {
+                Reply::AppendStreamCompleted(resp) => match resp {
                     AppendStreamCompleted::WriteResult(result) => {
                         return Ok(result);
                     }
@@ -147,7 +138,7 @@ impl Client for GrpcClient {
             let mut task = outcome?;
             while let Some(event) = task.recv().await? {
                 match event {
-                    OperationOut::StreamRead(read) => match read {
+                    Reply::StreamRead(read) => match read {
                         StreamRead::EventsAppeared(records) => {
                             for record in records {
                                 yield record;
@@ -220,7 +211,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                OperationOut::DeleteStreamCompleted(resp) => match resp {
+                Reply::DeleteStreamCompleted(resp) => match resp {
                     DeleteStreamCompleted::DeleteResult(result) => {
                         return Ok(result);
                     }
@@ -243,7 +234,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                OperationOut::ProgramsListed(resp) => {
+                Reply::ProgramsListed(resp) => {
                     return Ok(resp.programs);
                 }
                 _ => eyre::bail!("unexpected reply when listing programs"),
@@ -261,7 +252,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                OperationOut::ProgramObtained(resp) => {
+                Reply::ProgramObtained(resp) => {
                     return match resp {
                         ProgramObtained::Error(e) => Err(e),
                         ProgramObtained::Success(stats) => Ok(stats),
@@ -282,7 +273,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                OperationOut::ProgramKilled(resp) => {
+                Reply::ProgramKilled(resp) => {
                     return match resp {
                         ProgramKilled::Error(e) => Err(e),
                         ProgramKilled::Success => Ok(()),
@@ -304,7 +295,7 @@ fn produce_subscription_stream(
         let mut task = outcome?;
         while let Some(event) = task.recv().await? {
             match event {
-                OperationOut::SubscriptionEvent(event) => {
+                Reply::SubscriptionEvent(event) => {
                     match event {
                         SubscriptionEventIR::EventsAppeared(events) => {
                             for record in events {

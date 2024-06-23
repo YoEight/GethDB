@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::EndPoint;
+use geth_common::{EndPoint, OperationOut};
 use geth_common::generated::next::protocol;
 
-use crate::next::{Command, connect_to_node, Connection, Event, Mailbox};
+use crate::next::{Command, connect_to_node, Connection, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -71,7 +71,7 @@ impl Driver {
         }
     }
 
-    pub fn handle_event(&mut self, event: Event) {
+    pub fn handle_event(&mut self, event: OperationOut) {
         if let Some(command) = self.registry.remove(&event.correlation) {
             // If we are dealing with a subscription, it means we need to keep that command in the
             // registry until the user decides to unsubscribe or the server disconnects.
