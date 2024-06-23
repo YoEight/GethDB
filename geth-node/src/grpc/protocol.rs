@@ -1,6 +1,7 @@
 use futures::StreamExt;
+use tokio::select;
 use tokio::sync::mpsc;
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
@@ -22,24 +23,78 @@ impl Protocol for ProtocolImpl {
     ) -> Result<Response<Self::MultiplexStream>, Status> {
         let (tx, rx) = mpsc::unbounded_channel();
 
+        tokio::spawn(multiplex(tx, request.into_inner()));
+
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
 }
 
-async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
-    while let Some(operation) = input.next().await {
-        match operation {
-            Err(e) => {
-                let _ = downstream.send(Err(Status::internal(e.to_string())));
+enum Msg {
+    User(OperationIn),
+    Server(OperationOut),
+}
 
+struct Pipeline {
+    input: Streaming<OperationIn>,
+    output: UnboundedReceiver<OperationOut>,
+}
+
+impl Pipeline {
+    async fn recv(&mut self) -> Result<Option<Msg>, Status> {
+        select! {
+            input = self.input.next() => {
+                if let Some(input) = input {
+                    return match input {
+                        Ok(operation) => Ok(Some(Msg::User(operation))),
+                        Err(e) => {
+                            tracing::error!("user error: {:?}", e);
+                            Err(e)
+                        }
+                    };
+                }
+
+                tracing::warn!("user closed connection");
+                Ok(None)
+            },
+
+            output = self.output.recv() => {
+                if let Some(output) = output {
+                    return Ok(Some(Msg::Server(output)));
+                }
+
+                tracing::error!("unexpected server error");
+                Err(Status::unavailable("unexpected server error"))
+            }
+        }
+    }
+}
+
+async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
+    let (tx, mut out_rx) = mpsc::unbounded_channel();
+    let mut pipeline = Pipeline {
+        input,
+        output: out_rx,
+    };
+
+    loop {
+        match pipeline.recv().await {
+            Err(e) => {
+                let _ = downstream.send(Err(e));
                 break;
             }
 
-            Ok(operation) => {
-                let correlation: Uuid = operation.correlation.unwrap().into();
+            Ok(msg) => match msg {
+                None => break,
+                Some(msg) => match msg {
+                    Msg::User(operation) => {
+                        todo!();
+                    }
 
-                // match operation.operation.unwrap() {}
-            }
+                    Msg::Server(operation) => {
+                        let _ = downstream.send(Ok(operation));
+                    }
+                },
+            },
         }
     }
 }
