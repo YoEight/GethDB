@@ -6,20 +6,21 @@ use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol::{OperationIn, OperationOut};
+use geth_common::{Operation, OperationIn, OperationOut};
+use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 
 pub struct ProtocolImpl;
 
-type Downstream = UnboundedSender<Result<OperationOut, Status>>;
+type Downstream = UnboundedSender<Result<protocol::OperationOut, Status>>;
 
 #[tonic::async_trait]
 impl Protocol for ProtocolImpl {
-    type MultiplexStream = UnboundedReceiverStream<Result<OperationOut, Status>>;
+    type MultiplexStream = UnboundedReceiverStream<Result<protocol::OperationOut, Status>>;
 
     async fn multiplex(
         &self,
-        request: Request<Streaming<OperationIn>>,
+        request: Request<Streaming<protocol::OperationIn>>,
     ) -> Result<Response<Self::MultiplexStream>, Status> {
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -35,7 +36,7 @@ enum Msg {
 }
 
 struct Pipeline {
-    input: Streaming<OperationIn>,
+    input: Streaming<protocol::OperationIn>,
     output: UnboundedReceiver<OperationOut>,
 }
 
@@ -45,7 +46,7 @@ impl Pipeline {
             input = self.input.next() => {
                 if let Some(input) = input {
                     return match input {
-                        Ok(operation) => Ok(Some(Msg::User(operation))),
+                        Ok(operation) => Ok(Some(Msg::User(operation.into()))),
                         Err(e) => {
                             tracing::error!("user error: {:?}", e);
                             Err(e)
@@ -69,7 +70,7 @@ impl Pipeline {
     }
 }
 
-async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
+async fn multiplex(downstream: Downstream, mut input: Streaming<protocol::OperationIn>) {
     let (tx, mut out_rx) = mpsc::unbounded_channel();
     let mut pipeline = Pipeline {
         input,
@@ -87,11 +88,11 @@ async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
                 None => break,
                 Some(msg) => match msg {
                     Msg::User(operation) => {
-                        todo!();
+                        run_operation(tx.clone(), operation);
                     }
 
                     Msg::Server(operation) => {
-                        if downstream.send(Ok(operation)).is_err() {
+                        if downstream.send(Ok(operation.into())).is_err() {
                             tracing::warn!("user reset connection");
                             break;
                         }
@@ -99,5 +100,22 @@ async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
                 },
             },
         }
+    }
+}
+
+fn run_operation(tx: UnboundedSender<OperationOut>, input: OperationIn) {
+    tokio::spawn(execute_operation(tx, input));
+}
+
+async fn execute_operation(tx: UnboundedSender<OperationOut>, input: OperationIn) {
+    let correlation = input.correlation;
+    match input.operation {
+        Operation::AppendStream(_) => {}
+        Operation::DeleteStream(_) => {}
+        Operation::ReadStream(_) => {}
+        Operation::Subscribe(_) => {}
+        Operation::ListPrograms(_) => {}
+        Operation::GetProgram(_) => {}
+        Operation::KillProgram(_) => {}
     }
 }
