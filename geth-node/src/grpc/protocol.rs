@@ -91,7 +91,10 @@ async fn multiplex(downstream: Downstream, mut input: Streaming<OperationIn>) {
                     }
 
                     Msg::Server(operation) => {
-                        let _ = downstream.send(Ok(operation));
+                        if downstream.send(Ok(operation)).is_err() {
+                            tracing::warn!("user reset connection");
+                            break;
+                        }
                     }
                 },
             },
