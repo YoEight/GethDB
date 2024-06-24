@@ -1,4 +1,3 @@
-use std::pin::pin;
 use std::sync::Arc;
 
 use futures::{pin_mut, Stream, StreamExt};
@@ -7,7 +6,6 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
-use uuid::Uuid;
 
 use geth_common::{
     Client, Operation, OperationIn, OperationOut, ProgramListed, Reply, StreamRead, Subscribe,
@@ -100,11 +98,11 @@ impl Pipeline {
 async fn multiplex<C>(
     client: Arc<C>,
     downstream: Downstream,
-    mut input: Streaming<protocol::OperationIn>,
+    input: Streaming<protocol::OperationIn>,
 ) where
     C: Client + Send + Sync + 'static,
 {
-    let (tx, mut out_rx) = mpsc::unbounded_channel();
+    let (tx, out_rx) = mpsc::unbounded_channel();
     let mut pipeline = Pipeline {
         input,
         output: out_rx,
@@ -144,7 +142,7 @@ fn run_operation<C>(
     C: Client + Send + Sync + 'static,
 {
     tokio::spawn(async move {
-        let mut stream = execute_operation(client, input).await;
+        let stream = execute_operation(client, input).await;
 
         pin_mut!(stream);
         while let Some(out) = stream.next().await {
@@ -224,7 +222,7 @@ where
                 }
             }
 
-            Operation::ListPrograms(params) => {
+            Operation::ListPrograms(_) => {
                 let programs = client.list_programs().await?;
                 yield OperationOut {
                     correlation,

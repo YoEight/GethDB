@@ -1541,7 +1541,7 @@ impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
                 SubscriptionEvent::EventAppeared(e.event.unwrap().into())
             }
             operation_out::subscription_event::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
-            operation_out::subscription_event::Event::Error(e) => {
+            operation_out::subscription_event::Event::Error(_) => {
                 SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)
             }
         }
@@ -1799,9 +1799,15 @@ impl From<ProgramListed> for operation_out::ProgramsListed {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum ProgramKilled {
     Success,
-    Error(eyre::Report),
+    Error(ProgramKillError),
+}
+
+#[derive(Clone, Copy, Debug)]
+pub enum ProgramKillError {
+    NotExists,
 }
 
 impl From<operation_out::ProgramKilled> for ProgramKilled {
@@ -1810,7 +1816,7 @@ impl From<operation_out::ProgramKilled> for ProgramKilled {
             operation_out::program_killed::Result::Success(_) => ProgramKilled::Success,
             operation_out::program_killed::Result::Error(e) => match e.error.unwrap() {
                 operation_out::program_killed::error::Error::NotExists(_) => {
-                    ProgramKilled::Error(eyre::eyre!("program not exists"))
+                    ProgramKilled::Error(ProgramKillError::NotExists)
                 }
             },
         }
@@ -1827,7 +1833,11 @@ impl From<ProgramKilled> for operation_out::ProgramKilled {
             ProgramKilled::Error(e) => operation_out::ProgramKilled {
                 result: Some(operation_out::program_killed::Result::Error(
                     operation_out::program_killed::Error {
-                        error: Some(operation_out::program_killed::error::Error::NotExists(())),
+                        error: Some(match e {
+                            ProgramKillError::NotExists => {
+                                operation_out::program_killed::error::Error::NotExists(())
+                            }
+                        }),
                     },
                 )),
             },
@@ -1874,7 +1884,12 @@ impl From<ProgramStats> for operation_out::program_obtained::ProgramStats {
 #[derive(Debug)]
 pub enum ProgramObtained {
     Success(ProgramStats),
-    Error(eyre::Report),
+    Error(GetProgramError),
+}
+
+#[derive(Debug)]
+pub enum GetProgramError {
+    NotExists,
 }
 
 impl From<operation_out::ProgramObtained> for ProgramObtained {
@@ -1886,7 +1901,7 @@ impl From<operation_out::ProgramObtained> for ProgramObtained {
 
             operation_out::program_obtained::Result::Error(e) => match e.error.unwrap() {
                 operation_out::program_obtained::error::Error::NotExists(_) => {
-                    ProgramObtained::Error(eyre::eyre!("program not found"))
+                    ProgramObtained::Error(GetProgramError::NotExists)
                 }
             },
         }
@@ -1905,7 +1920,11 @@ impl From<ProgramObtained> for operation_out::ProgramObtained {
             ProgramObtained::Error(e) => operation_out::ProgramObtained {
                 result: Some(operation_out::program_obtained::Result::Error(
                     operation_out::program_obtained::Error {
-                        error: Some(operation_out::program_obtained::error::Error::NotExists(())),
+                        error: Some(match e {
+                            GetProgramError::NotExists => {
+                                operation_out::program_obtained::error::Error::NotExists(())
+                            }
+                        }),
                     },
                 )),
             },

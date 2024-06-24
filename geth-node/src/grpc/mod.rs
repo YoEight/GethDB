@@ -1,7 +1,6 @@
 use tonic::transport::{self, Server};
 
 use geth_common::generated::next::protocol::protocol_server::ProtocolServer;
-use geth_common::protocol::streams::server::StreamsServer;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::WriteAheadLog;
 

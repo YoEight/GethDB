@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol;
 use geth_common::{EndPoint, OperationOut};
+use geth_common::generated::next::protocol;
 
-use crate::next::{connect_to_node, Command, Connection, Mailbox};
+use crate::next::{Command, connect_to_node, Connection, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -39,7 +39,6 @@ impl Driver {
                         self.endpoint.port,
                     );
                     // TODO - We need to re-send passed inflight commands.
-                    did_we_reconnect = false;
                 }
             }
 

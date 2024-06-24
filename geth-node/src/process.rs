@@ -1,15 +1,14 @@
 use std::io;
 
 use eyre::bail;
-use futures::Stream;
 use futures::stream::BoxStream;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    ProgramKilled, ProgrammableStats, ProgrammableSummary, ProgramObtained,
-    ProgramSummary, Propose, Record, Revision, SubscriptionEvent,
+    ProgramKilled, ProgrammableStats, ProgrammableSummary, ProgramObtained, ProgramSummary,
+    Propose, Record, Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
