@@ -205,7 +205,7 @@ impl From<next::protocol::OperationIn> for OperationIn {
 pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
-    SubscriptionEvent(SubscriptionEventIR),
+    SubscriptionEvent(SubscriptionEvent),
     DeleteStreamCompleted(DeleteStreamCompleted),
     ProgramsListed(ProgramListed),
     ProgramKilled(ProgramKilled),
@@ -221,7 +221,7 @@ impl OperationOut {
     pub fn is_subscription_related(&self) -> bool {
         match &self.reply {
             Reply::SubscriptionEvent(event) => match event {
-                SubscriptionEventIR::Error(_) => false,
+                SubscriptionEvent::Unsubscribed(_) => false,
                 _ => true,
             },
 
@@ -1465,7 +1465,7 @@ impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
 
 pub enum StreamRead {
     EndOfStream,
-    EventsAppeared(Vec<Record>),
+    EventAppeared(Record),
     Error(StreamReadError),
 }
 
@@ -1473,8 +1473,8 @@ impl From<operation_out::StreamRead> for StreamRead {
     fn from(value: operation_out::StreamRead) -> Self {
         match value.read_result.unwrap() {
             operation_out::stream_read::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
-            operation_out::stream_read::ReadResult::EventsAppeared(e) => {
-                StreamRead::EventsAppeared(e.events.into_iter().map(|r| r.into()).collect())
+            operation_out::stream_read::ReadResult::EventAppeared(e) => {
+                StreamRead::EventAppeared(e.event.unwrap().into())
             }
             operation_out::stream_read::ReadResult::Error(_) => {
                 StreamRead::Error(StreamReadError {})
@@ -1489,10 +1489,10 @@ impl From<StreamRead> for operation_out::StreamRead {
             StreamRead::EndOfStream => operation_out::StreamRead {
                 read_result: Some(operation_out::stream_read::ReadResult::EndOfStream(())),
             },
-            StreamRead::EventsAppeared(e) => operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::EventsAppeared(
-                    operation_out::stream_read::EventsAppeared {
-                        events: e.into_iter().map(|r| r.into()).collect(),
+            StreamRead::EventAppeared(e) => operation_out::StreamRead {
+                read_result: Some(operation_out::stream_read::ReadResult::EventAppeared(
+                    operation_out::stream_read::EventAppeared {
+                        event: Some(e.into()),
                     },
                 )),
             },
@@ -1513,13 +1513,6 @@ impl Display for StreamReadError {
     }
 }
 
-pub enum SubscriptionEventIR {
-    Confirmation(SubscriptionConfirmation),
-    EventsAppeared(Vec<Record>),
-    CaughtUp,
-    Error(SubscriptionError),
-}
-
 pub enum SubscriptionConfirmation {
     StreamName(String),
     ProcessId(Uuid),
@@ -1533,34 +1526,32 @@ impl Display for SubscriptionError {
     }
 }
 
-impl From<operation_out::SubscriptionEvent> for SubscriptionEventIR {
+impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
     fn from(value: operation_out::SubscriptionEvent) -> Self {
         match value.event.unwrap() {
             operation_out::subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
                 operation_out::subscription_event::confirmation::Kind::StreamName(s) => {
-                    SubscriptionEventIR::Confirmation(SubscriptionConfirmation::StreamName(s))
+                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(s))
                 }
                 operation_out::subscription_event::confirmation::Kind::ProcessId(p) => {
-                    SubscriptionEventIR::Confirmation(SubscriptionConfirmation::ProcessId(p.into()))
+                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p.into()))
                 }
             },
-            operation_out::subscription_event::Event::EventsAppeared(ea) => {
-                SubscriptionEventIR::EventsAppeared(
-                    ea.events.into_iter().map(|r| r.into()).collect(),
-                )
+            operation_out::subscription_event::Event::EventAppeared(e) => {
+                SubscriptionEvent::EventAppeared(e.event.unwrap().into())
             }
-            operation_out::subscription_event::Event::CaughtUp(_) => SubscriptionEventIR::CaughtUp,
+            operation_out::subscription_event::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
             operation_out::subscription_event::Event::Error(e) => {
-                SubscriptionEventIR::Error(e.into())
+                SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)
             }
         }
     }
 }
 
-impl From<SubscriptionEventIR> for operation_out::SubscriptionEvent {
-    fn from(value: SubscriptionEventIR) -> Self {
+impl From<SubscriptionEvent> for operation_out::SubscriptionEvent {
+    fn from(value: SubscriptionEvent) -> Self {
         match value {
-            SubscriptionEventIR::Confirmation(c) => match c {
+            SubscriptionEvent::Confirmed(c) => match c {
                 SubscriptionConfirmation::StreamName(s) => operation_out::SubscriptionEvent {
                     event: Some(operation_out::subscription_event::Event::Confirmation(
                         operation_out::subscription_event::Confirmation {
@@ -1584,19 +1575,19 @@ impl From<SubscriptionEventIR> for operation_out::SubscriptionEvent {
                     )),
                 },
             },
-            SubscriptionEventIR::EventsAppeared(ea) => operation_out::SubscriptionEvent {
-                event: Some(operation_out::subscription_event::Event::EventsAppeared(
-                    operation_out::subscription_event::EventsAppeared {
-                        events: ea.into_iter().map(|r| r.into()).collect(),
+            SubscriptionEvent::EventAppeared(e) => operation_out::SubscriptionEvent {
+                event: Some(operation_out::subscription_event::Event::EventAppeared(
+                    operation_out::subscription_event::EventAppeared {
+                        event: Some(e.into()),
                     },
                 )),
             },
-            SubscriptionEventIR::CaughtUp => operation_out::SubscriptionEvent {
+            SubscriptionEvent::CaughtUp => operation_out::SubscriptionEvent {
                 event: Some(operation_out::subscription_event::Event::CaughtUp(
                     operation_out::subscription_event::CaughtUp {},
                 )),
             },
-            SubscriptionEventIR::Error(e) => operation_out::SubscriptionEvent {
+            SubscriptionEvent::Unsubscribed(_) => operation_out::SubscriptionEvent {
                 event: Some(operation_out::subscription_event::Event::Error(
                     operation_out::subscription_event::Error {},
                 )),

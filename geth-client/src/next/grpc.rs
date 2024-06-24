@@ -10,7 +10,7 @@ use geth_common::{
     EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
     ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Reply, Revision,
     StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
-    SubscriptionEventIR, UnsubscribeReason,
+    UnsubscribeReason,
 };
 
 use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
@@ -136,10 +136,8 @@ impl Client for GrpcClient {
             while let Some(event) = task.recv().await? {
                 match event {
                     Reply::StreamRead(read) => match read {
-                        StreamRead::EventsAppeared(records) => {
-                            for record in records {
-                                yield record;
-                            }
+                        StreamRead::EventAppeared(record) => {
+                            yield record;
                         }
 
                         StreamRead::Error(e) => {
@@ -286,17 +284,7 @@ fn produce_subscription_stream<'a>(
         while let Some(event) = task.recv().await? {
             match event {
                 Reply::SubscriptionEvent(event) => {
-                    match event {
-                        SubscriptionEventIR::EventsAppeared(events) => {
-                            for record in events {
-                                yield SubscriptionEvent::EventAppeared(record);
-                            }
-                        }
-
-                        SubscriptionEventIR::Confirmation(confirm) => yield SubscriptionEvent::Confirmed(confirm),
-                        SubscriptionEventIR::CaughtUp => yield SubscriptionEvent::CaughtUp,
-                        SubscriptionEventIR::Error(e) => read_error(&ident, e)?,
-                    }
+                    yield event;
                 }
 
                 _ => unexpected_reply_when_reading(&ident)?,

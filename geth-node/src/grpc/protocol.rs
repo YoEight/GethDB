@@ -9,7 +9,7 @@ use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
-use geth_common::{Client, Operation, OperationIn, OperationOut, Reply};
+use geth_common::{Client, Operation, OperationIn, OperationOut, Reply, StreamRead, Subscribe};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 
@@ -184,8 +184,44 @@ where
                     reply: Reply::DeleteStreamCompleted(completed),
                 };
             }
-            Operation::ReadStream(_) => {}
-            Operation::Subscribe(_) => {}
+
+            Operation::ReadStream(params) => {
+                let mut stream = client.read_stream(
+                    &params.stream_name,
+                    params.direction,
+                    params.revision,
+                    params.max_count,
+                ).await;
+
+                while let Some(record) = stream.next().await {
+                    let record = record?;
+                    yield OperationOut {
+                        correlation,
+                        reply: Reply::StreamRead(StreamRead::EventAppeared(record)),
+                    };
+                }
+            }
+
+            Operation::Subscribe(subscribe) => {
+                let mut stream = match subscribe {
+                    Subscribe::ToStream(params) => {
+                        client.subscribe_to_stream(&params.stream_name, params.start).await
+                    }
+
+                    Subscribe::ToProgram(params) => {
+                        client.subscribe_to_process(&params.name, &params.source).await
+                    }
+                };
+
+                while let Some(event) = stream.next().await {
+                    let event = event?;
+                    yield OperationOut {
+                        correlation,
+                        reply: Reply::SubscriptionEvent(event),
+                    };
+                }
+            }
+
             Operation::ListPrograms(_) => {}
             Operation::GetProgram(_) => {}
             Operation::KillProgram(_) => {}

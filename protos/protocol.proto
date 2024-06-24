@@ -166,12 +166,12 @@ message OperationOut {
   message StreamRead {
     oneof read_result {
       google.protobuf.Empty end_of_stream = 1;
-      EventsAppeared events_appeared = 2;
+      EventAppeared event_appeared = 2;
       Error error = 3;
     }
 
-    message EventsAppeared {
-      repeated RecordedEvent events = 1;
+    message EventAppeared {
+      RecordedEvent event = 1;
     }
 
     message Error {
@@ -182,7 +182,7 @@ message OperationOut {
   message SubscriptionEvent {
     oneof event {
       Confirmation confirmation = 1;
-      EventsAppeared events_appeared = 2;
+      EventAppeared event_appeared = 2;
       CaughtUp caught_up = 3;
       Error error = 4;
     }
@@ -194,8 +194,8 @@ message OperationOut {
       }
     }
 
-    message EventsAppeared {
-      repeated RecordedEvent events = 1;
+    message EventAppeared {
+      RecordedEvent event = 1;
     }
 
     message CaughtUp {}
