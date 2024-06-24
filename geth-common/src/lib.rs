@@ -12,8 +12,7 @@ use protocol::streams::append_resp;
 use protocol::streams::delete_resp;
 
 use crate::generated::next;
-use crate::generated::next::protocol::{delete_stream_completed, operation_in, operation_out};
-use crate::generated::next::protocol::operation_out::subscription_event;
+use crate::generated::next::protocol::{operation_in, operation_out};
 
 mod client;
 mod io;
@@ -548,17 +547,17 @@ impl From<operation_out::append_stream_completed::error::wrong_expected_revision
     }
 }
 
-impl From<delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
+impl From<next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
     for ExpectedRevision
 {
     fn from(
-        value: delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
+        value: next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
     ) -> Self {
         match value {
-            delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
                 _,
             ) => ExpectedRevision::NoStream,
-            delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -673,6 +672,20 @@ impl From<next::protocol::RecordedEvent> for Record {
     }
 }
 
+impl From<Record> for next::protocol::RecordedEvent {
+    fn from(value: Record) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            class: value.r#type,
+            stream_name: value.stream_name,
+            position: value.position.raw(),
+            revision: value.revision,
+            payload: value.data,
+            metadata: Default::default(),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub enum ExpectedRevision {
     Revision(u64),
@@ -715,6 +728,80 @@ impl From<ExpectedRevision> for operation_in::append_stream::ExpectedRevision {
             ExpectedRevision::Any => operation_in::append_stream::ExpectedRevision::Any(()),
             ExpectedRevision::StreamExists => {
                 operation_in::append_stream::ExpectedRevision::StreamExists(())
+            }
+        }
+    }
+}
+
+impl From<ExpectedRevision>
+    for operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision
+{
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
+            }
+            ExpectedRevision::NoStream => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<ExpectedRevision>
+    for next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision
+{
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
+            }
+            ExpectedRevision::NoStream => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
+            }
+            _ => unreachable!(),
+        }
+    }
+}
+
+impl From<ExpectedRevision>
+    for operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision
+{
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
+            }
+            ExpectedRevision::NoStream => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
+            }
+            ExpectedRevision::Any => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
+            }
+            ExpectedRevision::StreamExists => {
+                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
+            }
+        }
+    }
+}
+
+impl From<ExpectedRevision>
+    for next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision
+{
+    fn from(value: ExpectedRevision) -> Self {
+        match value {
+            ExpectedRevision::Revision(v) => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
+            }
+            ExpectedRevision::NoStream => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
+            }
+            ExpectedRevision::Any => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
+            }
+            ExpectedRevision::StreamExists => {
+                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
             }
         }
     }
@@ -794,23 +881,23 @@ impl From<operation_out::append_stream_completed::error::wrong_expected_revision
     }
 }
 
-impl From<delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+impl From<next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
     for ExpectedRevision
 {
     fn from(
-        value: delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+        value: next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
     ) -> Self {
         match value {
-            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
                 ExpectedRevision::Any
             }
-            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
-            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
                 _,
             ) => ExpectedRevision::NoStream,
-            delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -829,6 +916,28 @@ impl Display for WrongExpectedRevisionError {
             "Expected revision {} but got {} instead",
             self.expected, self.current
         )
+    }
+}
+
+impl From<WrongExpectedRevisionError>
+    for operation_out::append_stream_completed::error::WrongExpectedRevision
+{
+    fn from(value: WrongExpectedRevisionError) -> Self {
+        Self {
+            current_revision: Some(value.current.into()),
+            expected_revision: Some(value.expected.into()),
+        }
+    }
+}
+
+impl From<WrongExpectedRevisionError>
+    for next::protocol::delete_stream_completed::error::WrongExpectedRevision
+{
+    fn from(value: WrongExpectedRevisionError) -> Self {
+        Self {
+            current_revision: Some(value.current.into()),
+            expected_revision: Some(value.expected.into()),
+        }
     }
 }
 
@@ -1206,6 +1315,24 @@ pub struct WriteResult {
     pub next_logical_position: u64,
 }
 
+impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
+    fn from(value: WriteResult) -> Self {
+        Self {
+            next_revision: value.next_expected_version.raw() as u64,
+            position: value.position.raw(),
+        }
+    }
+}
+
+impl From<WriteResult> for next::protocol::delete_stream_completed::DeleteResult {
+    fn from(value: WriteResult) -> Self {
+        Self {
+            next_revision: value.next_expected_version.raw() as u64,
+            position: value.position.raw(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum DeleteResult {
     WrongExpectedRevision(WrongExpectedRevisionError),
@@ -1391,19 +1518,23 @@ impl Display for SubscriptionError {
 impl From<operation_out::SubscriptionEvent> for SubscriptionEventIR {
     fn from(value: operation_out::SubscriptionEvent) -> Self {
         match value.event.unwrap() {
-            subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
-                subscription_event::confirmation::Kind::StreamName(s) => {
+            operation_out::subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
+                operation_out::subscription_event::confirmation::Kind::StreamName(s) => {
                     SubscriptionEventIR::Confirmation(SubscriptionConfirmation::StreamName(s))
                 }
-                subscription_event::confirmation::Kind::ProcessId(p) => {
+                operation_out::subscription_event::confirmation::Kind::ProcessId(p) => {
                     SubscriptionEventIR::Confirmation(SubscriptionConfirmation::ProcessId(p.into()))
                 }
             },
-            subscription_event::Event::EventsAppeared(ea) => SubscriptionEventIR::EventsAppeared(
-                ea.events.into_iter().map(|r| r.into()).collect(),
-            ),
-            subscription_event::Event::CaughtUp(_) => SubscriptionEventIR::CaughtUp,
-            subscription_event::Event::Error(e) => SubscriptionEventIR::Error(e.into()),
+            operation_out::subscription_event::Event::EventsAppeared(ea) => {
+                SubscriptionEventIR::EventsAppeared(
+                    ea.events.into_iter().map(|r| r.into()).collect(),
+                )
+            }
+            operation_out::subscription_event::Event::CaughtUp(_) => SubscriptionEventIR::CaughtUp,
+            operation_out::subscription_event::Event::Error(e) => {
+                SubscriptionEventIR::Error(e.into())
+            }
         }
     }
 }
@@ -1413,41 +1544,51 @@ impl From<SubscriptionEventIR> for operation_out::SubscriptionEvent {
         match value {
             SubscriptionEventIR::Confirmation(c) => match c {
                 SubscriptionConfirmation::StreamName(s) => operation_out::SubscriptionEvent {
-                    event: Some(subscription_event::Event::Confirmation(
-                        subscription_event::Confirmation {
-                            kind: Some(subscription_event::confirmation::Kind::StreamName(s)),
+                    event: Some(operation_out::subscription_event::Event::Confirmation(
+                        operation_out::subscription_event::Confirmation {
+                            kind: Some(
+                                operation_out::subscription_event::confirmation::Kind::StreamName(
+                                    s,
+                                ),
+                            ),
                         },
                     )),
                 },
                 SubscriptionConfirmation::ProcessId(p) => operation_out::SubscriptionEvent {
-                    event: Some(subscription_event::Event::Confirmation(
-                        subscription_event::Confirmation {
-                            kind: Some(subscription_event::confirmation::Kind::ProcessId(p.into())),
+                    event: Some(operation_out::subscription_event::Event::Confirmation(
+                        operation_out::subscription_event::Confirmation {
+                            kind: Some(
+                                operation_out::subscription_event::confirmation::Kind::ProcessId(
+                                    p.into(),
+                                ),
+                            ),
                         },
                     )),
                 },
             },
             SubscriptionEventIR::EventsAppeared(ea) => operation_out::SubscriptionEvent {
-                event: Some(subscription_event::Event::EventsAppeared(
-                    subscription_event::EventsAppeared {
+                event: Some(operation_out::subscription_event::Event::EventsAppeared(
+                    operation_out::subscription_event::EventsAppeared {
                         events: ea.into_iter().map(|r| r.into()).collect(),
                     },
                 )),
             },
             SubscriptionEventIR::CaughtUp => operation_out::SubscriptionEvent {
-                event: Some(subscription_event::Event::CaughtUp(
-                    subscription_event::CaughtUp {},
+                event: Some(operation_out::subscription_event::Event::CaughtUp(
+                    operation_out::subscription_event::CaughtUp {},
                 )),
             },
             SubscriptionEventIR::Error(e) => operation_out::SubscriptionEvent {
-                event: Some(subscription_event::Event::Error(e.into())),
+                event: Some(operation_out::subscription_event::Event::Error(
+                    operation_out::subscription_event::Error {},
+                )),
             },
         }
     }
 }
 
-impl From<subscription_event::Error> for SubscriptionError {
-    fn from(_: subscription_event::Error) -> Self {
+impl From<operation_out::subscription_event::Error> for SubscriptionError {
+    fn from(_: operation_out::subscription_event::Error) -> Self {
         SubscriptionError {}
     }
 }
@@ -1482,7 +1623,7 @@ impl Display for DeleteError {
 impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
     fn from(value: next::protocol::DeleteStreamCompleted) -> Self {
         match value.result.unwrap() {
-            delete_stream_completed::Result::WriteResult(r) => {
+            next::protocol::delete_stream_completed::Result::WriteResult(r) => {
                 DeleteStreamCompleted::DeleteResult(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: Position(r.position),
@@ -1490,8 +1631,8 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
                 })
             }
 
-            delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
-                delete_stream_completed::error::Error::WrongRevision(e) => {
+            next::protocol::delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
+                next::protocol::delete_stream_completed::error::Error::WrongRevision(e) => {
                     DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
                         WrongExpectedRevisionError {
                             expected: e.expected_revision.unwrap().into(),
@@ -1499,7 +1640,7 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
                         },
                     ))
                 }
-                delete_stream_completed::error::Error::NotLeader(e) => {
+                next::protocol::delete_stream_completed::error::Error::NotLeader(e) => {
                     DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
                         host: e.leader_host,
                         port: e.leader_port as u16,
@@ -1514,19 +1655,23 @@ impl From<DeleteStreamCompleted> for next::protocol::DeleteStreamCompleted {
     fn from(value: DeleteStreamCompleted) -> Self {
         match value {
             DeleteStreamCompleted::DeleteResult(w) => next::protocol::DeleteStreamCompleted {
-                result: Some(delete_stream_completed::Result::WriteResult(w.into())),
+                result: Some(
+                    next::protocol::delete_stream_completed::Result::WriteResult(w.into()),
+                ),
             },
 
             DeleteStreamCompleted::Error(e) => next::protocol::DeleteStreamCompleted {
-                result: Some(delete_stream_completed::Result::Error(
-                    delete_stream_completed::Error {
+                result: Some(next::protocol::delete_stream_completed::Result::Error(
+                    next::protocol::delete_stream_completed::Error {
                         error: Some(match e {
                             DeleteError::WrongExpectedRevision(e) => {
-                                delete_stream_completed::error::Error::WrongRevision(e.into())
+                                next::protocol::delete_stream_completed::error::Error::WrongRevision(
+                                    e.into(),
+                                )
                             }
                             DeleteError::NotLeaderException(e) => {
-                                delete_stream_completed::error::Error::NotLeader(
-                                    delete_stream_completed::error::NotLeader {
+                                next::protocol::delete_stream_completed::error::Error::NotLeader(
+                                    next::protocol::delete_stream_completed::error::NotLeader {
                                         leader_host: e.host,
                                         leader_port: e.port as u32,
                                     },
@@ -1619,8 +1764,26 @@ impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
     }
 }
 
+impl From<ProgramSummary> for operation_out::programs_listed::ProgramSummary {
+    fn from(value: ProgramSummary) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            name: value.name,
+            started_at: value.started_at.timestamp(),
+        }
+    }
+}
+
 impl From<operation_out::ProgramsListed> for ProgramListed {
     fn from(value: operation_out::ProgramsListed) -> Self {
+        Self {
+            programs: value.programs.into_iter().map(|p| p.into()).collect(),
+        }
+    }
+}
+
+impl From<ProgramListed> for operation_out::ProgramsListed {
+    fn from(value: ProgramListed) -> Self {
         Self {
             programs: value.programs.into_iter().map(|p| p.into()).collect(),
         }
@@ -1640,6 +1803,24 @@ impl From<operation_out::ProgramKilled> for ProgramKilled {
                 operation_out::program_killed::error::Error::NotExists(_) => {
                     ProgramKilled::Error(eyre::eyre!("program not exists"))
                 }
+            },
+        }
+    }
+}
+
+impl From<ProgramKilled> for operation_out::ProgramKilled {
+    fn from(value: ProgramKilled) -> Self {
+        match value {
+            ProgramKilled::Success => operation_out::ProgramKilled {
+                result: Some(operation_out::program_killed::Result::Success(())),
+            },
+
+            ProgramKilled::Error(e) => operation_out::ProgramKilled {
+                result: Some(operation_out::program_killed::Result::Error(
+                    operation_out::program_killed::Error {
+                        error: Some(operation_out::program_killed::error::Error::NotExists(())),
+                    },
+                )),
             },
         }
     }
@@ -1668,6 +1849,19 @@ impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
     }
 }
 
+impl From<ProgramStats> for operation_out::program_obtained::ProgramStats {
+    fn from(value: ProgramStats) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            name: value.name,
+            source_code: value.source_code,
+            subscriptions: value.subscriptions,
+            pushed_events: value.pushed_events as u64,
+            started_at: value.started.timestamp(),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum ProgramObtained {
     Success(ProgramStats),
@@ -1685,6 +1879,26 @@ impl From<operation_out::ProgramObtained> for ProgramObtained {
                 operation_out::program_obtained::error::Error::NotExists(_) => {
                     ProgramObtained::Error(eyre::eyre!("program not found"))
                 }
+            },
+        }
+    }
+}
+
+impl From<ProgramObtained> for operation_out::ProgramObtained {
+    fn from(value: ProgramObtained) -> Self {
+        match value {
+            ProgramObtained::Success(stats) => operation_out::ProgramObtained {
+                result: Some(operation_out::program_obtained::Result::Program(
+                    stats.into(),
+                )),
+            },
+
+            ProgramObtained::Error(e) => operation_out::ProgramObtained {
+                result: Some(operation_out::program_obtained::Result::Error(
+                    operation_out::program_obtained::Error {
+                        error: Some(operation_out::program_obtained::error::Error::NotExists(())),
+                    },
+                )),
             },
         }
     }
