@@ -212,18 +212,6 @@ pub enum Reply {
     ProgramObtained(ProgramObtained),
 }
 
-impl Reply {
-    pub fn append_stream_completed_with_success(value: WriteResult) -> Self {
-        Self::AppendStreamCompleted(AppendStreamCompleted::WriteResult(value))
-    }
-
-    pub fn append_stream_completed_with_error(value: WrongExpectedRevisionError) -> Self {
-        Self::AppendStreamCompleted(AppendStreamCompleted::Error(
-            AppendError::WrongExpectedRevision(value),
-        ))
-    }
-}
-
 pub struct OperationOut {
     pub correlation: Uuid,
     pub reply: Reply,
@@ -915,7 +903,7 @@ impl From<operation_out::delete_stream_completed::error::wrong_expected_revision
         }
     }
 }
-#[derive(Error, Debug)]
+#[derive(Error, Debug, Copy, Clone)]
 pub struct WrongExpectedRevisionError {
     pub expected: ExpectedRevision,
     pub current: ExpectedRevision,
@@ -1320,6 +1308,12 @@ impl From<Option<u64>> for protocol::streams::CurrentRevisionOption {
     }
 }
 
+#[derive(Clone, Copy, Debug)]
+pub enum AppendCompleted {
+    Success(WriteResult),
+    Error(WrongExpectedRevisionError),
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
@@ -1382,12 +1376,14 @@ pub struct ProgrammableSummary {
 }
 
 pub enum AppendStreamCompleted {
-    WriteResult(WriteResult),
+    Success(WriteResult),
     Error(AppendError),
 }
 
+#[derive(Clone, Copy, Debug)]
 pub enum AppendError {
     WrongExpectedRevision(WrongExpectedRevisionError),
+    StreamDeleted,
 }
 
 impl Display for AppendError {
@@ -1400,6 +1396,8 @@ impl Display for AppendError {
                     e.expected, e.current
                 )
             }
+
+            AppendError::StreamDeleted => write!(f, "stream deleted"),
         }
     }
 }
@@ -1408,7 +1406,7 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
     fn from(value: operation_out::AppendStreamCompleted) -> Self {
         match value.append_result.unwrap() {
             operation_out::append_stream_completed::AppendResult::WriteResult(r) => {
-                AppendStreamCompleted::WriteResult(WriteResult {
+                AppendStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: Position(r.position),
                     next_logical_position: 0,
@@ -1425,6 +1423,9 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
                             },
                         ))
                     }
+                    operation_out::append_stream_completed::error::Error::StreamDeleted(_) => {
+                        AppendStreamCompleted::Error(AppendError::StreamDeleted)
+                    }
                 }
             }
         }
@@ -1434,7 +1435,7 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
 impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
     fn from(value: AppendStreamCompleted) -> Self {
         match value {
-            AppendStreamCompleted::WriteResult(w) => operation_out::AppendStreamCompleted {
+            AppendStreamCompleted::Success(w) => operation_out::AppendStreamCompleted {
                 append_result: Some(
                     operation_out::append_stream_completed::AppendResult::WriteResult(w.into()),
                 ),
@@ -1447,6 +1448,11 @@ impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
                             AppendError::WrongExpectedRevision(e) => {
                                 operation_out::append_stream_completed::error::Error::WrongRevision(
                                     e.into(),
+                                )
+                            }
+                            AppendError::StreamDeleted => {
+                                operation_out::append_stream_completed::error::Error::StreamDeleted(
+                                    (),
                                 )
                             }
                         }),
@@ -1606,7 +1612,7 @@ impl From<operation_out::subscription_event::Error> for SubscriptionError {
 }
 
 pub enum DeleteStreamCompleted {
-    DeleteResult(WriteResult),
+    Success(WriteResult),
     Error(DeleteError),
 }
 
@@ -1636,7 +1642,7 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
     fn from(value: operation_out::DeleteStreamCompleted) -> Self {
         match value.result.unwrap() {
             operation_out::delete_stream_completed::Result::WriteResult(r) => {
-                DeleteStreamCompleted::DeleteResult(WriteResult {
+                DeleteStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: Position(r.position),
                     next_logical_position: 0,
@@ -1666,7 +1672,7 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
 impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
     fn from(value: DeleteStreamCompleted) -> Self {
         match value {
-            DeleteStreamCompleted::DeleteResult(w) => operation_out::DeleteStreamCompleted {
+            DeleteStreamCompleted::Success(w) => operation_out::DeleteStreamCompleted {
                 result: Some(operation_out::delete_stream_completed::Result::WriteResult(
                     w.into(),
                 )),

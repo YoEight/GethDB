@@ -144,6 +144,7 @@ message OperationOut {
     message Error {
       oneof error {
         WrongExpectedRevision wrong_revision = 1;
+        google.protobuf.Empty stream_deleted = 2;
       }
 
       message WrongExpectedRevision {

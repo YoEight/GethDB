@@ -10,7 +10,7 @@ use geth_common::{
     EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
     ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Reply, Revision,
     StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
-    SubscriptionEventIR, UnsubscribeReason, WriteResult,
+    SubscriptionEventIR, UnsubscribeReason,
 };
 
 use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
@@ -90,7 +90,7 @@ impl Client for GrpcClient {
         stream_id: &str,
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
-    ) -> eyre::Result<WriteResult> {
+    ) -> eyre::Result<AppendStreamCompleted> {
         let mut task = self
             .mailbox
             .send_operation(Operation::AppendStream(AppendStream {
@@ -102,14 +102,7 @@ impl Client for GrpcClient {
 
         if let Some(out) = task.recv().await? {
             match out {
-                Reply::AppendStreamCompleted(resp) => match resp {
-                    AppendStreamCompleted::WriteResult(result) => {
-                        return Ok(result);
-                    }
-                    AppendStreamCompleted::Error(e) => {
-                        eyre::bail!("error when appending events to '{}': {}", stream_id, e);
-                    }
-                },
+                Reply::AppendStreamCompleted(resp) => Ok(resp),
                 _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
             }
         } else {
@@ -204,7 +197,7 @@ impl Client for GrpcClient {
         &self,
         stream_id: &str,
         expected_revision: ExpectedRevision,
-    ) -> eyre::Result<WriteResult> {
+    ) -> eyre::Result<DeleteStreamCompleted> {
         let mut task = self
             .mailbox
             .send_operation(Operation::DeleteStream(DeleteStream {
@@ -215,14 +208,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                Reply::DeleteStreamCompleted(resp) => match resp {
-                    DeleteStreamCompleted::DeleteResult(result) => {
-                        return Ok(result);
-                    }
-                    DeleteStreamCompleted::Error(e) => {
-                        eyre::bail!("error when deleting stream '{}': {}", stream_id, e);
-                    }
-                },
+                Reply::DeleteStreamCompleted(resp) => return Ok(resp),
                 _ => eyre::bail!("unexpected reply when deleting stream '{}'", stream_id),
             }
         }

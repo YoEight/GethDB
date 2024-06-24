@@ -7,8 +7,9 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use geth_common::{
-    Client, Direction, ExpectedRevision, ProgrammableStats, ProgrammableSummary, ProgramStats,
-    ProgramSummary, Propose, Record, Revision, SubscriptionEvent, WriteResult,
+    AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
+    ProgrammableStats, ProgrammableSummary, ProgramStats, ProgramSummary, Propose, Record,
+    Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -18,9 +19,8 @@ use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
 use crate::messages::{
-    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ProcessTarget,
-    ReadStream, ReadStreamCompleted, StreamTarget, SubscribeTo, SubscriptionConfirmed,
-    SubscriptionRequestOutcome, SubscriptionTarget,
+    AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
+    SubscribeTo, SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::process::storage::StorageService;
 use crate::process::subscriptions::SubscriptionsClient;
@@ -31,6 +31,18 @@ mod subscriptions;
 pub struct InternalClient<WAL, S: Storage> {
     storage: StorageService<WAL, S>,
     subscriptions: SubscriptionsClient,
+}
+
+impl<WAL, S> InternalClient<WAL, S>
+where
+    S: Storage,
+{
+    pub fn new(processes: Processes<WAL, S>) -> Self {
+        Self {
+            storage: processes.storage,
+            subscriptions: processes.subscriptions,
+        }
+    }
 }
 
 #[async_trait::async_trait]
@@ -44,7 +56,7 @@ where
         stream_id: &str,
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
-    ) -> eyre::Result<WriteResult> {
+    ) -> eyre::Result<AppendStreamCompleted> {
         let outcome = self
             .storage
             .append_stream(AppendStream {
@@ -55,13 +67,7 @@ where
             })
             .await?;
 
-        // FIXME: should return first class error.
-        match outcome {
-            AppendStreamCompleted::Success(r) => Ok(r),
-            AppendStreamCompleted::Failure(e) => bail!("error: {:?}", e),
-            AppendStreamCompleted::Unexpected(e) => Err(e),
-            AppendStreamCompleted::StreamDeleted => bail!("stream '{}' deleted", stream_id),
-        }
+        Ok(outcome)
     }
 
     async fn read_stream(
@@ -176,7 +182,7 @@ where
         &self,
         stream_id: &str,
         expected_revision: ExpectedRevision,
-    ) -> eyre::Result<WriteResult> {
+    ) -> eyre::Result<DeleteStreamCompleted> {
         let outcome = self
             .storage
             .delete_stream(DeleteStream {
@@ -185,12 +191,7 @@ where
             })
             .await?;
 
-        // FIXME - should return first class error.
-        match outcome {
-            DeleteStreamCompleted::Success(r) => Ok(r),
-            DeleteStreamCompleted::Failure(e) => bail!("error: {:?}", e),
-            DeleteStreamCompleted::Unexpected(e) => Err(e),
-        }
+        Ok(outcome)
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
@@ -238,9 +239,9 @@ where
         self.storage.read_stream(params).await
     }
 
-    pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
-        self.storage.delete_stream(params).await
-    }
+    // pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
+    //     self.storage.delete_stream(params).await
+    // }
 
     pub async fn subscribe_to(&self, msg: SubscribeTo) -> eyre::Result<SubscriptionConfirmed> {
         let (sender, recv) = oneshot::channel();

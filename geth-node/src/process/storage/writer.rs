@@ -4,12 +4,15 @@ use bytes::BytesMut;
 use chrono::Utc;
 use prost::Message;
 
-use geth_common::{ExpectedRevision, Position, WriteResult, WrongExpectedRevisionError};
+use geth_common::{
+    AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
+    Position, WriteResult, WrongExpectedRevisionError,
+};
 use geth_domain::AppendProposes;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::messages::{AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted};
+use crate::messages::{AppendStream, DeleteStream};
 use crate::process::storage::index::{CurrentRevision, StorageIndex};
 use crate::process::storage::RevisionCache;
 
@@ -44,11 +47,13 @@ where
         let current_revision = self.index.stream_current_revision(&params.stream_name)?;
 
         if current_revision.is_deleted() {
-            return Ok::<_, io::Error>(AppendStreamCompleted::StreamDeleted);
+            return Ok::<_, io::Error>(AppendStreamCompleted::Error(AppendError::StreamDeleted));
         }
 
         if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-            return Ok(AppendStreamCompleted::Failure(e));
+            return Ok(AppendStreamCompleted::Error(
+                AppendError::WrongExpectedRevision(e),
+            ));
         }
 
         let revision = current_revision.next_revision();
@@ -81,7 +86,9 @@ where
         let current_revision = self.index.stream_current_revision(&params.stream_name)?;
 
         if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
-            return Ok::<_, io::Error>(DeleteStreamCompleted::Failure(e));
+            return Ok::<_, io::Error>(DeleteStreamCompleted::Error(
+                DeleteError::WrongExpectedRevision(e),
+            ));
         }
 
         let created = Utc::now().timestamp();
@@ -160,14 +167,16 @@ impl StorageWriter {
             if let Ok(result) = resp.recv() {
                 result
             } else {
-                Ok(AppendStreamCompleted::Unexpected(eyre::eyre!(
-                    "storage writer process exited"
-                )))
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "storage writer process exited",
+                ))
             }
         } else {
-            Ok(AppendStreamCompleted::Unexpected(eyre::eyre!(
-                "storage writer process exited"
-            )))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "storage writer process exited",
+            ))
         }
     }
 
@@ -178,14 +187,16 @@ impl StorageWriter {
             if let Ok(result) = resp.recv() {
                 result
             } else {
-                Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!(
-                    "storage writer process exited"
-                )))
+                Err(io::Error::new(
+                    io::ErrorKind::Other,
+                    "storage writer process exited",
+                ))
             }
         } else {
-            Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!(
-                "storage writer process exited"
-            )))
+            Err(io::Error::new(
+                io::ErrorKind::Other,
+                "storage writer process exited",
+            ))
         }
     }
 }

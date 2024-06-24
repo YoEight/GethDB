@@ -1,6 +1,7 @@
+use std::pin::pin;
 use std::sync::Arc;
 
-use futures::StreamExt;
+use futures::{pin_mut, Stream, StreamExt};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -14,6 +15,14 @@ use geth_common::generated::next::protocol::protocol_server::Protocol;
 
 pub struct ProtocolImpl<C> {
     client: Arc<C>,
+}
+
+impl<C> ProtocolImpl<C> {
+    pub fn new(client: C) -> Self {
+        Self {
+            client: Arc::new(client),
+        }
+    }
 }
 
 type Downstream = UnboundedSender<Result<protocol::OperationOut, Status>>;
@@ -44,7 +53,7 @@ enum Msg {
 
 struct Pipeline {
     input: Streaming<protocol::OperationIn>,
-    output: UnboundedReceiver<OperationOut>,
+    output: UnboundedReceiver<eyre::Result<OperationOut>>,
 }
 
 impl Pipeline {
@@ -67,7 +76,16 @@ impl Pipeline {
 
             output = self.output.recv() => {
                 if let Some(output) = output {
-                    return Ok(Some(Msg::Server(output)));
+                    return match output {
+                        Err(e) => {
+                            tracing::error!("server error: {:?}", e);
+                            Err(Status::unavailable(e.to_string()))
+                        }
+
+                        Ok(out)=> {
+                            Ok(Some(Msg::Server(out)))
+                        }
+                    }
                 }
 
                 tracing::error!("unexpected server error");
@@ -116,38 +134,61 @@ async fn multiplex<C>(
     }
 }
 
-fn run_operation<C>(client: Arc<C>, tx: UnboundedSender<OperationOut>, input: OperationIn)
-where
+fn run_operation<C>(
+    client: Arc<C>,
+    tx: UnboundedSender<eyre::Result<OperationOut>>,
+    input: OperationIn,
+) where
     C: Client + Send + Sync + 'static,
 {
-    tokio::spawn(execute_operation(client, tx, input));
+    tokio::spawn(async move {
+        let mut stream = execute_operation(client, input).await;
+
+        pin_mut!(stream);
+        while let Some(out) = stream.next().await {
+            if tx.send(out).is_err() {
+                break;
+            }
+        }
+    });
 }
 
-async fn execute_operation<C>(client: Arc<C>, tx: UnboundedSender<OperationOut>, input: OperationIn)
+async fn execute_operation<C>(
+    client: Arc<C>,
+    input: OperationIn,
+) -> impl Stream<Item = eyre::Result<OperationOut>>
 where
     C: Client + Send + Sync + 'static,
 {
-    let correlation = input.correlation;
-    match input.operation {
-        Operation::AppendStream(params) => {
-            let outcome = client
-                .append_stream(&params.stream_name, params.expected_revision, params.events)
-                .await;
+    async_stream::try_stream! {
+        let correlation = input.correlation;
+        match input.operation {
+            Operation::AppendStream(params) => {
+                let completed = client
+                    .append_stream(&params.stream_name, params.expected_revision, params.events)
+                    .await?;
 
-            let _ = tx.send(OperationOut {
-                correlation,
-                reply: match outcome {
-                    Ok(r) => Reply::append_stream_completed_with_success(r),
-                    Err(e) => todo!(),
-                },
-            });
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::AppendStreamCompleted(completed),
+                };
+            }
+
+            Operation::DeleteStream(params) => {
+                let completed = client
+                    .delete_stream(&params.stream_name, params.expected_revision)
+                    .await?;
+
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::DeleteStreamCompleted(completed),
+                };
+            }
+            Operation::ReadStream(_) => {}
+            Operation::Subscribe(_) => {}
+            Operation::ListPrograms(_) => {}
+            Operation::GetProgram(_) => {}
+            Operation::KillProgram(_) => {}
         }
-
-        Operation::DeleteStream(_) => {}
-        Operation::ReadStream(_) => {}
-        Operation::Subscribe(_) => {}
-        Operation::ListPrograms(_) => {}
-        Operation::GetProgram(_) => {}
-        Operation::KillProgram(_) => {}
     }
 }

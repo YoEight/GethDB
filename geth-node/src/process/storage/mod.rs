@@ -1,13 +1,11 @@
 use std::io;
 
+use geth_common::{AppendStreamCompleted, DeleteStreamCompleted};
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::messages::{
-    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
-    ReadStreamCompleted,
-};
+use crate::messages::{AppendStream, DeleteStream, ReadStream, ReadStreamCompleted};
 use crate::process::storage::index::StorageIndex;
 use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::{new_storage_writer, StorageWriter};
@@ -54,7 +52,7 @@ where
     pub async fn append_stream(&self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
         let writer = self.writer.clone();
         match tokio::task::spawn_blocking(move || writer.append(params)).await {
-            Err(e) => Ok(AppendStreamCompleted::Unexpected(eyre::eyre!("{}", e))),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
             Ok(r) => r,
         }
     }
@@ -62,7 +60,7 @@ where
     pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
         let writer = self.writer.clone();
         match tokio::task::spawn_blocking(move || writer.delete(params)).await {
-            Err(e) => Ok(DeleteStreamCompleted::Unexpected(eyre::eyre!("{}", e))),
+            Err(e) => Err(io::Error::new(io::ErrorKind::Other, e)),
             Ok(r) => r,
         }
     }

@@ -1,9 +1,10 @@
 use eyre::Report;
+use uuid::Uuid;
+
 use geth_common::{
     Direction, ExpectedRevision, Propose, Revision, WriteResult, WrongExpectedRevisionError,
 };
 use geth_mikoshi::MikoshiStream;
-use uuid::Uuid;
 
 #[derive(Debug)]
 pub struct ReadStream {
@@ -34,7 +35,6 @@ pub struct DeleteStream {
     pub expected: ExpectedRevision,
 }
 
-#[derive(Debug)]
 pub enum AppendStreamCompleted {
     Success(WriteResult),
     Failure(WrongExpectedRevisionError),
