@@ -246,41 +246,41 @@ message OperationOut {
       }
     }
   }
-}
 
-message DeleteStreamCompleted {
-  oneof result {
-    DeleteResult write_result = 1;
-    Error error = 2;
-  }
-
-  message DeleteResult {
-    uint64 position = 1;
-    uint64 next_revision = 2;
-  }
-
-  message Error {
-    oneof error {
-      NotLeader not_leader = 1;
-      WrongExpectedRevision wrong_revision = 2;
+  message DeleteStreamCompleted {
+    oneof result {
+      DeleteResult write_result = 1;
+      Error error = 2;
     }
 
-    message NotLeader {
-      string leader_host = 1;
-      uint32 leader_port = 2;
+    message DeleteResult {
+      uint64 position = 1;
+      uint64 next_revision = 2;
     }
 
-    message WrongExpectedRevision {
-      oneof current_revision {
-        google.protobuf.Empty NotExists = 1;
-        uint64 revision = 2;
+    message Error {
+      oneof error {
+        NotLeader not_leader = 1;
+        WrongExpectedRevision wrong_revision = 2;
       }
 
-      oneof expected_revision {
-        google.protobuf.Empty Any = 3;
-        google.protobuf.Empty NoStream = 4;
-        google.protobuf.Empty StreamExists = 5;
-        uint64 expected = 6;
+      message NotLeader {
+        string leader_host = 1;
+        uint32 leader_port = 2;
+      }
+
+      message WrongExpectedRevision {
+        oneof current_revision {
+          google.protobuf.Empty NotExists = 1;
+          uint64 revision = 2;
+        }
+
+        oneof expected_revision {
+          google.protobuf.Empty Any = 3;
+          google.protobuf.Empty NoStream = 4;
+          google.protobuf.Empty StreamExists = 5;
+          uint64 expected = 6;
+        }
       }
     }
   }

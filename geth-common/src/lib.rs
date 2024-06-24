@@ -559,17 +559,17 @@ impl From<operation_out::append_stream_completed::error::wrong_expected_revision
     }
 }
 
-impl From<next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
+impl From<operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
     for ExpectedRevision
 {
     fn from(
-        value: next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
+        value: operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
     ) -> Self {
         match value {
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+            operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
                 _,
             ) => ExpectedRevision::NoStream,
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+            operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -762,15 +762,15 @@ impl From<ExpectedRevision>
 }
 
 impl From<ExpectedRevision>
-    for next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision
+    for operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
+                operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
             }
             ExpectedRevision::NoStream => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
+                operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
             }
             _ => unreachable!(),
         }
@@ -799,21 +799,21 @@ impl From<ExpectedRevision>
 }
 
 impl From<ExpectedRevision>
-    for next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision
+    for operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
+                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
             }
             ExpectedRevision::NoStream => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
+                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
             }
             ExpectedRevision::Any => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
+                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
             }
             ExpectedRevision::StreamExists => {
-                next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
+                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
             }
         }
     }
@@ -893,23 +893,23 @@ impl From<operation_out::append_stream_completed::error::wrong_expected_revision
     }
 }
 
-impl From<next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+impl From<operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
     for ExpectedRevision
 {
     fn from(
-        value: next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+        value: operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
     ) -> Self {
         match value {
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
                 ExpectedRevision::Any
             }
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
                 _,
             ) => ExpectedRevision::NoStream,
-            next::protocol::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -943,7 +943,7 @@ impl From<WrongExpectedRevisionError>
 }
 
 impl From<WrongExpectedRevisionError>
-    for next::protocol::delete_stream_completed::error::WrongExpectedRevision
+    for operation_out::delete_stream_completed::error::WrongExpectedRevision
 {
     fn from(value: WrongExpectedRevisionError) -> Self {
         Self {
@@ -1336,7 +1336,7 @@ impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
     }
 }
 
-impl From<WriteResult> for next::protocol::delete_stream_completed::DeleteResult {
+impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult {
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
@@ -1632,10 +1632,10 @@ impl Display for DeleteError {
     }
 }
 
-impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
-    fn from(value: next::protocol::DeleteStreamCompleted) -> Self {
+impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
+    fn from(value: operation_out::DeleteStreamCompleted) -> Self {
         match value.result.unwrap() {
-            next::protocol::delete_stream_completed::Result::WriteResult(r) => {
+            operation_out::delete_stream_completed::Result::WriteResult(r) => {
                 DeleteStreamCompleted::DeleteResult(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: Position(r.position),
@@ -1643,8 +1643,8 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
                 })
             }
 
-            next::protocol::delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
-                next::protocol::delete_stream_completed::error::Error::WrongRevision(e) => {
+            operation_out::delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
+                operation_out::delete_stream_completed::error::Error::WrongRevision(e) => {
                     DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
                         WrongExpectedRevisionError {
                             expected: e.expected_revision.unwrap().into(),
@@ -1652,7 +1652,7 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
                         },
                     ))
                 }
-                next::protocol::delete_stream_completed::error::Error::NotLeader(e) => {
+                operation_out::delete_stream_completed::error::Error::NotLeader(e) => {
                     DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
                         host: e.leader_host,
                         port: e.leader_port as u16,
@@ -1663,27 +1663,27 @@ impl From<next::protocol::DeleteStreamCompleted> for DeleteStreamCompleted {
     }
 }
 
-impl From<DeleteStreamCompleted> for next::protocol::DeleteStreamCompleted {
+impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
     fn from(value: DeleteStreamCompleted) -> Self {
         match value {
-            DeleteStreamCompleted::DeleteResult(w) => next::protocol::DeleteStreamCompleted {
-                result: Some(
-                    next::protocol::delete_stream_completed::Result::WriteResult(w.into()),
-                ),
+            DeleteStreamCompleted::DeleteResult(w) => operation_out::DeleteStreamCompleted {
+                result: Some(operation_out::delete_stream_completed::Result::WriteResult(
+                    w.into(),
+                )),
             },
 
-            DeleteStreamCompleted::Error(e) => next::protocol::DeleteStreamCompleted {
-                result: Some(next::protocol::delete_stream_completed::Result::Error(
-                    next::protocol::delete_stream_completed::Error {
+            DeleteStreamCompleted::Error(e) => operation_out::DeleteStreamCompleted {
+                result: Some(operation_out::delete_stream_completed::Result::Error(
+                    operation_out::delete_stream_completed::Error {
                         error: Some(match e {
                             DeleteError::WrongExpectedRevision(e) => {
-                                next::protocol::delete_stream_completed::error::Error::WrongRevision(
+                                operation_out::delete_stream_completed::error::Error::WrongRevision(
                                     e.into(),
                                 )
                             }
                             DeleteError::NotLeaderException(e) => {
-                                next::protocol::delete_stream_completed::error::Error::NotLeader(
-                                    next::protocol::delete_stream_completed::error::NotLeader {
+                                operation_out::delete_stream_completed::error::Error::NotLeader(
+                                    operation_out::delete_stream_completed::error::NotLeader {
                                         leader_host: e.host,
                                         leader_port: e.port as u32,
                                     },
