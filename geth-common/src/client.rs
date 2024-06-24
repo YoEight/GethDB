@@ -20,7 +20,7 @@ pub enum UnsubscribeReason {
     Server,
 }
 
-pub trait Client {
+pub trait Client: Send + Sync {
     async fn append_stream(
         &self,
         stream_id: &str,

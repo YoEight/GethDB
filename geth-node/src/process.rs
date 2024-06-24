@@ -1,10 +1,14 @@
 use std::io;
 
 use eyre::bail;
+use futures::Stream;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
-use geth_common::{ProgrammableStats, ProgrammableSummary};
+use geth_common::{
+    Client, Direction, ExpectedRevision, ProgramStats, ProgramSummary, ProgrammableStats,
+    ProgrammableSummary, Propose, Record, Revision, SubscriptionEvent, WriteResult,
+};
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
@@ -13,14 +17,191 @@ use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
 use crate::messages::{
-    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ReadStream,
-    ReadStreamCompleted, SubscribeTo, SubscriptionConfirmed,
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, ProcessTarget,
+    ReadStream, ReadStreamCompleted, StreamTarget, SubscribeTo, SubscriptionConfirmed,
+    SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::process::storage::StorageService;
 use crate::process::subscriptions::SubscriptionsClient;
 
 pub mod storage;
 mod subscriptions;
+
+pub struct InternalClient<WAL, S: Storage> {
+    storage: StorageService<WAL, S>,
+    subscriptions: SubscriptionsClient,
+}
+
+impl<WAL, S> Client for InternalClient<WAL, S>
+where
+    WAL: WriteAheadLog + Send + Sync + 'static,
+    S: Storage + Send + Sync + 'static,
+{
+    async fn append_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+        proposes: Vec<Propose>,
+    ) -> eyre::Result<WriteResult> {
+        let outcome = self
+            .storage
+            .append_stream(AppendStream {
+                correlation: Default::default(),
+                stream_name: stream_id.to_string(),
+                events: proposes,
+                expected: expected_revision,
+            })
+            .await?;
+
+        // FIXME: should return first class error.
+        match outcome {
+            AppendStreamCompleted::Success(r) => Ok(r),
+            AppendStreamCompleted::Failure(e) => bail!("error: {:?}", e),
+            AppendStreamCompleted::Unexpected(e) => Err(e),
+            AppendStreamCompleted::StreamDeleted => bail!("stream '{}' deleted", stream_id),
+        }
+    }
+
+    async fn read_stream(
+        &self,
+        stream_id: &str,
+        direction: Direction,
+        revision: Revision<u64>,
+        max_count: u64,
+    ) -> impl Stream<Item = eyre::Result<Record>> {
+        let outcome = self
+            .storage
+            .read_stream(ReadStream {
+                correlation: Default::default(),
+                stream_name: stream_id.to_string(),
+                direction,
+                starting: revision,
+                count: max_count as usize,
+            })
+            .await;
+
+        // FIXME: should return first class error.
+        async_stream::try_stream! {
+            match outcome {
+                ReadStreamCompleted::StreamDeleted => {
+                    let () = Err(eyre::eyre!("stream '{}' deleted", stream_id))?;
+
+                } ,
+                ReadStreamCompleted::Success(mut stream) => {
+                    while let Some(record) = stream.next().await? {
+                        yield record;
+                    }
+                }
+                ReadStreamCompleted::Unexpected(e) => {
+                    let () = Err(e)?;
+                }
+            }
+        }
+    }
+
+    async fn subscribe_to_stream(
+        &self,
+        stream_id: &str,
+        start: Revision<u64>,
+    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+        let (sender, recv) = oneshot::channel();
+        let outcome = self.subscriptions.subscribe(SubscribeMsg {
+            payload: SubscribeTo {
+                correlation: Uuid::new_v4(),
+                target: SubscriptionTarget::Stream(StreamTarget {
+                    parent: None,
+                    stream_name: stream_id.to_string(),
+                    starting: start,
+                }),
+            },
+            mail: sender,
+        });
+
+        async_stream::try_stream! {
+            outcome?;
+            let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
+
+            match resp.outcome {
+                SubscriptionRequestOutcome::Success(mut stream) => {
+                    while let Some(record) = stream.next().await? {
+                        yield SubscriptionEvent::EventAppeared(record);
+                    }
+                }
+                SubscriptionRequestOutcome::Failure(e) => {
+                    let () = Err(e)?;
+                }
+            }
+        }
+    }
+
+    async fn subscribe_to_process(
+        &self,
+        name: &str,
+        source_code: &str,
+    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+        let (sender, recv) = oneshot::channel();
+        let outcome = self.subscriptions.subscribe(SubscribeMsg {
+            payload: SubscribeTo {
+                correlation: Uuid::new_v4(),
+                target: SubscriptionTarget::Process(ProcessTarget {
+                    id: Uuid::new_v4(),
+                    name: name.to_string(),
+                    source_code: source_code.to_string(),
+                }),
+            },
+            mail: sender,
+        });
+
+        async_stream::try_stream! {
+            outcome?;
+            let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
+
+            match resp.outcome {
+                SubscriptionRequestOutcome::Success(mut stream) => {
+                    while let Some(record) = stream.next().await? {
+                        yield SubscriptionEvent::EventAppeared(record);
+                    }
+                }
+                SubscriptionRequestOutcome::Failure(e) => {
+                    let () = Err(e)?;
+                }
+            }
+        }
+    }
+
+    async fn delete_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+    ) -> eyre::Result<WriteResult> {
+        let outcome = self
+            .storage
+            .delete_stream(DeleteStream {
+                stream_name: stream_id.to_string(),
+                expected: expected_revision,
+            })
+            .await?;
+
+        // FIXME - should return first class error.
+        match outcome {
+            DeleteStreamCompleted::Success(r) => Ok(r),
+            DeleteStreamCompleted::Failure(e) => bail!("error: {:?}", e),
+            DeleteStreamCompleted::Unexpected(e) => Err(e),
+        }
+    }
+
+    async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+        todo!()
+    }
+
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats> {
+        todo!()
+    }
+
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<()> {
+        todo!()
+    }
+}
 
 #[derive(Clone)]
 pub struct Processes<WAL, S>

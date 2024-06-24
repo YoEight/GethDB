@@ -46,18 +46,18 @@ pub mod protocol {
     }
 
     pub mod streams {
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            stream_options::RevisionOption, CountOption, StreamOption,
+        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, Success, success::CurrentRevisionOption},
+            append_resp::{self, success::CurrentRevisionOption, Success},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
-        };
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {

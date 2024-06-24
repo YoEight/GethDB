@@ -2,13 +2,13 @@ use futures::StreamExt;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
+use tonic::{Request, Response, Status, Streaming};
 use uuid::Uuid;
 
-use geth_common::{Operation, OperationIn, OperationOut};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
+use geth_common::{Operation, OperationIn, OperationOut};
 
 pub struct ProtocolImpl;
 

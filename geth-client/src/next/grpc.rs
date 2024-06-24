@@ -13,8 +13,8 @@ use geth_common::{
     SubscriptionEventIR, UnsubscribeReason, WriteResult,
 };
 
-use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
 use crate::next::driver::Driver;
+use crate::next::{multiplex_loop, Command, Msg, OperationIn, OperationOut};
 
 pub struct Task {
     rx: UnboundedReceiver<OperationOut>,

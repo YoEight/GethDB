@@ -4,9 +4,9 @@ use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::transport::Uri;
 
-use geth_common::{OperationIn, OperationOut};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_client::ProtocolClient;
+use geth_common::{OperationIn, OperationOut};
 
 use crate::next::driver::Driver;
 
