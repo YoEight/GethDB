@@ -8,8 +8,8 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    ProgrammableStats, ProgrammableSummary, ProgramStats, ProgramSummary, Propose, Record,
-    Revision, SubscriptionEvent,
+    ProgramKilled, ProgrammableStats, ProgrammableSummary, ProgramObtained,
+    ProgramSummary, Propose, Record, Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -198,11 +198,11 @@ where
         todo!()
     }
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats> {
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
         todo!()
     }
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<()> {
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
         todo!()
     }
 }

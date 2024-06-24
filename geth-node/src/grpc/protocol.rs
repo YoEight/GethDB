@@ -9,7 +9,9 @@ use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use uuid::Uuid;
 
-use geth_common::{Client, Operation, OperationIn, OperationOut, Reply, StreamRead, Subscribe};
+use geth_common::{
+    Client, Operation, OperationIn, OperationOut, ProgramListed, Reply, StreamRead, Subscribe,
+};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 
@@ -222,9 +224,27 @@ where
                 }
             }
 
-            Operation::ListPrograms(_) => {}
-            Operation::GetProgram(_) => {}
-            Operation::KillProgram(_) => {}
+            Operation::ListPrograms(params) => {
+                let programs = client.list_programs().await?;
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramsListed(ProgramListed { programs }),
+                };
+            }
+
+            Operation::GetProgram(params) => {
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramObtained(client.get_program(params.id).await?),
+                };
+            }
+
+            Operation::KillProgram(params) => {
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramKilled(client.kill_program(params.id).await?),
+                };
+            }
         }
     }
 }

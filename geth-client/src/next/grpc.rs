@@ -8,9 +8,8 @@ use uuid::Uuid;
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
     EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
-    ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStream, Record, Reply, Revision,
-    StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
-    UnsubscribeReason,
+    ProgramObtained, ProgramSummary, Propose, ReadStream, Record, Reply, Revision, StreamRead,
+    Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
 };
 
 use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
@@ -232,7 +231,7 @@ impl Client for GrpcClient {
         eyre::bail!("unexpected code path when listing programs");
     }
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats> {
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
         let mut task = self
             .mailbox
             .send_operation(Operation::GetProgram(GetProgram { id }))
@@ -240,12 +239,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                Reply::ProgramObtained(resp) => {
-                    return match resp {
-                        ProgramObtained::Error(e) => Err(e),
-                        ProgramObtained::Success(stats) => Ok(stats),
-                    }
-                }
+                Reply::ProgramObtained(resp) => return Ok(resp),
                 _ => eyre::bail!("unexpected reply when getting program {}", id),
             }
         }
@@ -253,7 +247,7 @@ impl Client for GrpcClient {
         eyre::bail!("unexpected code path when getting program {}", id);
     }
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<()> {
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
         let mut task = self
             .mailbox
             .send_operation(Operation::KillProgram(KillProgram { id }))
@@ -261,12 +255,7 @@ impl Client for GrpcClient {
 
         if let Some(event) = task.recv().await? {
             match event {
-                Reply::ProgramKilled(resp) => {
-                    return match resp {
-                        ProgramKilled::Error(e) => Err(e),
-                        ProgramKilled::Success => Ok(()),
-                    }
-                }
+                Reply::ProgramKilled(resp) => return Ok(resp),
                 _ => eyre::bail!("unexpected reply when killing program {}", id),
             }
         }

@@ -4,8 +4,8 @@ use futures::stream::BoxStream;
 use uuid::Uuid;
 
 use crate::{
-    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
-    ProgramSummary, Propose, Record, Revision, SubscriptionConfirmation,
+    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramKilled,
+    ProgramObtained, ProgramSummary, Propose, Record, Revision, SubscriptionConfirmation,
 };
 
 pub enum SubscriptionEvent {
@@ -57,7 +57,7 @@ pub trait Client {
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>>;
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramStats>;
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained>;
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<()>;
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled>;
 }
