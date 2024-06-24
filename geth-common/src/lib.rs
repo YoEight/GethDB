@@ -46,18 +46,18 @@ pub mod protocol {
     }
 
     pub mod streams {
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            stream_options::RevisionOption, CountOption, StreamOption,
-        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, success::CurrentRevisionOption, Success},
+            append_resp::{self, Success, success::CurrentRevisionOption},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
+        };
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {
@@ -210,6 +210,18 @@ pub enum Reply {
     ProgramsListed(ProgramListed),
     ProgramKilled(ProgramKilled),
     ProgramObtained(ProgramObtained),
+}
+
+impl Reply {
+    pub fn append_stream_completed_with_success(value: WriteResult) -> Self {
+        Self::AppendStreamCompleted(AppendStreamCompleted::WriteResult(value))
+    }
+
+    pub fn append_stream_completed_with_error(value: WrongExpectedRevisionError) -> Self {
+        Self::AppendStreamCompleted(AppendStreamCompleted::Error(
+            AppendError::WrongExpectedRevision(value),
+        ))
+    }
 }
 
 pub struct OperationOut {

@@ -2,12 +2,13 @@ use std::io;
 
 use eyre::bail;
 use futures::Stream;
+use futures::stream::BoxStream;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use geth_common::{
-    Client, Direction, ExpectedRevision, ProgramStats, ProgramSummary, ProgrammableStats,
-    ProgrammableSummary, Propose, Record, Revision, SubscriptionEvent, WriteResult,
+    Client, Direction, ExpectedRevision, ProgrammableStats, ProgrammableSummary, ProgramStats,
+    ProgramSummary, Propose, Record, Revision, SubscriptionEvent, WriteResult,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -32,6 +33,7 @@ pub struct InternalClient<WAL, S: Storage> {
     subscriptions: SubscriptionsClient,
 }
 
+#[async_trait::async_trait]
 impl<WAL, S> Client for InternalClient<WAL, S>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
@@ -68,7 +70,7 @@ where
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> impl Stream<Item = eyre::Result<Record>> {
+    ) -> BoxStream<'static, eyre::Result<Record>> {
         let outcome = self
             .storage
             .read_stream(ReadStream {
@@ -80,8 +82,9 @@ where
             })
             .await;
 
+        let stream_id = stream_id.to_string();
         // FIXME: should return first class error.
-        async_stream::try_stream! {
+        Box::pin(async_stream::try_stream! {
             match outcome {
                 ReadStreamCompleted::StreamDeleted => {
                     let () = Err(eyre::eyre!("stream '{}' deleted", stream_id))?;
@@ -96,14 +99,14 @@ where
                     let () = Err(e)?;
                 }
             }
-        }
+        })
     }
 
     async fn subscribe_to_stream(
         &self,
         stream_id: &str,
         start: Revision<u64>,
-    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
@@ -117,7 +120,7 @@ where
             mail: sender,
         });
 
-        async_stream::try_stream! {
+        Box::pin(async_stream::try_stream! {
             outcome?;
             let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
 
@@ -131,14 +134,14 @@ where
                     let () = Err(e)?;
                 }
             }
-        }
+        })
     }
 
     async fn subscribe_to_process(
         &self,
         name: &str,
         source_code: &str,
-    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
@@ -152,7 +155,7 @@ where
             mail: sender,
         });
 
-        async_stream::try_stream! {
+        Box::pin(async_stream::try_stream! {
             outcome?;
             let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
 
@@ -166,7 +169,7 @@ where
                     let () = Err(e)?;
                 }
             }
-        }
+        })
     }
 
     async fn delete_stream(

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use futures_util::Stream;
+use futures_util::stream::BoxStream;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use uuid::Uuid;
@@ -13,8 +13,8 @@ use geth_common::{
     SubscriptionEventIR, UnsubscribeReason, WriteResult,
 };
 
+use crate::next::{Command, Msg, multiplex_loop, OperationIn, OperationOut};
 use crate::next::driver::Driver;
-use crate::next::{multiplex_loop, Command, Msg, OperationIn, OperationOut};
 
 pub struct Task {
     rx: UnboundedReceiver<OperationOut>,
@@ -31,6 +31,7 @@ impl Task {
     }
 }
 
+#[derive(Clone)]
 pub struct Mailbox {
     tx: UnboundedSender<Msg>,
 }
@@ -64,6 +65,7 @@ impl Mailbox {
     }
 }
 
+#[derive(Clone)]
 pub struct GrpcClient {
     mailbox: Mailbox,
 }
@@ -81,6 +83,7 @@ impl GrpcClient {
     }
 }
 
+#[async_trait::async_trait]
 impl Client for GrpcClient {
     async fn append_stream(
         &self,
@@ -123,7 +126,7 @@ impl Client for GrpcClient {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> impl Stream<Item = eyre::Result<Record>> {
+    ) -> BoxStream<'static, eyre::Result<Record>> {
         let outcome = self
             .mailbox
             .send_operation(Operation::ReadStream(ReadStream {
@@ -134,7 +137,8 @@ impl Client for GrpcClient {
             }))
             .await;
 
-        async_stream::try_stream! {
+        let stream_id = stream_id.to_string();
+        Box::pin(async_stream::try_stream! {
             let mut task = outcome?;
             while let Some(event) = task.recv().await? {
                 match event {
@@ -146,25 +150,25 @@ impl Client for GrpcClient {
                         }
 
                         StreamRead::Error(e) => {
-                            read_error(stream_id, e)?;
+                            read_error(&stream_id, e)?;
                         }
 
                         StreamRead::EndOfStream => break,
                     }
 
                     _ => {
-                        unexpected_reply_when_reading(stream_id)?;
+                        unexpected_reply_when_reading(&stream_id)?;
                     }
                 }
             }
-        }
+        })
     }
 
     async fn subscribe_to_stream(
         &self,
         stream_id: &str,
         start: Revision<u64>,
-    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
         let outcome = self
             .mailbox
             .send_operation(Operation::Subscribe(Subscribe::ToStream(
@@ -182,7 +186,7 @@ impl Client for GrpcClient {
         &self,
         name: &str,
         source_code: &str,
-    ) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
         let outcome = self
             .mailbox
             .send_operation(Operation::Subscribe(Subscribe::ToProgram(
@@ -287,11 +291,11 @@ impl Client for GrpcClient {
     }
 }
 
-fn produce_subscription_stream(
+fn produce_subscription_stream<'a>(
     ident: String,
     outcome: eyre::Result<Task>,
-) -> impl Stream<Item = eyre::Result<SubscriptionEvent>> {
-    async_stream::try_stream! {
+) -> BoxStream<'a, eyre::Result<SubscriptionEvent>> {
+    Box::pin(async_stream::try_stream! {
         let mut task = outcome?;
         while let Some(event) = task.recv().await? {
             match event {
@@ -314,7 +318,7 @@ fn produce_subscription_stream(
         }
 
         yield SubscriptionEvent::Unsubscribed(UnsubscribeReason::User);
-    }
+    })
 }
 
 fn unexpected_reply_when_reading(stream_id: &str) -> eyre::Result<()> {
