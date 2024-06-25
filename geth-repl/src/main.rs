@@ -5,14 +5,17 @@ use std::path::Path;
 use bytes::BytesMut;
 use chrono::Utc;
 use directories::UserDirs;
+use futures::stream::BoxStream;
+use futures::TryStreamExt;
 use glyph::{FileBackedInputs, Input, PromptOptions};
 use serde::Deserialize;
 use uuid::Uuid;
 
-use geth_client::Client;
+use geth_client::GrpcClient;
 use geth_common::{
-    DeleteResult, Direction, ExpectedRevision, IteratorIO, Position, Propose, Record, Revision,
-    WriteResult,
+    AppendError, AppendStreamCompleted, Client, DeleteError, DeleteStreamCompleted, Direction,
+    EndPoint, ExpectedRevision, GetProgramError, IteratorIO, Position, ProgramObtained, Propose,
+    Record, Revision, SubscriptionEvent, WriteResult,
 };
 use geth_domain::{AppendProposes, Lsm, LsmSettings, parse_event, parse_event_io, RecordedEvent};
 use geth_domain::binary::events::Event;
@@ -56,14 +59,11 @@ async fn main() -> eyre::Result<()> {
                         let host = host.unwrap_or_else(|| "localhost".to_string());
                         let port = port.unwrap_or(2_113);
 
-                        match Client::new(format!("http://{}:{}", host, port)).await {
-                            Err(e) => {
-                                println!("ERR: error when connecting to {}:{}: {}", host, port, e)
-                            }
-                            Ok(client) => {
-                                repl_state = ReplState::Online(OnlineState { host, port, client });
-                            }
-                        }
+                        repl_state = ReplState::Online(OnlineState {
+                            host: host.clone(),
+                            port,
+                            client: GrpcClient::new(EndPoint::new(host.clone(), port)),
+                        });
                     }
 
                     OfflineCommands::Mikoshi { directory } => {
@@ -123,28 +123,26 @@ async fn main() -> eyre::Result<()> {
                         let state = repl_state.online();
                         let result = state
                             .client
-                            .read_stream(args.stream.as_str(), Revision::Start, Direction::Forward)
+                            .read_stream(
+                                args.stream.as_str(),
+                                Direction::Forward,
+                                Revision::Start,
+                                50,
+                            )
                             .await;
 
-                        match result {
-                            Err(e) => {
-                                println!("ERR: Error when reading from '{}': {}", args.stream, e);
-                            }
-                            Ok(result) => {
-                                let mut reading = Reading::Stream(result);
+                        let mut reading = Reading::Stream(result);
 
-                                reading.display().await?;
-                            }
-                        }
+                        reading.display().await?;
                     }
 
                     OnlineCommands::Subscribe(cmd) => {
                         let state = repl_state.online();
-                        let stream = match cmd.command {
+                        let mut stream = match cmd.command {
                             SubscribeCommands::Stream(opts) => {
                                 state
                                     .client
-                                    .subscribe_to_stream(opts.stream, Revision::Start)
+                                    .subscribe_to_stream(&opts.stream, Revision::Start)
                                     .await
                             }
 
@@ -163,21 +161,20 @@ async fn main() -> eyre::Result<()> {
 
                                 state
                                     .client
-                                    .subscribe_to_process(opts.name, source_code)
+                                    .subscribe_to_process(&opts.name, &source_code)
                                     .await
                             }
                         };
 
-                        match stream {
-                            Err(e) => {
-                                println!("ERR: Error when subscribing: {}", e)
+                        let mut reading = Reading::Stream(Box::pin(async_stream::try_stream! {
+                            while let Some(event) = stream.try_next().await? {
+                                if let SubscriptionEvent::EventAppeared(record) = event {
+                                    yield record;
+                                }
                             }
+                        }));
 
-                            Ok(stream) => {
-                                let mut reading = Reading::Stream(stream);
-                                reading.display().await?;
-                            }
-                        }
+                        reading.display().await?;
                     }
 
                     OnlineCommands::Disconnect => {
@@ -216,7 +213,7 @@ async fn main() -> eyre::Result<()> {
 
                         match state
                             .client
-                            .append_stream(&opts.stream, proposes, ExpectedRevision::Any)
+                            .append_stream(&opts.stream, ExpectedRevision::Any, proposes)
                             .await
                         {
                             Err(e) => {
@@ -226,17 +223,26 @@ async fn main() -> eyre::Result<()> {
                                 );
                             }
 
-                            Ok(result) => {
-                                println!(
-                                    "{}",
-                                    serde_json::to_string_pretty(&serde_json::json!({
-                                        "position": result.position.raw(),
-                                        "next_expected_version": result.next_expected_version.raw(),
-                                        "next_logical_position": result.next_logical_position,
-                                    }))
-                                    .unwrap()
-                                );
-                            }
+                            Ok(result) => match result {
+                                AppendStreamCompleted::Error(e) => match e {
+                                    AppendError::StreamDeleted => {
+                                        println!("ERR: Stream '{}' has been deleted", opts.stream);
+                                    }
+                                    AppendError::WrongExpectedRevision(_) => {
+                                        println!("ERR: {}", e);
+                                    }
+                                },
+                                AppendStreamCompleted::Success(result) => {
+                                    println!(
+                                        "{}",
+                                        serde_json::to_string_pretty(&serde_json::json!({
+                                            "position": result.position.raw(),
+                                            "next_expected_version": result.next_expected_version.raw(),
+                                            "next_logical_position": result.next_logical_position,
+                                        })).unwrap()
+                                    );
+                                }
+                            },
                         }
                     }
 
@@ -252,24 +258,31 @@ async fn main() -> eyre::Result<()> {
                                 println!("ERR: Error when deleting stream {}: {}", opts.stream, e);
                             }
 
-                            Ok(result) => match result {
-                                DeleteResult::WrongExpectedRevision(e) => {
-                                    println!(
-                                        "ERR: Wrong expected revision when deleting stream '{}', expected: {} but got {}",
-                                        opts.stream,
-                                        e.expected,
-                                        e.current,
-                                    );
-                                }
+                            Ok(result) => {
+                                match result {
+                                    DeleteStreamCompleted::Error(e) => match e {
+                                        DeleteError::WrongExpectedRevision(e) => {
+                                            println!(
+                                            "ERR: Wrong expected revision when deleting stream '{}', expected: {} but got {}",
+                                            opts.stream,
+                                            e.expected,
+                                            e.current,
+                                        );
+                                        }
+                                        DeleteError::NotLeaderException(_) => {
+                                            println!("ERR: Not leader exception when deleting stream '{}'", opts.stream);
+                                        }
+                                    },
 
-                                DeleteResult::Success(p) => {
-                                    println!(
-                                        "Stream '{}' deletion successful, position {}",
-                                        opts.stream,
-                                        p.raw(),
-                                    );
+                                    DeleteStreamCompleted::Success(p) => {
+                                        println!(
+                                            "Stream '{}' deletion successful, position {}",
+                                            opts.stream,
+                                            p.position.raw(),
+                                        );
+                                    }
                                 }
-                            },
+                            }
                         }
                     }
 
@@ -412,7 +425,7 @@ impl ReplState {
 struct OnlineState {
     host: String,
     port: u16,
-    client: Client,
+    client: GrpcClient,
 }
 
 struct MikoshiState {
@@ -584,7 +597,7 @@ where
 }
 
 async fn list_programmable_subscriptions(state: &mut OnlineState) {
-    let summaries = match state.client.list_programmable_subscriptions().await {
+    let summaries = match state.client.list_programs().await {
         Err(e) => {
             println!("Err: Error when listing programmable subscriptions: {}", e);
             return;
@@ -617,7 +630,7 @@ async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
         }
     };
 
-    if let Err(e) = state.client.kill_programmable_subscription(id).await {
+    if let Err(e) = state.client.kill_program(id).await {
         println!("Err: Error when killing programmable subscription: {}", e);
     }
 }
@@ -635,18 +648,29 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
         }
     };
 
-    let stats = match state.client.get_programmable_subscription_stats(id).await {
+    let stats = match state.client.get_program(id).await {
         Err(e) => {
             println!("Err: Error when getting programmable subscription: {}", e);
             return;
         }
 
-        Ok(stats) => stats,
+        Ok(prog) => match prog {
+            ProgramObtained::Success(stats) => stats,
+            ProgramObtained::Error(e) => match e {
+                GetProgramError::NotExists => {
+                    println!(
+                        "Err: programmable subscription with id {} does not exist",
+                        id
+                    );
+                    return;
+                }
+            },
+        },
     };
 
-    let source_code = stats.source_code;
+    // let source_code = stats.source_code;
 
-    let stats = serde_json::json!({
+    let js = serde_json::json!({
         "id": stats.id,
         "name": stats.name,
         "started": stats.started,
@@ -654,21 +678,21 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
         "pushed_events": stats.pushed_events,
     });
 
-    println!("{}", serde_json::to_string_pretty(&stats).unwrap());
+    println!("{}", serde_json::to_string_pretty(&js).unwrap());
     println!("Source code:");
-    println!("{}", source_code);
+    println!("{}", stats.source_code);
 }
 
 enum Reading {
     Sync(VecDeque<Record>),
-    Stream(geth_client::ReadStream),
+    Stream(BoxStream<'static, eyre::Result<Record>>),
 }
 
 impl Reading {
     async fn next(&mut self) -> eyre::Result<Option<Record>> {
         match self {
             Reading::Sync(vec) => Ok(vec.pop_front()),
-            Reading::Stream(stream) => stream.next().await,
+            Reading::Stream(stream) => stream.try_next().await,
         }
     }
 

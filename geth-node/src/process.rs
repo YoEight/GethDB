@@ -5,8 +5,8 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKilled, ProgramKillError, ProgramObtained,
-    ProgramSummary, Propose, Record, Revision, SubscriptionEvent,
+    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
+    Record, Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;

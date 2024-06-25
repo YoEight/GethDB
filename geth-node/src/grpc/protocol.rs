@@ -4,14 +4,14 @@ use futures::{pin_mut, Stream, StreamExt};
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
-use tonic::{Request, Response, Status, Streaming};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
+use tonic::{Request, Response, Status, Streaming};
 
+use geth_common::generated::next::protocol;
+use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
     Client, Operation, OperationIn, OperationOut, ProgramListed, Reply, StreamRead, Subscribe,
 };
-use geth_common::generated::next::protocol;
-use geth_common::generated::next::protocol::protocol_server::Protocol;
 
 pub struct ProtocolImpl<C> {
     client: Arc<C>,

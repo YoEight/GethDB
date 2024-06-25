@@ -46,18 +46,18 @@ pub mod protocol {
     }
 
     pub mod streams {
+        pub use super::super::generated::protocol::streams::read_req::options::{
+            stream_options::RevisionOption, CountOption, StreamOption,
+        };
         pub use super::super::generated::protocol::streams::*;
         pub use super::super::generated::protocol::streams::{
             append_req,
-            append_resp::{self, Success, success::CurrentRevisionOption},
+            append_resp::{self, success::CurrentRevisionOption, Success},
             read_resp::{
                 self,
                 read_event::{self, RecordedEvent},
                 ReadEvent,
             },
-        };
-        pub use super::super::generated::protocol::streams::read_req::options::{
-            CountOption, stream_options::RevisionOption, StreamOption,
         };
 
         pub mod server {
@@ -138,6 +138,12 @@ fn grpc_to_uuid(value: protocol::Uuid) -> Result<Uuid, uuid::Error> {
 pub struct EndPoint {
     pub host: String,
     pub port: u16,
+}
+
+impl EndPoint {
+    pub fn new(host: String, port: u16) -> Self {
+        Self { host, port }
+    }
 }
 
 #[derive(Clone)]
@@ -1337,12 +1343,6 @@ impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult 
             position: value.position.raw(),
         }
     }
-}
-
-#[derive(Debug)]
-pub enum DeleteResult {
-    WrongExpectedRevision(WrongExpectedRevisionError),
-    Success(Position),
 }
 
 pub enum AppendStreamCompleted {
