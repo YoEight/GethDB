@@ -1,6 +1,7 @@
-use geth_common::ProgrammableStats;
 use tokio::sync::oneshot;
 use uuid::Uuid;
+
+use geth_common::ProgramStats;
 
 use crate::messages::{SubscribeTo, SubscriptionConfirmed};
 
@@ -11,10 +12,10 @@ pub struct SubscribeMsg {
 
 pub struct GetProgrammableSubscriptionStatsMsg {
     pub id: Uuid,
-    pub mail: oneshot::Sender<Option<ProgrammableStats>>,
+    pub mail: oneshot::Sender<Option<ProgramStats>>,
 }
 
 pub struct KillProgrammableSubscriptionMsg {
     pub id: Uuid,
-    pub mail: oneshot::Sender<()>,
+    pub mail: oneshot::Sender<Option<()>>,
 }

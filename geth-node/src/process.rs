@@ -1,5 +1,3 @@
-use std::io;
-
 use eyre::bail;
 use futures::stream::BoxStream;
 use tokio::sync::oneshot;
@@ -7,8 +5,8 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    ProgramKilled, ProgrammableStats, ProgrammableSummary, ProgramObtained, ProgramSummary,
-    Propose, Record, Revision, SubscriptionEvent,
+    GetProgramError, ProgramKilled, ProgramKillError, ProgramObtained,
+    ProgramSummary, Propose, Record, Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
@@ -19,7 +17,7 @@ use crate::bus::{
 };
 use crate::messages::{
     AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
-    SubscribeTo, SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget,
+    SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::process::storage::StorageService;
 use crate::process::subscriptions::SubscriptionsClient;
@@ -194,15 +192,67 @@ where
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
-        todo!()
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .list_programmable_subscriptions(sender)
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp);
+        }
+
+        bail!("Main bus has shutdown!");
     }
 
     async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
-        todo!()
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .get_programmable_subscription_stats(GetProgrammableSubscriptionStatsMsg {
+                id,
+                mail: sender,
+            })
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(resp.map_or(
+                ProgramObtained::Error(GetProgramError::NotExists),
+                ProgramObtained::Success,
+            ));
+        }
+
+        bail!("Main bus has shutdown!");
     }
 
     async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
-        todo!()
+        let (sender, recv) = oneshot::channel();
+        if self
+            .subscriptions
+            .kill_programmable_subscription(KillProgrammableSubscriptionMsg { id, mail: sender })
+            .await
+            .is_err()
+        {
+            bail!("Main bus has shutdown!");
+        }
+
+        if let Ok(resp) = recv.await {
+            return Ok(
+                resp.map_or(ProgramKilled::Error(ProgramKillError::NotExists), |_| {
+                    ProgramKilled::Success
+                }),
+            );
+        }
+
+        bail!("Main bus has shutdown!");
     }
 }
 
@@ -228,97 +278,5 @@ where
             storage,
             subscriptions,
         }
-    }
-
-    pub async fn append_stream(&self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
-        self.storage.append_stream(params).await
-    }
-
-    pub async fn read_stream(&self, params: ReadStream) -> ReadStreamCompleted {
-        self.storage.read_stream(params).await
-    }
-
-    // pub async fn delete_stream(&self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
-    //     self.storage.delete_stream(params).await
-    // }
-
-    pub async fn subscribe_to(&self, msg: SubscribeTo) -> eyre::Result<SubscriptionConfirmed> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .subscribe(SubscribeMsg {
-                payload: msg,
-                mail: sender,
-            })
-            .is_err()
-        {
-            bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp);
-        }
-
-        bail!("Main bus has shutdown!");
-    }
-
-    pub async fn get_programmable_subscription_stats(
-        &self,
-        id: Uuid,
-    ) -> eyre::Result<Option<ProgrammableStats>> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .get_programmable_subscription_stats(GetProgrammableSubscriptionStatsMsg {
-                id,
-                mail: sender,
-            })
-            .await
-            .is_err()
-        {
-            bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp);
-        }
-
-        bail!("Main bus has shutdown!");
-    }
-
-    pub async fn kill_programmable_subscription(&self, id: Uuid) -> eyre::Result<()> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .kill_programmable_subscription(KillProgrammableSubscriptionMsg { id, mail: sender })
-            .await
-            .is_err()
-        {
-            bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp);
-        }
-
-        bail!("Main bus has shutdown!");
-    }
-
-    pub async fn list_programmable_subscriptions(&self) -> eyre::Result<Vec<ProgrammableSummary>> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .list_programmable_subscriptions(sender)
-            .await
-            .is_err()
-        {
-            bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp);
-        }
-
-        bail!("Main bus has shutdown!");
     }
 }

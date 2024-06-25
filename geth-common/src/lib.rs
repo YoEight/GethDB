@@ -1345,36 +1345,6 @@ pub enum DeleteResult {
     Success(Position),
 }
 
-#[derive(Clone, Debug)]
-pub struct ProgrammableStats {
-    pub id: Uuid,
-    pub name: String,
-    pub source_code: String,
-    pub subscriptions: Vec<String>,
-    pub pushed_events: usize,
-    pub started: DateTime<Utc>,
-}
-
-impl ProgrammableStats {
-    pub fn new(id: Uuid, name: String, source_code: String) -> Self {
-        Self {
-            id,
-            name,
-            source_code,
-            subscriptions: vec![],
-            pushed_events: 0,
-            started: Utc::now(),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub struct ProgrammableSummary {
-    pub id: Uuid,
-    pub name: String,
-    pub started: DateTime<Utc>,
-}
-
 pub enum AppendStreamCompleted {
     Success(WriteResult),
     Error(AppendError),

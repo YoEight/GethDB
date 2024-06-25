@@ -1,6 +1,6 @@
+use std::{fs, fs::File, io, path::PathBuf};
 use std::collections::VecDeque;
 use std::path::Path;
-use std::{fs, fs::File, io, path::PathBuf};
 
 use bytes::BytesMut;
 use chrono::Utc;
@@ -14,12 +14,12 @@ use geth_common::{
     DeleteResult, Direction, ExpectedRevision, IteratorIO, Position, Propose, Record, Revision,
     WriteResult,
 };
+use geth_domain::{AppendProposes, Lsm, LsmSettings, parse_event, parse_event_io, RecordedEvent};
 use geth_domain::binary::events::Event;
-use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings, RecordedEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::chunks::ChunkBasedWAL;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::wal::chunks::ChunkBasedWAL;
 
 use crate::cli::{
     Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,
@@ -597,7 +597,7 @@ async fn list_programmable_subscriptions(state: &mut OnlineState) {
         let summary = serde_json::json!({
             "id": summary.id,
             "name": summary.name,
-            "started": summary.started,
+            "started_at": summary.started_at,
         });
 
         println!("{}", serde_json::to_string_pretty(&summary).unwrap());

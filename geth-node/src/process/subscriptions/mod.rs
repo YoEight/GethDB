@@ -1,26 +1,30 @@
-mod programmable;
+use std::collections::HashMap;
+
+use chrono::Utc;
+use tokio::sync::{mpsc, oneshot};
+use tokio::task::JoinHandle;
+use uuid::Uuid;
+
+use geth_common::{ProgramStats, ProgramSummary};
+use geth_mikoshi::{Entry, MikoshiStream};
 
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
 use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
-use geth_common::{ProgrammableStats, ProgrammableSummary};
-use geth_mikoshi::{Entry, MikoshiStream};
-use std::collections::HashMap;
-use tokio::sync::{mpsc, oneshot};
-use tokio::task::JoinHandle;
-use uuid::Uuid;
+
+mod programmable;
 
 enum Msg {
     Subscribe(SubscribeMsg),
     EventCommitted(Entry),
-    GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgrammableStats>>),
-    KillProgrammableSub(Uuid, oneshot::Sender<()>),
-    ListProgrammableSubs(oneshot::Sender<Vec<ProgrammableSummary>>),
+    GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgramStats>>),
+    KillProgrammableSub(Uuid, oneshot::Sender<Option<()>>),
+    ListProgrammableSubs(oneshot::Sender<Vec<ProgramSummary>>),
 }
 
 struct ProgrammableProcess {
-    stats: ProgrammableStats,
+    stats: ProgramStats,
     handle: JoinHandle<()>,
 }
 
@@ -78,7 +82,7 @@ impl SubscriptionsClient {
 
     pub async fn list_programmable_subscriptions(
         &self,
-        mailbox: oneshot::Sender<Vec<ProgrammableSummary>>,
+        mailbox: oneshot::Sender<Vec<ProgramSummary>>,
     ) -> eyre::Result<()> {
         if self.inner.send(Msg::ListProgrammableSubs(mailbox)).is_err() {
             eyre::bail!("Subscription service process has shutdown!");
@@ -144,11 +148,14 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                             programmables.insert(
                                 opts.id,
                                 ProgrammableProcess {
-                                    stats: ProgrammableStats::new(
-                                        opts.id,
-                                        opts.name.clone(),
-                                        opts.source_code,
-                                    ),
+                                    stats: ProgramStats {
+                                        id: opts.id,
+                                        name: opts.name.clone(),
+                                        source_code: opts.source_code,
+                                        subscriptions: vec![],
+                                        pushed_events: 0,
+                                        started: Utc::now(),
+                                    },
                                     handle: prog.handle,
                                 },
                             );
@@ -205,21 +212,23 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                 let _ = mailbox.send(stats);
             }
             Msg::KillProgrammableSub(id, mailbox) => {
+                let mut outcome = None;
                 if let Some(process) = programmables.remove(&id) {
                     process.handle.abort();
+                    outcome = Some(());
                 }
 
-                let _ = mailbox.send(());
+                let _ = mailbox.send(outcome);
             }
 
             Msg::ListProgrammableSubs(mailbox) => {
                 let mut summaries = Vec::with_capacity(programmables.len());
 
                 for process in programmables.values() {
-                    summaries.push(ProgrammableSummary {
+                    summaries.push(ProgramSummary {
                         id: process.stats.id,
                         name: process.stats.name.clone(),
-                        started: process.stats.started,
+                        started_at: process.stats.started,
                     });
                 }
 
