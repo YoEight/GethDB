@@ -1,6 +1,6 @@
-use std::{fs, fs::File, io, path::PathBuf};
 use std::collections::VecDeque;
 use std::path::Path;
+use std::{fs, fs::File, io, path::PathBuf};
 
 use bytes::BytesMut;
 use chrono::Utc;
@@ -17,12 +17,12 @@ use geth_common::{
     EndPoint, ExpectedRevision, GetProgramError, IteratorIO, Position, ProgramObtained, Propose,
     Record, Revision, SubscriptionEvent, WriteResult,
 };
-use geth_domain::{AppendProposes, Lsm, LsmSettings, parse_event, parse_event_io, RecordedEvent};
 use geth_domain::binary::events::Event;
+use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings, RecordedEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::cli::{
     Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,

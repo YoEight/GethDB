@@ -106,7 +106,7 @@ impl Client for GrpcClient {
             }
         } else {
             eyre::bail!(
-                "unexpected code path when appending events to '{}'",
+                "task unable to complete when appending events to '{}'",
                 stream_id
             );
         }

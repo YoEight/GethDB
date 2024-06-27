@@ -11,6 +11,7 @@ use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
     Client, Operation, OperationIn, OperationOut, ProgramListed, Reply, StreamRead, Subscribe,
+    SubscriptionEvent, UnsubscribeReason,
 };
 
 pub struct ProtocolImpl<C> {
@@ -200,6 +201,11 @@ where
                         reply: Reply::StreamRead(StreamRead::EventAppeared(record)),
                     };
                 }
+
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::StreamRead(StreamRead::EndOfStream),
+                };
             }
 
             Operation::Subscribe(subscribe) => {
@@ -220,6 +226,11 @@ where
                         reply: Reply::SubscriptionEvent(event),
                     };
                 }
+
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                };
             }
 
             Operation::ListPrograms(_) => {

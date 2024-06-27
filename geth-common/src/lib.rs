@@ -125,11 +125,16 @@ pub struct OperationOut {
 }
 
 impl OperationOut {
-    pub fn is_subscription_related(&self) -> bool {
+    pub fn is_streaming(&self) -> bool {
         match &self.reply {
             Reply::SubscriptionEvent(event) => match event {
                 SubscriptionEvent::Unsubscribed(_) => false,
                 _ => true,
+            },
+
+            Reply::StreamRead(event) => match event {
+                StreamRead::EventAppeared(_) => true,
+                _ => false,
             },
 
             _ => false,
