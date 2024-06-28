@@ -14,6 +14,8 @@ use geth_common::{
     SubscriptionEvent, UnsubscribeReason,
 };
 
+use crate::grpc::local::LocalStorage;
+
 pub struct ProtocolImpl<C> {
     client: Arc<C>,
 }
@@ -103,6 +105,7 @@ async fn multiplex<C>(
 ) where
     C: Client + Send + Sync + 'static,
 {
+    let local_storage = LocalStorage::new();
     let (tx, out_rx) = mpsc::unbounded_channel();
     let mut pipeline = Pipeline {
         input,
@@ -120,7 +123,7 @@ async fn multiplex<C>(
                 None => break,
                 Some(msg) => match msg {
                     Msg::User(operation) => {
-                        run_operation(client.clone(), tx.clone(), operation);
+                        run_operation(client.clone(), local_storage.clone(), tx.clone(), operation);
                     }
 
                     Msg::Server(operation) => {
@@ -137,13 +140,14 @@ async fn multiplex<C>(
 
 fn run_operation<C>(
     client: Arc<C>,
+    local_storage: LocalStorage,
     tx: UnboundedSender<eyre::Result<OperationOut>>,
     input: OperationIn,
 ) where
     C: Client + Send + Sync + 'static,
 {
     tokio::spawn(async move {
-        let stream = execute_operation(client, input).await;
+        let stream = execute_operation(client, local_storage, input).await;
 
         pin_mut!(stream);
         while let Some(out) = stream.next().await {
@@ -156,6 +160,7 @@ fn run_operation<C>(
 
 async fn execute_operation<C>(
     client: Arc<C>,
+    local_storage: LocalStorage,
     input: OperationIn,
 ) -> impl Stream<Item = eyre::Result<OperationOut>>
 where
@@ -194,21 +199,37 @@ where
                     params.max_count,
                 ).await;
 
-                while let Some(record) = stream.next().await {
-                    let record = record?;
-                    yield OperationOut {
-                        correlation,
-                        reply: Reply::StreamRead(StreamRead::EventAppeared(record)),
-                    };
-                }
+                let token = local_storage.new_cancellation_token(correlation).await;
+                loop {
+                    select! {
+                        record = stream.next() => {
+                            match record {
+                                None => {
+                                   yield OperationOut {
+                                        correlation,
+                                        reply: Reply::StreamRead(StreamRead::EndOfStream),
+                                    };
 
-                yield OperationOut {
-                    correlation,
-                    reply: Reply::StreamRead(StreamRead::EndOfStream),
-                };
+                                    local_storage.complete(&correlation).await;
+                                    break;
+                                }
+
+                                Some(record) => {
+                                    yield OperationOut {
+                                        correlation,
+                                        reply: Reply::StreamRead(StreamRead::EventAppeared(record?)),
+                                    };
+                                }
+                            }
+                        }
+
+                        _ = token.notified() => break,
+                    }
+                }
             }
 
             Operation::Subscribe(subscribe) => {
+                let token = local_storage.new_cancellation_token(correlation).await;
                 let mut stream = match subscribe {
                     Subscribe::ToStream(params) => {
                         client.subscribe_to_stream(&params.stream_name, params.start).await
@@ -219,18 +240,38 @@ where
                     }
                 };
 
-                while let Some(event) = stream.next().await {
-                    let event = event?;
-                    yield OperationOut {
-                        correlation,
-                        reply: Reply::SubscriptionEvent(event),
-                    };
-                }
+                loop {
+                    select! {
+                        event = stream.next() => {
+                            match event {
+                                None => {
+                                    yield OperationOut {
+                                        correlation,
+                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                                    };
 
-                yield OperationOut {
-                    correlation,
-                    reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-                };
+                                    local_storage.complete(&correlation).await;
+                                    break;
+                                }
+
+                                Some(event) => {
+                                    yield OperationOut {
+                                        correlation,
+                                        reply: Reply::SubscriptionEvent(event?),
+                                    };
+                                }
+                            }
+                        }
+
+                        _ = token.notified() => {
+                            yield OperationOut {
+                                correlation,
+                                reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
+                            };
+                            break;
+                        },
+                    }
+                }
             }
 
             Operation::ListPrograms(_) => {
@@ -253,6 +294,10 @@ where
                     correlation,
                     reply: Reply::ProgramKilled(client.kill_program(params.id).await?),
                 };
+            }
+
+            Operation::Unsubscribe => {
+                local_storage.cancel(&correlation).await;
             }
         }
     }

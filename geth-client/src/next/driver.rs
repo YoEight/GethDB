@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::{EndPoint, OperationOut};
 use geth_common::generated::next::protocol;
+use geth_common::{EndPoint, Operation, OperationIn, OperationOut};
 
-use crate::next::{Command, connect_to_node, Connection, Mailbox};
+use crate::next::{connect_to_node, Command, Connection, Mailbox, Msg};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -79,7 +79,19 @@ impl Driver {
                     command.operation_in.correlation
                 );
 
-                // TODO - If we are dealing with a streaming operation, we need to end it.
+                // If we were dealing with a streaming operation, we notify the server that there is
+                // no need to keep those resources up for nothing.
+                if is_streaming {
+                    if let Some(connection) = &self.connection {
+                        let _ = connection.send(
+                            OperationIn {
+                                correlation: command.operation_in.correlation,
+                                operation: Operation::Unsubscribe,
+                            }
+                            .into(),
+                        );
+                    }
+                }
                 return;
             }
 

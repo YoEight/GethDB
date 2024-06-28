@@ -33,6 +33,7 @@ message OperationIn {
     ListPrograms list_programs = 6;
     KillProgram kill_program = 7;
     GetProgram get_program = 8;
+    google.protobuf.Empty unsubscribe = 9;
   }
 
   message AppendStream {

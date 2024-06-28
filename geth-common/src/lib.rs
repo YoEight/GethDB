@@ -62,6 +62,7 @@ pub enum Operation {
     ListPrograms(ListPrograms),
     GetProgram(GetProgram),
     KillProgram(KillProgram),
+    Unsubscribe,
 }
 
 impl From<Operation> for operation_in::Operation {
@@ -74,6 +75,7 @@ impl From<Operation> for operation_in::Operation {
             Operation::ListPrograms(req) => operation_in::Operation::ListPrograms(req.into()),
             Operation::GetProgram(req) => operation_in::Operation::GetProgram(req.into()),
             Operation::KillProgram(req) => operation_in::Operation::KillProgram(req.into()),
+            Operation::Unsubscribe => operation_in::Operation::Unsubscribe(()),
         }
     }
 }
@@ -100,6 +102,7 @@ impl From<next::protocol::OperationIn> for OperationIn {
             operation_in::Operation::ListPrograms(req) => Operation::ListPrograms(req.into()),
             operation_in::Operation::GetProgram(req) => Operation::GetProgram(req.into()),
             operation_in::Operation::KillProgram(req) => Operation::KillProgram(req.into()),
+            operation_in::Operation::Unsubscribe(_) => Operation::Unsubscribe,
         };
 
         Self {

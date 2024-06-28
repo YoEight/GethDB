@@ -6,6 +6,7 @@ use geth_mikoshi::wal::WriteAheadLog;
 
 use crate::process::{InternalClient, Processes};
 
+mod local;
 mod protocol;
 
 pub async fn start_server<WAL, S>(processes: Processes<WAL, S>) -> Result<(), transport::Error>
