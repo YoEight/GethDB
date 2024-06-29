@@ -14,8 +14,8 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use crate::binary::events::Event;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
-use crate::index::ss_table::SsTable;
 use crate::index::Merge;
+use crate::index::ss_table::SsTable;
 use crate::parse_event_io;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
@@ -104,6 +104,10 @@ where
 
     pub fn with_default(storage: S) -> Self {
         Self::new(Default::default(), storage)
+    }
+
+    pub fn storage(&self) -> &S {
+        &self.storage
     }
 
     pub fn checkpoint(&self) -> u64 {

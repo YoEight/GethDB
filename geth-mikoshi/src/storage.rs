@@ -1,12 +1,13 @@
-pub(crate) mod fs;
-pub(crate) mod in_mem;
+use std::io;
+
+use bytes::Bytes;
+use uuid::Uuid;
 
 pub use fs::FileSystemStorage;
 pub use in_mem::InMemoryStorage;
 
-use bytes::Bytes;
-use std::io;
-use uuid::Uuid;
+pub(crate) mod fs;
+pub(crate) mod in_mem;
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum FileId {
@@ -28,17 +29,29 @@ impl FileId {
     pub fn writer_chk() -> Self {
         Self::Checkpoint(Checkpoint::Writer)
     }
+
+    pub fn index_chk() -> Self {
+        Self::Checkpoint(Checkpoint::Index)
+    }
+
+    pub fn index_global_chk() -> Self {
+        Self::Checkpoint(Checkpoint::IndexGlobal)
+    }
 }
 
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Checkpoint {
     Writer,
+    Index,
+    IndexGlobal,
 }
 
 impl Checkpoint {
     pub fn as_str(&self) -> &'static str {
         match self {
             Checkpoint::Writer => "writer.chk",
+            Checkpoint::Index => "index.chk",
+            Checkpoint::IndexGlobal => "index_global.chk",
         }
     }
 

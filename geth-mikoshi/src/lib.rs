@@ -10,7 +10,6 @@ pub use crate::storage::in_mem::InMemoryStorage;
 
 mod constants;
 pub mod hashing;
-pub mod marshalling;
 pub mod storage;
 pub mod wal;
 

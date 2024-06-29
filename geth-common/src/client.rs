@@ -1,5 +1,7 @@
 #![allow(async_fn_in_trait)]
 
+use std::sync::Arc;
+
 use futures::stream::BoxStream;
 use uuid::Uuid;
 
@@ -60,4 +62,67 @@ pub trait Client {
     async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained>;
 
     async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled>;
+}
+
+#[async_trait::async_trait]
+impl<C> Client for Arc<C>
+where
+    C: Client + Send + Sync,
+{
+    async fn append_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+        proposes: Vec<Propose>,
+    ) -> eyre::Result<AppendStreamCompleted> {
+        self.append_stream(stream_id, expected_revision, proposes)
+            .await
+    }
+
+    async fn read_stream(
+        &self,
+        stream_id: &str,
+        direction: Direction,
+        revision: Revision<u64>,
+        max_count: u64,
+    ) -> BoxStream<'static, eyre::Result<Record>> {
+        self.read_stream(stream_id, direction, revision, max_count)
+            .await
+    }
+
+    async fn subscribe_to_stream(
+        &self,
+        stream_id: &str,
+        start: Revision<u64>,
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
+        self.subscribe_to_stream(stream_id, start).await
+    }
+
+    async fn subscribe_to_process(
+        &self,
+        name: &str,
+        source_code: &str,
+    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
+        self.subscribe_to_process(name, source_code).await
+    }
+
+    async fn delete_stream(
+        &self,
+        stream_id: &str,
+        expected_revision: ExpectedRevision,
+    ) -> eyre::Result<DeleteStreamCompleted> {
+        self.delete_stream(stream_id, expected_revision).await
+    }
+
+    async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+        self.list_programs().await
+    }
+
+    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
+        self.get_program(id).await
+    }
+
+    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
+        self.kill_program(id).await
+    }
 }
