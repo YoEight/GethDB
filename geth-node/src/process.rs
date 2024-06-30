@@ -1,11 +1,12 @@
 use eyre::bail;
 use futures::stream::BoxStream;
+use futures::TryStreamExt;
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
+    GetProgramError, ProgramKilled, ProgramKillError, ProgramObtained, ProgramSummary, Propose,
     Record, Revision, SubscriptionEvent,
 };
 use geth_domain::Lsm;
@@ -32,7 +33,8 @@ pub struct InternalClient<WAL, S: Storage> {
 
 impl<WAL, S> InternalClient<WAL, S>
 where
-    S: Storage,
+    S: Storage + Send + Sync + 'static,
+    WAL: WriteAheadLog + Send + Sync + 'static,
 {
     pub fn new(processes: Processes<WAL, S>) -> Self {
         Self {
@@ -110,6 +112,15 @@ where
         stream_id: &str,
         start: Revision<u64>,
     ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
+        let catchup_stream = if start == Revision::End {
+            None
+        } else {
+            Some(
+                self.read_stream(stream_id, Direction::Forward, start, u64::MAX)
+                    .await,
+            )
+        };
+
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
@@ -127,9 +138,22 @@ where
             outcome?;
             let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
 
+            let mut threshold = start.raw();
+            if let Some(mut catchup_stream) = catchup_stream {
+                while let Some(record) = catchup_stream.try_next().await? {
+                    let revision = record.revision;
+                    yield SubscriptionEvent::EventAppeared(record);
+                    threshold = revision;
+                }
+            }
+
             match resp.outcome {
                 SubscriptionRequestOutcome::Success(mut stream) => {
                     while let Some(record) = stream.next().await? {
+                        if record.revision <= threshold {
+                            continue;
+                        }
+
                         yield SubscriptionEvent::EventAppeared(record);
                     }
                 }

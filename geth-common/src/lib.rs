@@ -380,7 +380,7 @@ impl From<operation_in::subscribe::Stream> for SubscribeToStream {
     }
 }
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum Revision<A> {
     Start,
     End,

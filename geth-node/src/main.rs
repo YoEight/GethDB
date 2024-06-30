@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::Arc;
 
+use tokio::select;
 use tracing::Level;
 use tracing_subscriber::FmtSubscriber;
 
@@ -34,8 +35,19 @@ async fn main() -> eyre::Result<()> {
 
     let processes = Processes::new(wal, index.clone());
     let client = Arc::new(InternalClient::new(processes));
-    let _services = services::start(client.clone(), index);
-    grpc::start_server(client).await?;
+    let services = services::start(client.clone(), index);
+
+    select! {
+        server = grpc::start_server(client) => {
+            if let Err(e) = server {
+                tracing::error!("GethDB node gRPC module crashed: {}", e);
+            }
+        }
+
+        _ = services.exited() => {
+            tracing::info!("GethDB node terminated");
+        }
+    }
 
     Ok(())
 }
