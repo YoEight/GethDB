@@ -1,21 +1,24 @@
+use std::collections::HashMap;
+use std::sync::Arc;
+
+use bytes::Bytes;
+use chrono::Utc;
+use pyro_core::ast::Prop;
+use pyro_core::sym::Literal;
+use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
+use pyro_runtime::helpers::{Declared, TypeBuilder};
+use serde_json::Value;
+use tokio::sync::{mpsc, Mutex, oneshot};
+use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::task::JoinHandle;
+use uuid::Uuid;
+
+use geth_common::{Position, Record, Revision};
+use geth_mikoshi::{Entry, MikoshiStream};
+
 use crate::bus::SubscribeMsg;
 use crate::messages::{StreamTarget, SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget};
 use crate::process::subscriptions::SubscriptionsClient;
-use bytes::Bytes;
-use chrono::Utc;
-use geth_common::{Position, Record, Revision};
-use geth_mikoshi::{Entry, MikoshiStream};
-use pyro_core::ast::Prop;
-use pyro_core::sym::Literal;
-use pyro_runtime::helpers::{Declared, TypeBuilder};
-use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
-use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::Arc;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::sync::{mpsc, oneshot, Mutex};
-use tokio::task::JoinHandle;
-use uuid::Uuid;
 
 struct SubServer {
     recv: Arc<Mutex<mpsc::UnboundedReceiver<RuntimeValue>>>,
@@ -319,7 +322,7 @@ pub fn spawn(
         })
         .build()?;
 
-    let (send_mikoshi, recv_mikoshi) = mpsc::channel(500);
+    let (send_mikoshi, recv_mikoshi) = mpsc::unbounded_channel();
 
     tokio::spawn(async move {
         let mut revision = 0;
@@ -336,7 +339,6 @@ pub fn spawn(
                     position: Position::end(),
                     created: Utc::now(),
                 })
-                .await
                 .is_err()
             {
                 tracing::info!(

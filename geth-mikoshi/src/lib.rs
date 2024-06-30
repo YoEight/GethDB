@@ -25,28 +25,26 @@ pub struct Entry {
 }
 
 pub struct MikoshiStream {
-    inner: mpsc::Receiver<Entry>,
+    inner: mpsc::UnboundedReceiver<Entry>,
 }
 
 impl MikoshiStream {
     pub fn empty() -> Self {
-        let (_, inner) = mpsc::channel(0);
+        let (_, inner) = mpsc::unbounded_channel();
 
         Self { inner }
     }
 
-    pub fn new(inner: mpsc::Receiver<Entry>) -> Self {
+    pub fn new(inner: mpsc::UnboundedReceiver<Entry>) -> Self {
         Self { inner }
     }
 
     pub fn from_vec(entries: Vec<Entry>) -> Self {
-        let (sender, inner) = mpsc::channel(entries.len());
+        let (sender, inner) = mpsc::unbounded_channel();
 
-        tokio::spawn(async move {
-            for entry in entries {
-                let _ = sender.send(entry).await;
-            }
-        });
+        for entry in entries {
+            let _ = sender.send(entry);
+        }
 
         Self { inner }
     }

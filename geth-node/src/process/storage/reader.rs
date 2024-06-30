@@ -76,7 +76,7 @@ where
         params.count,
     );
 
-    let (read_stream, read_queue) = tokio::sync::mpsc::channel(500);
+    let (read_stream, read_queue) = tokio::sync::mpsc::unbounded_channel();
     let stream = MikoshiStream::new(read_queue);
     let _ = send_result.send(ReadStreamCompleted::Success(stream));
 
@@ -104,7 +104,7 @@ where
         };
 
         // if failing means that we don't need to read form the transaction log.
-        if read_stream.blocking_send(entry).is_err() {
+        if read_stream.send(entry).is_err() {
             break;
         }
     }
@@ -120,7 +120,7 @@ fn direct_read<WAL>(
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
 {
-    let (read_stream, read_queue) = tokio::sync::mpsc::channel(500);
+    let (read_stream, read_queue) = tokio::sync::mpsc::unbounded_channel();
     let stream = MikoshiStream::new(read_queue);
     let _ = send_result.send(ReadStreamCompleted::Success(stream));
 
@@ -158,7 +158,7 @@ where
             },
         };
 
-        if read_stream.blocking_send(entry).is_err() {
+        if read_stream.send(entry).is_err() {
             tracing::warn!(
                 "read operation {} interrupted because nobody is listening to mikoshi stream",
                 params.correlation

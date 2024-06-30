@@ -12,6 +12,7 @@ use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
 use crate::messages::{SubscriptionConfirmed, SubscriptionRequestOutcome, SubscriptionTarget};
+use crate::names;
 
 mod programmable;
 
@@ -104,8 +105,7 @@ pub fn start() -> SubscriptionsClient {
 
 struct Sub {
     parent: Option<Uuid>,
-    stream: String,
-    sender: mpsc::Sender<Entry>,
+    sender: mpsc::UnboundedSender<Entry>,
 }
 
 async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiver<Msg>) {
@@ -117,7 +117,7 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
             Msg::Subscribe(msg) => match msg.payload.target {
                 SubscriptionTarget::Stream(opts) => {
                     let subs = registry.entry(opts.stream_name.clone()).or_default();
-                    let (sender, reader) = mpsc::channel(500);
+                    let (sender, reader) = mpsc::unbounded_channel();
 
                     if let Some(parent) = opts.parent {
                         if let Some(process) = programmables.get_mut(&parent) {
@@ -127,7 +127,6 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
 
                     subs.push(Sub {
                         parent: opts.parent,
-                        stream: opts.stream_name,
                         sender,
                     });
 
@@ -187,23 +186,19 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
             },
 
             Msg::EventCommitted(entry) => {
-                if let Some(subs) = registry.get(&entry.stream_name) {
-                    for sub in subs {
-                        if sub.stream != entry.stream_name {
-                            continue;
-                        }
+                notify_subs(
+                    &mut programmables,
+                    &mut registry,
+                    names::streams::ALL,
+                    &entry,
+                );
 
-                        if let Some(parent) = sub.parent {
-                            if let Some(process) = programmables.get_mut(&parent) {
-                                process.stats.pushed_events += 1;
-                            }
-                        }
-
-                        if let Err(_) = sub.sender.send(entry.clone()).await {
-                            // TODO - implement unsubscription logic here.
-                        }
-                    }
-                }
+                notify_subs(
+                    &mut programmables,
+                    &mut registry,
+                    &entry.stream_name,
+                    &entry,
+                );
             }
 
             Msg::GetProgrammableSubStats(id, mailbox) => {
@@ -238,4 +233,23 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
     }
 
     tracing::info!("storage service exited");
+}
+
+fn notify_subs(
+    programmables: &mut HashMap<Uuid, ProgrammableProcess>,
+    registry: &mut HashMap<String, Vec<Sub>>,
+    stream_id: &str,
+    entry: &Entry,
+) {
+    if let Some(subs) = registry.get_mut(stream_id) {
+        subs.retain(|sub| {
+            if let Some(parent) = sub.parent {
+                if let Some(process) = programmables.get_mut(&parent) {
+                    process.stats.pushed_events += 1;
+                }
+            }
+
+            sub.sender.send(entry.clone()).is_ok()
+        });
+    }
 }
