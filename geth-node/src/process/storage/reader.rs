@@ -5,7 +5,7 @@ use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
 use geth_common::{IteratorIO, Position, Record};
-use geth_domain::binary::events::Event;
+use geth_domain::binary::models::Event;
 use geth_domain::RecordedEvent;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{storage::Storage, MikoshiStream};
@@ -99,7 +99,7 @@ where
             r#type: event.class,
             stream_name: event.stream_name,
             revision: event.revision,
-            data: event.data.into(),
+            data: event.data,
             position: Position(record.position),
         };
 

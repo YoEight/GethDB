@@ -46,12 +46,10 @@ where
     C: Client + Send + 'static,
     S: Storage + Sync + Send + 'static,
 {
-    let mut inner = vec![];
-
-    inner.push(Service {
+    let inner = vec![Service {
         name: "indexing",
         handle: tokio::spawn(index::indexing(client, index, sub_client)),
-    });
+    }];
 
     Services { inner }
 }

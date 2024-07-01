@@ -11,7 +11,7 @@ use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileId, Storage};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::binary::events::Event;
+use crate::binary::models::Event;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::ss_table::SsTable;
@@ -22,7 +22,7 @@ pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
 
 pub fn sst_table_block_count_limit(level: u8) -> usize {
-    2 ^ (level as usize) * LSM_BASE_SSTABLE_BLOCK_COUNT
+    (2 ^ (level as usize)) * LSM_BASE_SSTABLE_BLOCK_COUNT
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -180,7 +180,7 @@ where
     pub fn ss_table_first(&self) -> Option<SsTable<S>> {
         let state = self.state.read().unwrap();
         let ts = state.levels.get(&0)?;
-        ts.get(0).cloned()
+        ts.front().cloned()
     }
 
     pub fn put_values<V>(&self, values: V) -> io::Result<()>

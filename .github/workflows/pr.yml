@@ -1,0 +1,81 @@
+name: Rust
+
+on:
+  push:
+    branches:
+      - "master"
+
+  pull_request:
+    branches:
+      - "master"
+
+  schedule:
+    - cron: '0 3 * * 0' # Every sunday at 3am UTC.
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build:
+    continue-on-error: true
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+          - windows-latest
+          - macos-latest
+
+    runs-on: ${{ matrix.os }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and configure dependencies
+        id: configure
+        shell: pwsh
+        run: .github/scripts/setup.ps1 -Runner ${{ matrix.os }}
+
+      - name: Update system path
+        shell: pwsh
+        run: |
+          "${{ steps.configure.outputs.protoc_bin }}" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Build
+        run: cargo check --all-targets
+
+      - name: Run tests
+        run: cargo test --all-targets
+
+  linting:
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        os:
+          - ubuntu-latest
+
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download and configure dependencies
+        id: configure
+        shell: pwsh
+        run: .github/scripts/setup.ps1 -Runner ${{ matrix.os }}
+
+      - name: Update system path
+        shell: pwsh
+        run: |
+          "${{ steps.configure.outputs.protoc_bin }}" | Out-File -FilePath $env:GITHUB_PATH -Append
+
+      - name: Install tools
+        run: |
+          rustup component add clippy
+          rustup component add rustfmt
+
+      - name: Lint
+        run: cargo clippy --all-features -- -D warnings
+
+      - name: Format
+        run: cargo fmt -- --check

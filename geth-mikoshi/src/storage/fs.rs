@@ -1,6 +1,3 @@
-use crate::constants::CHUNK_SIZE;
-use crate::storage::{FileCategory, FileId, Storage};
-use bytes::{Bytes, BytesMut};
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
 use std::io::{self, ErrorKind};
@@ -10,6 +7,11 @@ use std::os::unix::fs::FileExt;
 use std::os::windows::fs::FileExt;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
+
+use bytes::{Bytes, BytesMut};
+
+use crate::constants::CHUNK_SIZE;
+use crate::storage::{FileCategory, FileId, Storage};
 
 #[derive(Clone)]
 pub struct FileSystemStorage {
@@ -55,6 +57,7 @@ impl FileSystemStorage {
             .write(true)
             .read(true)
             .create(true)
+            .truncate(false)
             .open(path)?;
 
         Ok(file)

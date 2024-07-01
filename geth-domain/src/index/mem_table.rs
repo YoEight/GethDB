@@ -1,9 +1,11 @@
-use crate::index::block::BlockEntry;
-
-use bytes::{Buf, BufMut, BytesMut};
-use geth_common::{Direction, Revision};
 use std::cmp::Ordering;
 use std::collections::BTreeMap;
+
+use bytes::{Buf, BufMut, BytesMut};
+
+use geth_common::{Direction, Revision};
+
+use crate::index::block::BlockEntry;
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 
@@ -39,7 +41,7 @@ impl MemTable {
     }
 
     pub fn scan(&self, key: u64, direction: Direction, start: Revision<u64>, count: usize) -> Scan {
-        let buffer = self.inner.get(&key).map(|s| s.clone()).unwrap_or_default();
+        let buffer = self.inner.get(&key).cloned().unwrap_or_default();
 
         Scan::new(key, buffer, direction, start, count)
     }

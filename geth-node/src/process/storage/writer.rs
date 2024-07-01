@@ -101,14 +101,14 @@ where
         }
 
         let created = Utc::now().timestamp();
-        let event = geth_domain::binary::events::StreamDeleted {
+        let event = geth_domain::binary::models::StreamDeleted {
             stream_name: params.stream_name.clone(),
             revision: current_revision.next_revision(),
             created,
         };
 
-        let event = geth_domain::binary::events::Events {
-            event: Some(geth_domain::binary::events::Event::StreamDeleted(event)),
+        let event = geth_domain::binary::models::Events {
+            event: Some(geth_domain::binary::models::Event::StreamDeleted(event)),
         };
 
         event.encode(&mut self.buffer).unwrap();
@@ -151,7 +151,7 @@ where
     };
 
     thread::spawn(move || {
-        while let Some(msg) = mailbox.recv().ok() {
+        while let Ok(msg) = mailbox.recv() {
             match msg {
                 Msg::Append(params, resp) => {
                     let result = internal.append(params);

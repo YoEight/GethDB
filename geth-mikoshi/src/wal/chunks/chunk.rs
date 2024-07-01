@@ -1,11 +1,13 @@
+use std::cmp::Ordering;
+
+use nom::bytes::complete::{tag, take_till1};
+use nom::IResult;
+use uuid::Uuid;
+
 use crate::constants::{CHUNK_HEADER_SIZE, CHUNK_SIZE};
 use crate::storage::FileId;
 use crate::wal::chunks::footer::ChunkFooter;
 use crate::wal::chunks::header::ChunkHeader;
-use nom::bytes::complete::{tag, take_till1};
-use nom::IResult;
-use std::cmp::Ordering;
-use uuid::Uuid;
 
 #[derive(Debug, Copy, Clone)]
 pub struct ChunkInfo {
@@ -21,7 +23,7 @@ impl PartialEq<Self> for ChunkInfo {
 
 impl PartialOrd<Self> for ChunkInfo {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        self.seq_num.partial_cmp(&other.seq_num)
+        Some(self.cmp(other))
     }
 }
 

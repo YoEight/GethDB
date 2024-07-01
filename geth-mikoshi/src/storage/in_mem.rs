@@ -1,9 +1,11 @@
-use crate::constants::CHUNK_SIZE;
-use crate::storage::{FileCategory, FileId, Storage};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::collections::HashMap;
 use std::io;
 use std::sync::{Arc, Mutex};
+
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+
+use crate::constants::CHUNK_SIZE;
+use crate::storage::{FileCategory, FileId, Storage};
 
 #[derive(Clone)]
 pub struct InMemoryStorage {
@@ -12,6 +14,12 @@ pub struct InMemoryStorage {
 
 impl InMemoryStorage {
     pub fn new() -> Self {
+        InMemoryStorage::default()
+    }
+}
+
+impl Default for InMemoryStorage {
+    fn default() -> Self {
         Self {
             inner: Arc::new(Mutex::new(Default::default())),
         }

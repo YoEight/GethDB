@@ -1,4 +1,4 @@
-pub mod events {
+pub mod models {
     use uuid::Uuid;
 
     pub use events::Event;

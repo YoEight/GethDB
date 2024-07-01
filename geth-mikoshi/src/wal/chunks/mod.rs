@@ -55,13 +55,9 @@ impl<S> ChunkBasedWAL<S> {
     }
 
     fn find_chunk(&self, logical_position: u64) -> Option<&Chunk> {
-        for chunk in &self.chunks {
-            if chunk.contains_log_position(logical_position) {
-                return Some(chunk);
-            }
-        }
-
-        None
+        self.chunks
+            .iter()
+            .find(|&chunk| chunk.contains_log_position(logical_position))
     }
 }
 

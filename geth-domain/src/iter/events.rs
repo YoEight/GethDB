@@ -4,7 +4,7 @@ use geth_common::IteratorIO;
 use geth_mikoshi::wal::entries::EntryIter;
 use geth_mikoshi::wal::WriteAheadLog;
 
-use crate::binary::events::Event;
+use crate::binary::models::Event;
 use crate::parse_event;
 
 pub struct EventIter<WAL> {
@@ -28,6 +28,8 @@ impl<WAL: WriteAheadLog> IteratorIO for EventIter<WAL> {
                 if let Event::RecordedEvent(event) = event.event.unwrap() {
                     return Ok(Some((item.position, crate::RecordedEvent::from(event))));
                 }
+
+                continue;
             }
 
             return Ok(None);

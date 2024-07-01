@@ -2,10 +2,10 @@ use std::collections::HashMap;
 
 use uuid::Uuid;
 
-use geth_common::{EndPoint, Operation, OperationIn, OperationOut};
 use geth_common::generated::next::protocol;
+use geth_common::{EndPoint, Operation, OperationIn, OperationOut};
 
-use crate::next::{Command, connect_to_node, Connection, Mailbox};
+use crate::next::{connect_to_node, Command, Connection, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -45,13 +45,7 @@ impl Driver {
             let correlation = command.operation_in.correlation;
             let operation_in: protocol::OperationIn = command.operation_in.clone().into();
 
-            if self
-                .connection
-                .as_ref()
-                .unwrap()
-                .send(operation_in.into())
-                .is_ok()
-            {
+            if self.connection.as_ref().unwrap().send(operation_in).is_ok() {
                 self.registry.insert(correlation, command);
                 return Ok(());
             }
