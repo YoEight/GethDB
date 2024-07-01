@@ -3,18 +3,20 @@ use std::{io, sync, thread};
 use bytes::BytesMut;
 use chrono::Utc;
 use prost::Message;
+use uuid::Uuid;
 
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
-    Position, WriteResult, WrongExpectedRevisionError,
+    Position, Record, WriteResult, WrongExpectedRevisionError,
 };
 use geth_domain::AppendProposes;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
+use crate::domain::index::{CurrentRevision, Index};
 use crate::messages::{AppendStream, DeleteStream};
-use crate::process::storage::index::{CurrentRevision, StorageIndex};
-use crate::process::storage::RevisionCache;
+use crate::names;
+use crate::process::SubscriptionsClient;
 
 enum Msg {
     Append(
@@ -33,9 +35,9 @@ where
     S: Storage,
 {
     wal: WALRef<WAL>,
-    index: StorageIndex<S>,
-    revision_cache: RevisionCache,
+    index: Index<S>,
     buffer: BytesMut,
+    sub_client: SubscriptionsClient,
 }
 
 impl<WAL, S> StorageWriterInternal<WAL, S>
@@ -68,11 +70,18 @@ where
         );
 
         let receipt = self.wal.append(events)?;
-        self.index.chase(receipt.next_position);
+        let _ = self.sub_client.event_written(Record {
+            id: Uuid::new_v4(),
+            r#type: names::types::EVENTS_WRITTEN.to_string(),
+            stream_name: names::streams::SYSTEM.to_string(),
+            position: Position(receipt.start_position),
+            revision: receipt.start_position,
+            data: Default::default(),
+        });
 
         if len > 0 {
-            self.revision_cache
-                .insert(params.stream_name, revision + len - 1);
+            self.index
+                .cache_stream_revision(params.stream_name, revision + len - 1);
         }
 
         Ok(AppendStreamCompleted::Success(WriteResult {
@@ -105,8 +114,16 @@ where
         event.encode(&mut self.buffer).unwrap();
         let receipt = self.wal.append(vec![self.buffer.split().freeze()])?;
 
-        self.revision_cache.insert(params.stream_name, u64::MAX);
-        self.index.chase(receipt.next_position);
+        self.index
+            .cache_stream_revision(params.stream_name.clone(), u64::MAX);
+        let _ = self.sub_client.event_written(Record {
+            id: Uuid::new_v4(),
+            r#type: names::types::STREAM_DELETED.to_string(),
+            stream_name: params.stream_name,
+            position: Position(receipt.start_position),
+            revision: receipt.start_position,
+            data: Default::default(),
+        });
 
         Ok(DeleteStreamCompleted::Success(WriteResult {
             next_expected_version: ExpectedRevision::Revision(current_revision.next_revision()),
@@ -118,8 +135,8 @@ where
 
 pub fn new_storage_writer<WAL, S>(
     wal: WALRef<WAL>,
-    index: StorageIndex<S>,
-    revision_cache: RevisionCache,
+    index: Index<S>,
+    sub_client: SubscriptionsClient,
 ) -> StorageWriter
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
@@ -129,7 +146,7 @@ where
     let mut internal = StorageWriterInternal {
         wal,
         index,
-        revision_cache,
+        sub_client,
         buffer: BytesMut::with_capacity(4_096),
     };
 

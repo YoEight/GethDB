@@ -10,9 +10,11 @@ use geth_mikoshi::storage::FileSystemStorage;
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
 use geth_mikoshi::wal::WALRef;
 
+use crate::domain::index::Index;
 use crate::process::{InternalClient, Processes};
 
 mod bus;
+mod domain;
 mod grpc;
 pub mod messages;
 mod names;
@@ -28,14 +30,13 @@ async fn main() -> eyre::Result<()> {
     tracing::subscriber::set_global_default(subscriber).expect("setting default subscriber failed");
 
     let storage = FileSystemStorage::new(PathBuf::from("./geth"))?;
-    let index = Lsm::load(LsmSettings::default(), storage.clone())?;
-
+    let lsm = Lsm::load(LsmSettings::default(), storage.clone())?;
+    let index = Index::new(lsm);
     let wal = WALRef::new(ChunkBasedWAL::load(storage.clone())?);
-    index.rebuild(&wal)?;
-
     let processes = Processes::new(wal, index.clone());
+    let sub_client = processes.subscriptions_client().clone();
     let client = Arc::new(InternalClient::new(processes));
-    let services = services::start(client.clone(), index);
+    let services = services::start(client.clone(), index, sub_client);
 
     select! {
         server = grpc::start_server(client) => {

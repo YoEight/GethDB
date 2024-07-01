@@ -6,22 +6,22 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKilled, ProgramKillError, ProgramObtained, ProgramSummary, Propose,
+    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
     Record, Revision, SubscriptionEvent,
 };
-use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
+use crate::domain::index::Index;
 use crate::messages::{
     AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
     SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::process::storage::StorageService;
-use crate::process::subscriptions::SubscriptionsClient;
+pub use crate::process::subscriptions::SubscriptionsClient;
 
 pub mod storage;
 mod subscriptions;
@@ -294,7 +294,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Lsm<S>) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
         let subscriptions = subscriptions::start();
         let storage = StorageService::new(wal, index, subscriptions.clone());
 
@@ -302,5 +302,9 @@ where
             storage,
             subscriptions,
         }
+    }
+
+    pub fn subscriptions_client(&self) -> &SubscriptionsClient {
+        &self.subscriptions
     }
 }

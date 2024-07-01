@@ -1,3 +1,4 @@
+pub use block::BlockEntry;
 pub use lsm::{Lsm, LsmSettings};
 pub use merge::Merge;
 

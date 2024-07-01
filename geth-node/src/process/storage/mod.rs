@@ -1,17 +1,15 @@
 use std::io;
 
 use geth_common::{AppendStreamCompleted, DeleteStreamCompleted};
-use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
+use crate::domain::index::Index;
 use crate::messages::{AppendStream, DeleteStream, ReadStream, ReadStreamCompleted};
-use crate::process::storage::index::StorageIndex;
 use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::{new_storage_writer, StorageWriter};
 use crate::process::subscriptions::SubscriptionsClient;
 
-pub mod index;
 pub mod reader;
 mod writer;
 
@@ -24,23 +22,14 @@ where
     reader: StorageReader<WAL, S>,
 }
 
-pub type RevisionCache = moka::sync::Cache<String, u64>;
-
 impl<WAL, S> StorageService<WAL, S>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Lsm<S>, client: SubscriptionsClient) -> Self {
-        let revision_cache = moka::sync::Cache::<String, u64>::builder()
-            .max_capacity(10_000)
-            .name("revision-cache")
-            .build();
-
-        let index = StorageIndex::new(wal.clone(), index.clone(), client, revision_cache.clone());
-
+    pub fn new(wal: WALRef<WAL>, index: Index<S>, sub_client: SubscriptionsClient) -> Self {
         Self {
-            writer: new_storage_writer(wal.clone(), index.clone(), revision_cache.clone()),
+            writer: new_storage_writer(wal.clone(), index.clone(), sub_client),
             reader: StorageReader::new(wal, index),
         }
     }

@@ -5,8 +5,8 @@ use tokio::sync::{mpsc, oneshot};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use geth_common::{ProgramStats, ProgramSummary};
-use geth_mikoshi::{Entry, MikoshiStream};
+use geth_common::{ProgramStats, ProgramSummary, Record};
+use geth_mikoshi::MikoshiStream;
 
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
@@ -18,7 +18,8 @@ mod programmable;
 
 enum Msg {
     Subscribe(SubscribeMsg),
-    EventCommitted(Entry),
+    EventCommitted(Record),
+    EventWritten(Record),
     GetProgrammableSubStats(Uuid, oneshot::Sender<Option<ProgramStats>>),
     KillProgrammableSub(Uuid, oneshot::Sender<Option<()>>),
     ListProgrammableSubs(oneshot::Sender<Vec<ProgramSummary>>),
@@ -43,8 +44,16 @@ impl SubscriptionsClient {
         Ok(())
     }
 
-    pub fn event_committed(&self, event: Entry) -> eyre::Result<()> {
+    pub fn event_committed(&self, event: Record) -> eyre::Result<()> {
         if self.inner.send(Msg::EventCommitted(event)).is_err() {
+            eyre::bail!("Subscription service process has shutdown!");
+        }
+
+        Ok(())
+    }
+
+    pub fn event_written(&self, event: Record) -> eyre::Result<()> {
+        if self.inner.send(Msg::EventWritten(event)).is_err() {
             eyre::bail!("Subscription service process has shutdown!");
         }
 
@@ -105,7 +114,7 @@ pub fn start() -> SubscriptionsClient {
 
 struct Sub {
     parent: Option<Uuid>,
-    sender: mpsc::UnboundedSender<Entry>,
+    sender: mpsc::UnboundedSender<Record>,
 }
 
 async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiver<Msg>) {
@@ -185,19 +194,28 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                 }
             },
 
-            Msg::EventCommitted(entry) => {
+            Msg::EventWritten(record) => {
+                notify_subs(
+                    &mut Default::default(),
+                    &mut registry,
+                    &record.stream_name,
+                    &record,
+                );
+            }
+
+            Msg::EventCommitted(record) => {
                 notify_subs(
                     &mut programmables,
                     &mut registry,
                     names::streams::ALL,
-                    &entry,
+                    &record,
                 );
 
                 notify_subs(
                     &mut programmables,
                     &mut registry,
-                    &entry.stream_name,
-                    &entry,
+                    &record.stream_name,
+                    &record,
                 );
             }
 
@@ -206,6 +224,7 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
 
                 let _ = mailbox.send(stats);
             }
+
             Msg::KillProgrammableSub(id, mailbox) => {
                 let mut outcome = None;
                 if let Some(process) = programmables.remove(&id) {
@@ -239,7 +258,7 @@ fn notify_subs(
     programmables: &mut HashMap<Uuid, ProgrammableProcess>,
     registry: &mut HashMap<String, Vec<Sub>>,
     stream_id: &str,
-    entry: &Entry,
+    record: &Record,
 ) {
     if let Some(subs) = registry.get_mut(stream_id) {
         subs.retain(|sub| {
@@ -249,7 +268,7 @@ fn notify_subs(
                 }
             }
 
-            sub.sender.send(entry.clone()).is_ok()
+            sub.sender.send(record.clone()).is_ok()
         });
     }
 }

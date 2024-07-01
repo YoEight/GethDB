@@ -564,7 +564,7 @@ impl From<operation_in::append_stream::Propose> for Propose {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Record {
     pub id: Uuid,
     pub r#type: String,

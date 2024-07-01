@@ -12,7 +12,7 @@ use crate::binary::events::Events;
 
 mod append_propose;
 pub mod binary;
-mod index;
+pub mod index;
 mod iter;
 
 #[derive(Copy, Clone, Eq, PartialEq)]

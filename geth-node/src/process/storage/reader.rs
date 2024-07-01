@@ -1,19 +1,18 @@
 use std::io;
 
-use chrono::{TimeZone, Utc};
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
-use geth_common::{IteratorIO, Position};
+use geth_common::{IteratorIO, Position, Record};
 use geth_domain::binary::events::Event;
 use geth_domain::RecordedEvent;
-use geth_mikoshi::{Entry, hashing::mikoshi_hash, MikoshiStream, storage::Storage};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::{storage::Storage, MikoshiStream};
 
+use crate::domain::index::Index;
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::names;
-use crate::process::storage::index::StorageIndex;
 
 #[derive(Clone)]
 pub struct StorageReader<WAL, S>
@@ -21,7 +20,7 @@ where
     S: Storage,
 {
     wal: WALRef<WAL>,
-    index: StorageIndex<S>,
+    index: Index<S>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -29,7 +28,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: StorageIndex<S>) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
         Self { wal, index }
     }
 
@@ -39,7 +38,9 @@ where
         let (send_result, recv_result) = tokio::sync::oneshot::channel();
 
         spawn_blocking(move || {
-            if params.stream_name == names::streams::ALL {
+            if params.stream_name == names::streams::ALL
+                || params.stream_name == names::streams::SYSTEM
+            {
                 direct_read(wal, send_result, params)
             } else {
                 indexed_read(index, wal, send_result, params)
@@ -53,7 +54,7 @@ where
 }
 
 fn indexed_read<WAL, S>(
-    index: StorageIndex<S>,
+    index: Index<S>,
     wal: WALRef<WAL>,
     send_result: oneshot::Sender<ReadStreamCompleted>,
     params: ReadStream,
@@ -69,8 +70,8 @@ where
         return Ok::<_, io::Error>(());
     }
 
-    let mut iter = index.lsm().scan(
-        mikoshi_hash(&params.stream_name),
+    let mut iter = index.scan(
+        &params.stream_name,
         params.direction,
         params.starting,
         params.count,
@@ -93,18 +94,17 @@ where
             panic!("Error when parsing command from the transaction log");
         };
 
-        let entry = Entry {
+        let record = Record {
             id: event.id,
             r#type: event.class,
             stream_name: event.stream_name,
             revision: event.revision,
             data: event.data.into(),
             position: Position(record.position),
-            created: event.created,
         };
 
         // if failing means that we don't need to read form the transaction log.
-        if read_stream.send(entry).is_err() {
+        if read_stream.send(record).is_err() {
             break;
         }
     }
@@ -136,24 +136,22 @@ where
             }
 
             Ok(data) => match data.event.unwrap() {
-                Event::RecordedEvent(event) => Entry {
+                Event::RecordedEvent(event) => Record {
                     id: event.id.into(),
                     r#type: event.class,
                     stream_name: event.stream_name,
                     revision: event.revision,
                     data: event.data,
                     position: Position(entry.position),
-                    created: Utc.timestamp_opt(event.created, 0).unwrap(),
                 },
 
-                Event::StreamDeleted(event) => Entry {
+                Event::StreamDeleted(event) => Record {
                     id: Uuid::nil(),
                     r#type: names::types::STREAM_DELETED.to_string(),
                     stream_name: event.stream_name,
                     revision: u64::MAX,
                     data: Default::default(),
                     position: Position(entry.position),
-                    created: Utc.timestamp_opt(event.created, 0).unwrap(),
                 },
             },
         };

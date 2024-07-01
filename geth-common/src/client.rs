@@ -75,7 +75,8 @@ where
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
     ) -> eyre::Result<AppendStreamCompleted> {
-        self.append_stream(stream_id, expected_revision, proposes)
+        self.as_ref()
+            .append_stream(stream_id, expected_revision, proposes)
             .await
     }
 
@@ -86,7 +87,8 @@ where
         revision: Revision<u64>,
         max_count: u64,
     ) -> BoxStream<'static, eyre::Result<Record>> {
-        self.read_stream(stream_id, direction, revision, max_count)
+        self.as_ref()
+            .read_stream(stream_id, direction, revision, max_count)
             .await
     }
 
@@ -95,7 +97,7 @@ where
         stream_id: &str,
         start: Revision<u64>,
     ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        self.subscribe_to_stream(stream_id, start).await
+        self.as_ref().subscribe_to_stream(stream_id, start).await
     }
 
     async fn subscribe_to_process(
@@ -103,7 +105,7 @@ where
         name: &str,
         source_code: &str,
     ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        self.subscribe_to_process(name, source_code).await
+        self.as_ref().subscribe_to_process(name, source_code).await
     }
 
     async fn delete_stream(
@@ -111,18 +113,20 @@ where
         stream_id: &str,
         expected_revision: ExpectedRevision,
     ) -> eyre::Result<DeleteStreamCompleted> {
-        self.delete_stream(stream_id, expected_revision).await
+        self.as_ref()
+            .delete_stream(stream_id, expected_revision)
+            .await
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
-        self.list_programs().await
+        self.as_ref().list_programs().await
     }
 
     async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
-        self.get_program(id).await
+        self.as_ref().get_program(id).await
     }
 
     async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
-        self.kill_program(id).await
+        self.as_ref().kill_program(id).await
     }
 }

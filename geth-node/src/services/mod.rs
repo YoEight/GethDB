@@ -3,8 +3,10 @@ use std::time::Duration;
 use tokio::task::JoinHandle;
 
 use geth_common::Client;
-use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
+
+use crate::domain::index::Index;
+use crate::process::SubscriptionsClient;
 
 mod index;
 
@@ -39,7 +41,7 @@ impl Services {
     }
 }
 
-pub fn start<C, S>(client: C, lsm: Lsm<S>) -> Services
+pub fn start<C, S>(client: C, index: Index<S>, sub_client: SubscriptionsClient) -> Services
 where
     C: Client + Send + 'static,
     S: Storage + Sync + Send + 'static,
@@ -48,7 +50,7 @@ where
 
     inner.push(Service {
         name: "indexing",
-        handle: tokio::spawn(index::indexing(client, lsm)),
+        handle: tokio::spawn(index::indexing(client, index, sub_client)),
     });
 
     Services { inner }

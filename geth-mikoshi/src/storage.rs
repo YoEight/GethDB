@@ -26,15 +26,15 @@ impl FileId {
         Self::Chunk { num, version }
     }
 
-    pub fn writer_chk() -> Self {
+    pub const fn writer_chk() -> Self {
         Self::Checkpoint(Checkpoint::Writer)
     }
 
-    pub fn index_chk() -> Self {
+    pub const fn index_chk() -> Self {
         Self::Checkpoint(Checkpoint::Index)
     }
 
-    pub fn index_global_chk() -> Self {
+    pub const fn index_global_chk() -> Self {
         Self::Checkpoint(Checkpoint::IndexGlobal)
     }
 }

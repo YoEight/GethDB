@@ -2,19 +2,18 @@ use std::collections::HashMap;
 use std::sync::Arc;
 
 use bytes::Bytes;
-use chrono::Utc;
 use pyro_core::ast::Prop;
 use pyro_core::sym::Literal;
-use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
 use pyro_runtime::helpers::{Declared, TypeBuilder};
+use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
 use serde_json::Value;
-use tokio::sync::{mpsc, Mutex, oneshot};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
+use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 use geth_common::{Position, Record, Revision};
-use geth_mikoshi::{Entry, MikoshiStream};
+use geth_mikoshi::MikoshiStream;
 
 use crate::bus::SubscribeMsg;
 use crate::messages::{StreamTarget, SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget};
@@ -329,7 +328,7 @@ pub fn spawn(
         while let Some(value) = recv_output.recv().await {
             let value = from_runtime_value_to_json(value)?;
             if send_mikoshi
-                .send(Entry {
+                .send(Record {
                     id: Uuid::new_v4(),
                     r#type: "subscription-sent".to_string(),
                     // TODO - Find a better name for those programmable subscriptions.
@@ -337,7 +336,6 @@ pub fn spawn(
                     revision,
                     data: Bytes::from(serde_json::to_vec(&value)?),
                     position: Position::end(),
-                    created: Utc::now(),
                 })
                 .is_err()
             {
