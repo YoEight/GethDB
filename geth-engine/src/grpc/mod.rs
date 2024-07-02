@@ -1,7 +1,7 @@
 use tonic::transport::{self, Server};
 
-use geth_common::Client;
 use geth_common::generated::next::protocol::protocol_server::ProtocolServer;
+use geth_common::Client;
 
 use crate::options::Options;
 
