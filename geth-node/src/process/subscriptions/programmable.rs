@@ -95,39 +95,34 @@ impl PyroValue for EventRecord {
 
     fn serialize(self) -> eyre::Result<RuntimeValue> {
         let record = self.0;
-        let mut props = Vec::new();
-
-        props.push(Prop {
-            label: Some("id".to_string()),
-            val: RuntimeValue::string(record.id.to_string()),
-        });
-
-        props.push(Prop {
-            label: Some("stream_name".to_string()),
-            val: RuntimeValue::string(record.stream_name),
-        });
-
-        props.push(Prop {
-            label: Some("event_type".to_string()),
-            val: RuntimeValue::string(record.r#type),
-        });
-
-        props.push(Prop {
-            label: Some("event_revision".to_string()),
-            val: RuntimeValue::Literal(Literal::Integer(record.revision as i64)),
-        });
-
-        props.push(Prop {
-            label: Some("position".to_string()),
-            val: RuntimeValue::Literal(Literal::Integer(record.position.raw() as i64)),
-        });
-
-        let value = serde_json::from_slice::<Value>(record.data.as_ref())?;
-
-        props.push(Prop {
-            label: Some("payload".to_string()),
-            val: from_json_to_pyro_runtime_value(value)?,
-        });
+        let props = vec![
+            Prop {
+                label: Some("id".to_string()),
+                val: RuntimeValue::string(record.id.to_string()),
+            },
+            Prop {
+                label: Some("stream_name".to_string()),
+                val: RuntimeValue::string(record.stream_name),
+            },
+            Prop {
+                label: Some("event_type".to_string()),
+                val: RuntimeValue::string(record.r#type),
+            },
+            Prop {
+                label: Some("event_revision".to_string()),
+                val: RuntimeValue::Literal(Literal::Integer(record.revision as i64)),
+            },
+            Prop {
+                label: Some("position".to_string()),
+                val: RuntimeValue::Literal(Literal::Integer(record.position.raw() as i64)),
+            },
+            Prop {
+                label: Some("payload".to_string()),
+                val: from_json_to_pyro_runtime_value(serde_json::from_slice::<Value>(
+                    record.data.as_ref(),
+                )?)?,
+            },
+        ];
 
         Ok(RuntimeValue::Record(pyro_core::ast::Record { props }))
     }

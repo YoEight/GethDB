@@ -8,7 +8,7 @@ use uuid::Uuid;
 pub use index::{Lsm, LsmSettings};
 
 pub use crate::append_propose::AppendProposes;
-use crate::binary::events::Events;
+use crate::binary::models::Events;
 
 mod append_propose;
 pub mod binary;
@@ -39,7 +39,7 @@ pub struct RecordedEvent {
 }
 
 impl RecordedEvent {
-    pub fn from(inner: binary::events::RecordedEvent) -> RecordedEvent {
+    pub fn from(inner: binary::models::RecordedEvent) -> RecordedEvent {
         Self {
             id: inner.id.into(),
             revision: inner.revision,

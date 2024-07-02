@@ -94,11 +94,7 @@ where
                 granted = true;
             }
         } else {
-            let last_entry_id = if let Some(last) = storage.last_entry() {
-                last
-            } else {
-                EntryId::default()
-            };
+            let last_entry_id = storage.last_entry().unwrap_or_default();
 
             granted = self.voted_for == Some(args.candidate_id.clone())
                 && last_entry_id.index <= args.last_log_index

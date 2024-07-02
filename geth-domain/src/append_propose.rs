@@ -41,7 +41,7 @@ where
 
     fn next(&mut self) -> Option<Self::Item> {
         let propose = self.events.next()?;
-        let event = crate::binary::events::RecordedEvent {
+        let event = crate::binary::models::RecordedEvent {
             id: propose.id.into(),
             revision: self.revision,
             stream_name: self.stream_name.clone(),
@@ -52,8 +52,8 @@ where
         };
 
         self.revision += 1;
-        let event = crate::binary::events::Events {
-            event: Some(crate::binary::events::Event::RecordedEvent(event)),
+        let event = crate::binary::models::Events {
+            event: Some(crate::binary::models::Event::RecordedEvent(event)),
         };
 
         event.encode(&mut self.buffer).unwrap();
