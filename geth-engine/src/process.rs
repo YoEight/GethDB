@@ -6,7 +6,7 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
+    GetProgramError, ProgramKilled, ProgramKillError, ProgramObtained, ProgramSummary, Propose,
     Record, Revision, SubscriptionEvent,
 };
 use geth_mikoshi::storage::Storage;
@@ -59,7 +59,6 @@ where
         let outcome = self
             .storage
             .append_stream(AppendStream {
-                correlation: Default::default(),
                 stream_name: stream_id.to_string(),
                 events: proposes,
                 expected: expected_revision,
@@ -124,11 +123,9 @@ where
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
-                correlation: Uuid::new_v4(),
                 target: SubscriptionTarget::Stream(StreamTarget {
                     parent: None,
                     stream_name: stream_id.to_string(),
-                    starting: start,
                 }),
             },
             mail: sender,
@@ -172,7 +169,6 @@ where
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
-                correlation: Uuid::new_v4(),
                 target: SubscriptionTarget::Process(ProcessTarget {
                     id: Uuid::new_v4(),
                     name: name.to_string(),

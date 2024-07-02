@@ -1,11 +1,13 @@
 [workspace]
 resolver = "2"
 members = [
-    "geth-node",
+    "geth-engine",
     "geth-mikoshi",
     "geth-repl",
     "geth-client",
     "geth-common",
     "geth-consensus",
     "geth-domain",
+    "geth-client-tests",
+    "geth-node",
 ]

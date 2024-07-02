@@ -4,15 +4,15 @@ use std::sync::Arc;
 use bytes::Bytes;
 use pyro_core::ast::Prop;
 use pyro_core::sym::Literal;
-use pyro_runtime::helpers::{Declared, TypeBuilder};
 use pyro_runtime::{Channel, Engine, Env, PyroType, PyroValue, RuntimeValue};
+use pyro_runtime::helpers::{Declared, TypeBuilder};
 use serde_json::Value;
+use tokio::sync::{mpsc, Mutex, oneshot};
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::sync::{mpsc, oneshot, Mutex};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
-use geth_common::{Position, Record, Revision};
+use geth_common::{Position, Record};
 use geth_mikoshi::MikoshiStream;
 
 use crate::bus::SubscribeMsg;
@@ -274,11 +274,9 @@ pub fn spawn(
             let (mailbox, confirmed) = oneshot::channel();
             let _ = client.subscribe(SubscribeMsg {
                 payload: SubscribeTo {
-                    correlation: Uuid::new_v4(),
                     target: SubscriptionTarget::Stream(StreamTarget {
                         parent: Some(id),
                         stream_name: stream_name.clone(),
-                        starting: Revision::Start,
                     }),
                 },
                 mail: mailbox,
