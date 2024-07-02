@@ -1,6 +1,6 @@
 use clap::Parser;
 
-#[derive(Parser, Debug)]
+#[derive(Parser, Debug, Clone)]
 #[command(name = "geth-db")]
 #[command(author, version, about, long_about = None)]
 #[command(propagate_version = true)]

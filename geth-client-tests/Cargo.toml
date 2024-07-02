@@ -3,4 +3,21 @@ name = "geth-client-tests"
 version = "0.1.0"
 edition = "2021"
 
+[dependencies.geth-client]
+path = "../geth-client"
+
+[dependencies.geth-engine]
+path = "../geth-engine"
+
+[dependencies.geth-common]
+path = "../geth-common"
+
+[dependencies.tokio]
+version = "*"
+features = ["full"]
+
 [dependencies]
+fake = "2.9"
+temp-dir = "0.1"
+eyre = "0.6"
+uuid = "*"
