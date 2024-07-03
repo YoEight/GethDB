@@ -3,7 +3,8 @@ mod append_read_tests;
 
 #[cfg(test)]
 pub mod tests {
-    use fake::Fake;
+    use fake::{Dummy, Fake};
+    use serde::{Deserialize, Serialize};
     use temp_dir::TempDir;
 
     use geth_common::EndPoint;
@@ -22,5 +23,11 @@ pub mod tests {
             host: options.host.clone(),
             port: options.port,
         }
+    }
+
+    #[derive(Serialize, Deserialize, Dummy)]
+    pub struct Toto {
+        pub key: String,
+        pub value: u64,
     }
 }

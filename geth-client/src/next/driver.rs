@@ -1,11 +1,13 @@
 use std::collections::HashMap;
+use std::time::Duration;
 
+use eyre::bail;
 use uuid::Uuid;
 
 use geth_common::generated::next::protocol;
 use geth_common::{EndPoint, Operation, OperationIn, OperationOut};
 
-use crate::next::{connect_to_node, Command, Connection, Mailbox};
+use crate::next::{connect_to_node, Command, ConnErr, Connection, Mailbox};
 
 pub struct Driver {
     endpoint: EndPoint,
@@ -108,9 +110,51 @@ impl Driver {
             .parse()
             .unwrap();
 
-        let conn = connect_to_node(uri, self.mailbox.clone()).await?;
-        self.connection = Some(conn);
+        let mut attempts = 0;
+        let max_attempts = 10;
+        loop {
+            match connect_to_node(&uri, self.mailbox.clone()).await {
+                Err(e) => match e {
+                    ConnErr::Transport(e) => {
+                        if e.to_string() == "transport error" {
+                            attempts += 1;
 
-        Ok(())
+                            if attempts > max_attempts {
+                                tracing::error!(
+                                    "max connection attempt reached ({})",
+                                    max_attempts
+                                );
+
+                                bail!("max connection attempt reached");
+                            }
+
+                            tracing::error!(
+                                "error when connecting to {}:{} {}/{}",
+                                self.endpoint.host,
+                                self.endpoint.port,
+                                attempts,
+                                max_attempts,
+                            );
+
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                            continue;
+                        }
+
+                        bail!("fatal error when connecting: {}", e);
+                    }
+
+                    ConnErr::Status(e) => {
+                        // TODO - we might retry if the server is not ready or under too much load.
+                        tracing::error!("error when reaching endpoint: {}", e);
+                        bail!("error when reaching endpoint");
+                    }
+                },
+
+                Ok(c) => {
+                    self.connection = Some(c);
+                    return Ok(());
+                }
+            }
+        }
     }
 }

@@ -27,13 +27,21 @@ pub struct Command {
 type Connection = UnboundedSender<protocol::OperationIn>;
 type Mailbox = UnboundedSender<Msg>;
 
-pub(crate) async fn connect_to_node(uri: Uri, mailbox: Mailbox) -> eyre::Result<Connection> {
-    let mut client = ProtocolClient::connect(uri).await?;
+pub enum ConnErr {
+    Transport(tonic::transport::Error),
+    Status(tonic::Status),
+}
+
+pub(crate) async fn connect_to_node(uri: &Uri, mailbox: Mailbox) -> Result<Connection, ConnErr> {
+    let mut client = ProtocolClient::connect(uri.clone())
+        .await
+        .map_err(ConnErr::Transport)?;
     let (connection, stream_request) = mpsc::unbounded_channel();
 
     let mut stream_response = client
         .multiplex(UnboundedReceiverStream::new(stream_request))
-        .await?
+        .await
+        .map_err(ConnErr::Status)?
         .into_inner();
 
     tokio::spawn(async move {
