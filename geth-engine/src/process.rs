@@ -7,7 +7,7 @@ use uuid::Uuid;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
     GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
-    Record, Revision, SubscriptionEvent,
+    Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
 };
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
@@ -131,23 +131,30 @@ where
             mail: sender,
         });
 
+        let stream_id = stream_id.to_string();
         Box::pin(async_stream::try_stream! {
             outcome?;
             let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
 
             let mut threshold = start.raw();
+            let mut pre_read_events = false;
             if let Some(mut catchup_stream) = catchup_stream {
                 while let Some(record) = catchup_stream.try_next().await? {
+                    pre_read_events = true;
                     let revision = record.revision;
                     yield SubscriptionEvent::EventAppeared(record);
                     threshold = revision;
                 }
+
+                yield SubscriptionEvent::CaughtUp;
             }
 
             match resp.outcome {
                 SubscriptionRequestOutcome::Success(mut stream) => {
+                    yield SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(stream_id));
+
                     while let Some(record) = stream.next().await? {
-                        if record.revision <= threshold {
+                        if pre_read_events && record.revision <= threshold {
                             continue;
                         }
 
