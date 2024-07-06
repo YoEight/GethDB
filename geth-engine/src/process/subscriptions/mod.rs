@@ -140,7 +140,6 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                     });
 
                     let _ = msg.mail.send(SubscriptionConfirmed {
-                        correlation: Uuid::new_v4(),
                         outcome: SubscriptionRequestOutcome::Success(MikoshiStream::new(reader)),
                     });
                 }
@@ -169,7 +168,6 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                             );
 
                             let _ = msg.mail.send(SubscriptionConfirmed {
-                                correlation: Uuid::new_v4(),
                                 outcome: SubscriptionRequestOutcome::Success(prog.stream),
                             });
                         }
@@ -182,7 +180,6 @@ async fn service(client: SubscriptionsClient, mut mailbox: mpsc::UnboundedReceiv
                             );
 
                             let _ = msg.mail.send(SubscriptionConfirmed {
-                                correlation: Uuid::new_v4(),
                                 outcome: SubscriptionRequestOutcome::Failure(eyre::eyre!(
                                     "Error when starting programmable subscription '{}': {}",
                                     opts.name,

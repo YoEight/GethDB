@@ -1,9 +1,7 @@
 use eyre::Report;
 use uuid::Uuid;
 
-use geth_common::{
-    Direction, ExpectedRevision, Propose, Revision, WriteResult, WrongExpectedRevisionError,
-};
+use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use geth_mikoshi::MikoshiStream;
 
 #[derive(Debug)]
@@ -23,7 +21,6 @@ pub enum ReadStreamCompleted {
 
 #[derive(Debug)]
 pub struct AppendStream {
-    pub correlation: Uuid,
     pub stream_name: String,
     pub events: Vec<Propose>,
     pub expected: ExpectedRevision,
@@ -35,28 +32,12 @@ pub struct DeleteStream {
     pub expected: ExpectedRevision,
 }
 
-pub enum AppendStreamCompleted {
-    Success(WriteResult),
-    Failure(WrongExpectedRevisionError),
-    Unexpected(Report),
-    StreamDeleted,
-}
-
-#[derive(Debug)]
-pub enum DeleteStreamCompleted {
-    Success(WriteResult),
-    Failure(WrongExpectedRevisionError),
-    Unexpected(Report),
-}
-
 #[derive(Debug)]
 pub struct SubscribeTo {
-    pub correlation: Uuid,
     pub target: SubscriptionTarget,
 }
 
 pub struct SubscriptionConfirmed {
-    pub correlation: Uuid,
     pub outcome: SubscriptionRequestOutcome,
 }
 
@@ -75,7 +56,6 @@ pub enum SubscriptionTarget {
 pub struct StreamTarget {
     pub parent: Option<Uuid>,
     pub stream_name: String,
-    pub starting: Revision<u64>,
 }
 
 #[derive(Debug)]

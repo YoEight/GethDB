@@ -7,7 +7,7 @@ use uuid::Uuid;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
     GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
-    Record, Revision, SubscriptionEvent,
+    Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
 };
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
@@ -59,7 +59,6 @@ where
         let outcome = self
             .storage
             .append_stream(AppendStream {
-                correlation: Default::default(),
                 stream_name: stream_id.to_string(),
                 events: proposes,
                 expected: expected_revision,
@@ -124,33 +123,38 @@ where
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
-                correlation: Uuid::new_v4(),
                 target: SubscriptionTarget::Stream(StreamTarget {
                     parent: None,
                     stream_name: stream_id.to_string(),
-                    starting: start,
                 }),
             },
             mail: sender,
         });
 
+        let stream_id = stream_id.to_string();
         Box::pin(async_stream::try_stream! {
             outcome?;
             let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
 
             let mut threshold = start.raw();
+            let mut pre_read_events = false;
             if let Some(mut catchup_stream) = catchup_stream {
                 while let Some(record) = catchup_stream.try_next().await? {
+                    pre_read_events = true;
                     let revision = record.revision;
                     yield SubscriptionEvent::EventAppeared(record);
                     threshold = revision;
                 }
+
+                yield SubscriptionEvent::CaughtUp;
             }
 
             match resp.outcome {
                 SubscriptionRequestOutcome::Success(mut stream) => {
+                    yield SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(stream_id));
+
                     while let Some(record) = stream.next().await? {
-                        if record.revision <= threshold {
+                        if pre_read_events && record.revision <= threshold {
                             continue;
                         }
 
@@ -172,7 +176,6 @@ where
         let (sender, recv) = oneshot::channel();
         let outcome = self.subscriptions.subscribe(SubscribeMsg {
             payload: SubscribeTo {
-                correlation: Uuid::new_v4(),
                 target: SubscriptionTarget::Process(ProcessTarget {
                     id: Uuid::new_v4(),
                     name: name.to_string(),

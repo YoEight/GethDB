@@ -891,6 +891,7 @@ impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult 
     }
 }
 
+#[derive(Debug)]
 pub enum AppendStreamCompleted {
     Success(WriteResult),
     Error(AppendError),
