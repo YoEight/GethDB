@@ -22,13 +22,16 @@ use crate::messages::{
 };
 use crate::process::storage::StorageService;
 pub use crate::process::subscriptions::SubscriptionsClient;
+use crate::process::write_request_manager::WriteRequestManagerClient;
 
 pub mod storage;
 mod subscriptions;
+mod write_request_manager;
 
 pub struct InternalClient<WAL, S: Storage> {
     storage: StorageService<WAL, S>,
     subscriptions: SubscriptionsClient,
+    write_request_manager_client: WriteRequestManagerClient,
 }
 
 impl<WAL, S> InternalClient<WAL, S>
@@ -40,6 +43,7 @@ where
         Self {
             storage: processes.storage,
             subscriptions: processes.subscriptions,
+            write_request_manager_client: processes.write_request_manager_client,
         }
     }
 }
@@ -64,6 +68,12 @@ where
                 expected: expected_revision,
             })
             .await?;
+
+        if let AppendStreamCompleted::Success(ref result) = outcome {
+            self.write_request_manager_client
+                .wait_until_indexing_reach(result.position.raw())
+                .await?;
+        }
 
         Ok(outcome)
     }
@@ -290,6 +300,7 @@ where
 {
     storage: StorageService<WAL, S>,
     subscriptions: SubscriptionsClient,
+    write_request_manager_client: WriteRequestManagerClient,
 }
 
 impl<WAL, S> Processes<WAL, S>
@@ -299,11 +310,13 @@ where
 {
     pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
         let subscriptions = subscriptions::start();
+        let write_request_manager_client = write_request_manager::start(subscriptions.clone());
         let storage = StorageService::new(wal, index, subscriptions.clone());
 
         Self {
             storage,
             subscriptions,
+            write_request_manager_client,
         }
     }
 
