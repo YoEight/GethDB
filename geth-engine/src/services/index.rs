@@ -3,7 +3,7 @@ use std::io;
 use bytes::{Buf, Bytes};
 use futures::TryStreamExt;
 
-use geth_common::{Client, Direction, Record, Revision, SubscriptionEvent};
+use geth_common::{Client, Direction, Position, Record, Revision, SubscriptionEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileId, Storage};
 
@@ -20,7 +20,7 @@ where
     C: Client,
     S: Storage + Send + Sync + 'static,
 {
-    let mut internal = Internal::new(index, sub_client)?;
+    let mut internal = Internal::new(index, sub_client.clone())?;
 
     let starting = if internal.index_pos == 0 {
         Revision::Start
@@ -67,9 +67,20 @@ where
                         )
                         .await;
 
+                    let mut position = 0;
                     while let Some(record) = stream.try_next().await? {
+                        position = record.position.raw();
                         internal.index_record(record)?;
                     }
+
+                    sub_client.event_committed(Record {
+                        id: Default::default(),
+                        r#type: names::types::EVENTS_INDEXED.to_string(),
+                        stream_name: names::streams::SYSTEM.to_string(),
+                        position: Position(position),
+                        revision: position,
+                        data: Default::default(),
+                    })?
                 }
             }
         }

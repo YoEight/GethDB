@@ -8,4 +8,5 @@ pub mod streams {
 pub mod types {
     pub static STREAM_DELETED: &str = "$stream-deleted";
     pub static EVENTS_WRITTEN: &str = "$events-written";
+    pub static EVENTS_INDEXED: &str = "$events-indexed";
 }
