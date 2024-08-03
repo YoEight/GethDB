@@ -2,6 +2,7 @@ use std::fmt::Display;
 
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
+use eyre::bail;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -810,20 +811,11 @@ impl From<operation_out::delete_stream_completed::error::wrong_expected_revision
         }
     }
 }
-#[derive(Error, Debug, Copy, Clone)]
+#[derive(Debug, Copy, Clone, Error)]
+#[error("expected revision {expected} but got {current} instead")]
 pub struct WrongExpectedRevisionError {
     pub expected: ExpectedRevision,
     pub current: ExpectedRevision,
-}
-
-impl Display for WrongExpectedRevisionError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(
-            f,
-            "Expected revision {} but got {} instead",
-            self.expected, self.current
-        )
-    }
 }
 
 impl From<WrongExpectedRevisionError>
@@ -897,26 +889,28 @@ pub enum AppendStreamCompleted {
     Error(AppendError),
 }
 
-#[derive(Clone, Copy, Debug)]
-pub enum AppendError {
-    WrongExpectedRevision(WrongExpectedRevisionError),
-    StreamDeleted,
-}
-
-impl Display for AppendError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl AppendStreamCompleted {
+    pub fn ok(self) -> eyre::Result<WriteResult> {
         match self {
-            AppendError::WrongExpectedRevision(e) => {
-                write!(
-                    f,
-                    "expected revision {} but got {} instead",
-                    e.expected, e.current
-                )
-            }
-
-            AppendError::StreamDeleted => write!(f, "stream deleted"),
+            Self::Success(r) => Ok(r),
+            Self::Error(e) => Err(e.into()),
         }
     }
+
+    pub fn err(self) -> eyre::Result<AppendError> {
+        match self {
+            Self::Success(_) => bail!("got a successful append operation instead of an error"),
+            Self::Error(e) => Ok(e),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Error)]
+pub enum AppendError {
+    #[error("wrong expected revision: {0}")]
+    WrongExpectedRevision(WrongExpectedRevisionError),
+    #[error("stream deleted")]
+    StreamDeleted,
 }
 
 impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
