@@ -897,6 +897,16 @@ pub enum AppendStreamCompleted {
     Error(AppendError),
 }
 
+impl AppendStreamCompleted {
+    pub fn err(self) -> eyre::Result<AppendError> {
+        if let Self::Error(e) = self {
+            return Ok(e);
+        }
+
+        eyre::bail!("append was successful")
+    }
+}
+
 #[derive(Clone, Copy, Debug)]
 pub enum AppendError {
     WrongExpectedRevision(WrongExpectedRevisionError),

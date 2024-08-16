@@ -750,6 +750,7 @@ dependencies = [
 name = "geth-client-tests"
 version = "0.1.0"
 dependencies = [
+ "bytes",
  "eyre",
  "fake",
  "futures",
