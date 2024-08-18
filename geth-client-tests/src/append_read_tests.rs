@@ -246,10 +246,27 @@ async fn read_whole_stream_forward() -> eyre::Result<()> {
         });
     }
 
-    let mut stream = client
+    client
+        .append_stream(&stream_name, ExpectedRevision::Any, events.clone())
+        .await?;
+
+    let stream = client
         .read_stream(&stream_name, Direction::Forward, Revision::Start, u64::MAX)
         .await;
 
-    // TODO - forgot to complete that test!
+    let actuals = stream.try_collect::<Vec<_>>().await?;
+
+    assert_eq!(events.len(), actuals.len());
+
+    for i in 0..100 {
+        let expected = events.get(i).unwrap();
+        let actual = actuals.get(i).unwrap();
+
+        assert_eq!(expected.id, actual.id);
+        assert_eq!(expected.r#type, actual.r#type);
+        assert_eq!(expected.data, actual.data);
+        assert_eq!(stream_name, actual.stream_name);
+    }
+
     Ok(())
 }
