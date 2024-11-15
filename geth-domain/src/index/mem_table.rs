@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap};
+use std::collections::BTreeMap;
 use std::iter::Rev;
 
 use geth_common::{Direction, Revision};
@@ -40,7 +40,7 @@ impl MemTable {
         ScanForward {
             key,
             start,
-            inner: self.inner.get(&key).unwrap_or_default().iter(),
+            inner: self.inner.get(&key).map(|x| x.iter()),
             count: 0,
             max,
         }
@@ -50,7 +50,7 @@ impl MemTable {
         ScanBackward {
             key,
             start,
-            inner: self.inner.get(&key).unwrap_or_default().iter().rev(),
+            inner: self.inner.get(&key).map(|x| x.iter().rev()),
             count: 0,
             max,
         }
@@ -82,7 +82,7 @@ impl IntoIterator for MemTable {
 pub struct ScanForward<'a> {
     key: u64,
     start: u64,
-    inner: std::collections::btree_map::Iter<'a, u64, u64>,
+    inner: Option<std::collections::btree_map::Iter<'a, u64, u64>>,
     count: usize,
     max: usize,
 }
@@ -95,7 +95,8 @@ impl<'a> Iterator for ScanForward<'a> {
             return None;
         }
 
-        while let Some((rev, pos)) = self.inner.next() {
+        let inner = self.inner.as_mut()?;
+        while let Some((rev, pos)) = inner.next() {
             if *rev < self.start {
                 continue;
             }
@@ -104,7 +105,7 @@ impl<'a> Iterator for ScanForward<'a> {
                 key: self.key,
                 revision: *rev,
                 position: *pos,
-            })
+            });
         }
 
         self.count = self.max;
@@ -115,7 +116,7 @@ impl<'a> Iterator for ScanForward<'a> {
 pub struct ScanBackward<'a> {
     key: u64,
     start: u64,
-    inner: Rev<std::collections::btree_map::Iter<'a, u64, u64>>,
+    inner: Option<Rev<std::collections::btree_map::Iter<'a, u64, u64>>>,
     count: usize,
     max: usize,
 }
@@ -128,7 +129,8 @@ impl<'a> Iterator for ScanBackward<'a> {
             return None;
         }
 
-        while let Some((rev, pos)) = self.inner.next() {
+        let inner = self.inner.as_mut()?;
+        while let Some((rev, pos)) = inner.next() {
             if *rev > self.start {
                 continue;
             }
@@ -137,7 +139,7 @@ impl<'a> Iterator for ScanBackward<'a> {
                 key: self.key,
                 revision: *rev,
                 position: *pos,
-            })
+            });
         }
 
         self.count = self.max;
@@ -185,4 +187,3 @@ impl Iterator for IntoIter {
         }
     }
 }
-

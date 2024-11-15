@@ -2,32 +2,32 @@ use std::io;
 
 use geth_common::IteratorIOExt;
 
+use crate::index::merge::Merge;
 use crate::index::tests::{build_mem_table, check_merge_io_result};
 use crate::index::MergeBuilder;
 
 #[test]
 fn test_merge_io_mem_table_1() -> io::Result<()> {
+    let mut builder = Merge::builder_for_mem_tables_only();
     let mem_1 = build_mem_table([(1, 0, 1), (2, 0, 2), (3, 0, 3)]);
     let mem_2 = build_mem_table([(1, 0, 2), (2, 0, 4), (3, 0, 6), (4, 0, 8)]);
     let mem_3 = build_mem_table([(2, 0, 12), (3, 0, 18), (4, 0, 24)]);
 
-    let iters = vec![
-        mem_1.clone().into_iter().lift(),
-        mem_2.clone().into_iter().lift(),
-        mem_3.clone().into_iter().lift(),
-    ];
+    builder.push_mem_table_scan(mem_1.clone().into_iter());
+    builder.push_mem_table_scan(mem_2.clone().into_iter());
+    builder.push_mem_table_scan(mem_3.clone().into_iter());
 
-    let merge_iter = MergeBuilder::new(iters);
+    let merge_iter = builder.build();
 
     check_merge_io_result(merge_iter, [(1, 0, 1), (2, 0, 2), (3, 0, 3), (4, 0, 8)])?;
 
-    let iters = vec![
-        mem_3.into_iter().lift(),
-        mem_1.into_iter().lift(),
-        mem_2.into_iter().lift(),
-    ];
+    let mut builder = Merge::builder_for_mem_tables_only();
 
-    let merge_iter = MergeBuilder::new(iters);
+    builder.push_mem_table_scan(mem_3.clone().into_iter());
+    builder.push_mem_table_scan(mem_1.clone().into_iter());
+    builder.push_mem_table_scan(mem_2.clone().into_iter());
+
+    let merge_iter = builder.build();
 
     check_merge_io_result(merge_iter, [(1, 0, 1), (2, 0, 12), (3, 0, 18), (4, 0, 24)])?;
 

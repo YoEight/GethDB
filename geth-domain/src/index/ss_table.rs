@@ -380,3 +380,13 @@ where
         }
     }
 }
+
+pub enum NoSSTable {}
+
+impl IteratorIO for NoSSTable {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        unreachable!()
+    }
+}

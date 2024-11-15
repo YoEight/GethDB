@@ -6,6 +6,8 @@ use geth_common::IteratorIO;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::NoMemTable;
 
+use super::ss_table::NoSSTable;
+
 pub struct MergeBuilder<TMemTable, TSSTable> {
     mem_tables: Vec<TMemTable>,
     ss_tables: Vec<TSSTable>,
@@ -44,6 +46,15 @@ pub struct Merge<TMemTable, TSSTable> {
 
 impl<TSSTable> Merge<NoMemTable, TSSTable> {
     pub fn builder_for_ss_tables_only() -> MergeBuilder<NoMemTable, TSSTable> {
+        MergeBuilder {
+            mem_tables: vec![],
+            ss_tables: vec![],
+        }
+    }
+}
+
+impl<TMemTable> Merge<TMemTable, NoSSTable> {
+    pub fn builder_for_mem_tables_only() -> MergeBuilder<TMemTable, NoSSTable> {
         MergeBuilder {
             mem_tables: vec![],
             ss_tables: vec![],
@@ -93,9 +104,14 @@ where
     fn fill_caches(&mut self) -> io::Result<bool> {
         let mut found = false;
 
-        for (idx, cell) in self.caches.iter_mut().enumerate() {
+        for (index, cell) in self.caches.iter_mut().enumerate() {
             if cell.is_none() {
-                let value = self.pull_from_iter(idx)?;
+                let value = if index < self.mem_tables.len() {
+                    Ok(self.mem_tables[index].next())
+                } else {
+                    self.ss_tables[index - (self.mem_tables.len() + 1)].next()
+                }?;
+
                 found |= value.is_some();
                 *cell = value;
             } else {
@@ -104,14 +120,6 @@ where
         }
 
         Ok(found)
-    }
-
-    fn pull_from_iter(&mut self, index: usize) -> io::Result<Option<BlockEntry>> {
-        if index < self.mem_tables.len() {
-            Ok(self.mem_tables[index].next())
-        } else {
-            self.ss_tables[index - (self.mem_tables.len() + 1)].next()
-        }
     }
 }
 
