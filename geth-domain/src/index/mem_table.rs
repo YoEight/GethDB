@@ -94,7 +94,7 @@ impl<'a> Iterator for ScanForward<'a> {
         }
 
         let inner = self.inner.as_mut()?;
-        while let Some((rev, pos)) = inner.next() {
+        for (rev, pos) in inner.by_ref() {
             if *rev < self.start {
                 continue;
             }
@@ -130,7 +130,7 @@ impl<'a> Iterator for ScanBackward<'a> {
         }
 
         let inner = self.inner.as_mut()?;
-        while let Some((rev, pos)) = inner.next() {
+        for (rev, pos) in inner.by_ref() {
             if *rev > self.start {
                 continue;
             }
