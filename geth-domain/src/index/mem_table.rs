@@ -1,7 +1,5 @@
-use std::cmp::Ordering;
-use std::collections::BTreeMap;
-
-use bytes::{Buf, BufMut, BytesMut};
+use std::collections::{BTreeMap};
+use std::iter::Rev;
 
 use geth_common::{Direction, Revision};
 
@@ -9,41 +7,53 @@ use crate::index::block::BlockEntry;
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
 
+pub enum NoMemTable {}
+
+impl Iterator for NoMemTable {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        unreachable!()
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MemTable {
-    inner: BTreeMap<u64, BytesMut>,
+    inner: BTreeMap<u64, BTreeMap<u64, u64>>,
     entries_count: usize,
 }
 
 impl MemTable {
     pub fn get(&self, key: u64, revision: u64) -> Option<u64> {
-        if let Some(stream) = self.inner.get(&key) {
-            let mut bytes = stream.clone();
-
-            while bytes.has_remaining() {
-                match revision.cmp(&bytes.get_u64_le()) {
-                    Ordering::Less => bytes.advance(8),
-                    Ordering::Equal => return Some(bytes.get_u64_le()),
-                    Ordering::Greater => return None,
-                }
-            }
-        }
-
-        None
+        let stream = self.inner.get(&key)?;
+        stream.get(&revision).cloned()
     }
 
     pub fn put(&mut self, key: u64, revision: u64, position: u64) {
         let stream = self.inner.entry(key).or_default();
+        *stream.entry(revision).or_default() = position;
 
-        stream.put_u64_le(revision);
-        stream.put_u64_le(position);
         self.entries_count += 1;
     }
 
-    pub fn scan(&self, key: u64, direction: Direction, start: Revision<u64>, count: usize) -> Scan {
-        let buffer = self.inner.get(&key).cloned().unwrap_or_default();
+    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward {
+        ScanForward {
+            key,
+            start,
+            inner: self.inner.get(&key).unwrap_or_default().iter(),
+            count: 0,
+            max,
+        }
+    }
 
-        Scan::new(key, buffer, direction, start, count)
+    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward {
+        ScanBackward {
+            key,
+            start,
+            inner: self.inner.get(&key).unwrap_or_default().iter().rev(),
+            count: 0,
+            max,
+        }
     }
 
     pub fn size(&self) -> usize {
@@ -62,116 +72,92 @@ impl IntoIterator for MemTable {
 
     fn into_iter(self) -> Self::IntoIter {
         IntoIter {
+            key: 0,
             table: self,
             current: None,
         }
     }
 }
 
-fn binary_search_index(buffer: &[u8], revision: u64) -> usize {
-    let mut low = 0i64;
-    let mut high = (buffer.len() / MEM_TABLE_ENTRY_SIZE) as i64 - 1;
-
-    while low <= high {
-        let mid = ((low + high) / 2) as usize;
-        let offset = mid * MEM_TABLE_ENTRY_SIZE;
-        let mut temp = &buffer[offset..offset + 8];
-        let value = temp.get_u64_le();
-
-        match revision.cmp(&value) {
-            Ordering::Less => high = mid as i64 - 1,
-            Ordering::Equal => return mid,
-            Ordering::Greater => low = mid as i64 + 1,
-        }
-    }
-
-    low as usize
+pub struct ScanForward<'a> {
+    key: u64,
+    start: u64,
+    inner: std::collections::btree_map::Iter<'a, u64, u64>,
+    count: usize,
+    max: usize,
 }
 
-pub struct Scan {
+impl<'a> Iterator for ScanForward<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count >= self.max {
+            return None;
+        }
+
+        while let Some((rev, pos)) = self.inner.next() {
+            if *rev < self.start {
+                continue;
+            }
+
+            return Some(BlockEntry {
+                key: self.key,
+                revision: *rev,
+                position: *pos,
+            })
+        }
+
+        self.count = self.max;
+        None
+    }
+}
+
+pub struct ScanBackward<'a> {
+    key: u64,
+    start: u64,
+    inner: Rev<std::collections::btree_map::Iter<'a, u64, u64>>,
+    count: usize,
+    max: usize,
+}
+
+impl<'a> Iterator for ScanBackward<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.count >= self.max {
+            return None;
+        }
+
+        while let Some((rev, pos)) = self.inner.next() {
+            if *rev > self.start {
+                continue;
+            }
+
+            return Some(BlockEntry {
+                key: self.key,
+                revision: *rev,
+                position: *pos,
+            })
+        }
+
+        self.count = self.max;
+        None
+    }
+}
+
+pub struct Scan<'a> {
     key: u64,
     len: usize,
     index: usize,
-    buffer: BytesMut,
+    buffer: std::collections::btree_map::Iter<'a, u64, u64>,
     count: usize,
     direction: Direction,
 }
 
-impl Scan {
-    fn new(
-        key: u64,
-        buffer: BytesMut,
-        direction: Direction,
-        start: Revision<u64>,
-        mut count: usize,
-    ) -> Self {
-        let len = buffer.len() / MEM_TABLE_ENTRY_SIZE;
-        let mut index = 0usize;
-
-        if len == 0 {
-            count = 0;
-        } else {
-            index = binary_search_index(buffer.as_ref(), start.raw());
-
-            if index >= len - 1 {
-                index = len - 1;
-            }
-        }
-
-        Self {
-            key,
-            len,
-            index,
-            buffer,
-            count,
-            direction,
-        }
-    }
-}
-
-impl Iterator for Scan {
-    type Item = BlockEntry;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.count == 0 {
-            return None;
-        }
-
-        let offset = self.index * MEM_TABLE_ENTRY_SIZE;
-        let mut slice = &self.buffer.as_ref()[offset..offset + MEM_TABLE_ENTRY_SIZE];
-        let entry = BlockEntry {
-            key: self.key,
-            revision: slice.get_u64_le(),
-            position: slice.get_u64_le(),
-        };
-
-        self.count -= 1;
-
-        match self.direction {
-            Direction::Forward => {
-                self.index += 1;
-
-                if self.index >= self.len {
-                    self.count = 0;
-                }
-            }
-
-            Direction::Backward => {
-                if let Some(value) = self.index.checked_sub(1) {
-                    self.index = value;
-                } else {
-                    self.count = 0;
-                }
-            }
-        }
-
-        Some(entry)
-    }
-}
-
 pub struct IntoIter {
     table: MemTable,
-    current: Option<Scan>,
+    key: u64,
+    current: Option<std::collections::btree_map::IntoIter<u64, u64>>,
 }
 
 impl Iterator for IntoIter {
@@ -182,21 +168,21 @@ impl Iterator for IntoIter {
             if self.current.is_none() {
                 let (key, buffer) = self.table.inner.pop_first()?;
 
-                self.current = Some(Scan::new(
-                    key,
-                    buffer,
-                    Direction::Forward,
-                    Revision::Start,
-                    usize::MAX,
-                ));
+                self.current = Some(buffer.into_iter());
+                self.key = key;
             }
 
-            let scan = self.current.as_mut()?;
-            if let Some(entry) = scan.next() {
-                return Some(entry);
+            let current = self.current.as_mut()?;
+            if let Some((revision, position)) = current.next() {
+                return Some(BlockEntry {
+                    key: self.key,
+                    revision,
+                    position,
+                });
             }
 
             self.current = None;
         }
     }
 }
+

@@ -8,8 +8,9 @@ use geth_mikoshi::InMemoryStorage;
 
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
+use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::index::Merge;
+use crate::index::MergeBuilder;
 
 mod fs;
 mod in_mem;
@@ -71,9 +72,10 @@ where
     mem_table
 }
 
-pub fn check_merge_io_result<I, Values>(mut target: Merge<I>, expecteds: Values) -> io::Result<()>
+pub fn check_merge_io_result<TMemTable, TSSTable, Values>(mut target: Merge<TMemTable, TSSTable>, expecteds: Values) -> io::Result<()>
 where
-    I: IteratorIO<Item = BlockEntry>,
+    TMemTable: Iterator<Item = BlockEntry>,
+    TSSTable: IteratorIO<Item = BlockEntry>,
     Values: IntoIterator<Item = (u64, u64, u64)>,
 {
     for (key, revision, position) in expecteds {
