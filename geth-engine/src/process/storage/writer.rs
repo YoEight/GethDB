@@ -13,7 +13,7 @@ use geth_domain::AppendProposes;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::domain::index::{CurrentRevision, Index};
+use crate::domain::index::{CurrentRevision, IndexRef};
 use crate::messages::{AppendStream, DeleteStream};
 use crate::names;
 use crate::process::SubscriptionsClient;
@@ -35,7 +35,7 @@ where
     S: Storage,
 {
     wal: WALRef<WAL>,
-    index: Index<S>,
+    index: IndexRef<S>,
     buffer: BytesMut,
     sub_client: SubscriptionsClient,
 }
@@ -46,7 +46,12 @@ where
     S: Storage + Send + Sync + 'static,
 {
     pub fn append(&mut self, params: AppendStream) -> io::Result<AppendStreamCompleted> {
-        let current_revision = self.index.stream_current_revision(&params.stream_name)?;
+        let current_revision = self
+            .index
+            .inner
+            .read()
+            .unwrap()
+            .stream_current_revision(&params.stream_name)?;
 
         if current_revision.is_deleted() {
             return Ok::<_, io::Error>(AppendStreamCompleted::Error(AppendError::StreamDeleted));
@@ -81,6 +86,9 @@ where
 
         if len > 0 {
             self.index
+                .inner
+                .read()
+                .unwrap()
                 .cache_stream_revision(params.stream_name, revision + len - 1);
         }
 
@@ -92,7 +100,12 @@ where
     }
 
     pub fn delete(&mut self, params: DeleteStream) -> io::Result<DeleteStreamCompleted> {
-        let current_revision = self.index.stream_current_revision(&params.stream_name)?;
+        let current_revision = self
+            .index
+            .inner
+            .read()
+            .unwrap()
+            .stream_current_revision(&params.stream_name)?;
 
         if let Some(e) = optimistic_concurrency_check(params.expected, current_revision) {
             return Ok::<_, io::Error>(DeleteStreamCompleted::Error(
@@ -115,6 +128,9 @@ where
         let receipt = self.wal.append(vec![self.buffer.split().freeze()])?;
 
         self.index
+            .inner
+            .read()
+            .unwrap()
             .cache_stream_revision(params.stream_name.clone(), u64::MAX);
         let _ = self.sub_client.event_written(Record {
             id: Uuid::new_v4(),
@@ -135,7 +151,7 @@ where
 
 pub fn new_storage_writer<WAL, S>(
     wal: WALRef<WAL>,
-    index: Index<S>,
+    index: IndexRef<S>,
     sub_client: SubscriptionsClient,
 ) -> StorageWriter
 where

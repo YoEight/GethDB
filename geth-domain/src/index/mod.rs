@@ -1,6 +1,6 @@
 pub use block::BlockEntry;
 pub use lsm::{Lsm, LsmSettings};
-pub use merge::Merge;
+pub use merge::MergeBuilder;
 
 pub(crate) mod block;
 pub(crate) mod lsm;

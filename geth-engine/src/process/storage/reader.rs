@@ -1,16 +1,17 @@
 use std::io;
 
+use geth_domain::index::BlockEntry;
 use tokio::sync::oneshot;
 use tokio::task::spawn_blocking;
 use uuid::Uuid;
 
-use geth_common::{IteratorIO, Position, Record};
+use geth_common::{Direction, IteratorIO, Position, Record};
 use geth_domain::binary::models::Event;
 use geth_domain::RecordedEvent;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{storage::Storage, MikoshiStream};
 
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::names;
 
@@ -20,7 +21,7 @@ where
     S: Storage,
 {
     wal: WALRef<WAL>,
-    index: Index<S>,
+    index: IndexRef<S>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -28,7 +29,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: IndexRef<S>) -> Self {
         Self { wal, index }
     }
 
@@ -54,7 +55,7 @@ where
 }
 
 fn indexed_read<WAL, S>(
-    index: Index<S>,
+    index_ref: IndexRef<S>,
     wal: WALRef<WAL>,
     send_result: oneshot::Sender<ReadStreamCompleted>,
     params: ReadStream,
@@ -63,6 +64,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
+    let index = index_ref.inner.read().unwrap();
     let current_revision = index.stream_current_revision(&params.stream_name)?;
 
     if current_revision.is_deleted() {
@@ -70,12 +72,14 @@ where
         return Ok::<_, io::Error>(());
     }
 
-    let mut iter = index.scan(
-        &params.stream_name,
-        params.direction,
-        params.starting,
-        params.count,
-    );
+    let mut iter: Box<dyn IteratorIO<Item = BlockEntry>> = match params.direction {
+        Direction::Forward => {
+            Box::new(index.scan_forward(&params.stream_name, params.starting.raw(), params.count))
+        }
+        Direction::Backward => {
+            Box::new(index.scan_backward(&params.stream_name, params.starting.raw(), params.count))
+        }
+    };
 
     let (read_stream, read_queue) = tokio::sync::mpsc::unbounded_channel();
     let stream = MikoshiStream::new(read_queue);

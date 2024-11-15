@@ -4,27 +4,77 @@ use std::io;
 use geth_common::IteratorIO;
 
 use crate::index::block::BlockEntry;
+use crate::index::mem_table::NoMemTable;
 
-pub struct Merge<I> {
-    pub iters: Vec<I>,
-    pub caches: Vec<Option<BlockEntry>>,
+use super::ss_table::NoSSTable;
+
+pub struct MergeBuilder<TMemTable, TSSTable> {
+    mem_tables: Vec<TMemTable>,
+    ss_tables: Vec<TSSTable>,
 }
 
-impl<I> Merge<I>
-where
-    I: IteratorIO<Item = BlockEntry>,
-{
-    pub fn new(iters: Vec<I>) -> Self {
-        let mut caches = Vec::with_capacity(iters.len());
+impl<TMemTable, TSSTable> MergeBuilder<TMemTable, TSSTable> {
+    pub fn build(self) -> Merge<TMemTable, TSSTable> {
+        let len = self.mem_tables.len() + self.ss_tables.len();
+        let mut caches = Vec::with_capacity(len);
 
-        for _ in 0..iters.len() {
+        for _ in 0..len {
             caches.push(None);
         }
 
-        Self { iters, caches }
+        Merge {
+            mem_tables: self.mem_tables,
+            ss_tables: self.ss_tables,
+            caches,
+        }
     }
 
-    fn pull_from_cache(&mut self) -> Option<BlockEntry> {
+    pub fn push_mem_table_scan(&mut self, mem_table_scan: TMemTable) {
+        self.mem_tables.push(mem_table_scan);
+    }
+
+    pub fn push_ss_table_scan(&mut self, ss_table_scan: TSSTable) {
+        self.ss_tables.push(ss_table_scan);
+    }
+}
+
+pub struct Merge<TMemTable, TSSTable> {
+    mem_tables: Vec<TMemTable>,
+    ss_tables: Vec<TSSTable>,
+    caches: Vec<Option<BlockEntry>>,
+}
+
+impl<TSSTable> Merge<NoMemTable, TSSTable> {
+    pub fn builder_for_ss_tables_only() -> MergeBuilder<NoMemTable, TSSTable> {
+        MergeBuilder {
+            mem_tables: vec![],
+            ss_tables: vec![],
+        }
+    }
+}
+
+impl<TMemTable> Merge<TMemTable, NoSSTable> {
+    pub fn builder_for_mem_tables_only() -> MergeBuilder<TMemTable, NoSSTable> {
+        MergeBuilder {
+            mem_tables: vec![],
+            ss_tables: vec![],
+        }
+    }
+}
+
+impl<TMemTable, TSSTable> Merge<TMemTable, TSSTable>
+where
+    TMemTable: Iterator<Item = BlockEntry>,
+    TSSTable: IteratorIO<Item = BlockEntry>,
+{
+    pub fn builder() -> MergeBuilder<TMemTable, TSSTable> {
+        MergeBuilder {
+            mem_tables: vec![],
+            ss_tables: vec![],
+        }
+    }
+
+    fn pull_from_caches(&mut self) -> Option<BlockEntry> {
         let mut lower: Option<(usize, BlockEntry)> = None;
 
         for (idx, cell) in self.caches.iter_mut().enumerate() {
@@ -54,9 +104,14 @@ where
     fn fill_caches(&mut self) -> io::Result<bool> {
         let mut found = false;
 
-        for (idx, cell) in self.caches.iter_mut().enumerate() {
+        for (index, cell) in self.caches.iter_mut().enumerate() {
             if cell.is_none() {
-                let value = self.iters[idx].next()?;
+                let value = if index < self.mem_tables.len() {
+                    Ok(self.mem_tables[index].next())
+                } else {
+                    self.ss_tables[index - self.mem_tables.len()].next()
+                }?;
+
                 found |= value.is_some();
                 *cell = value;
             } else {
@@ -68,15 +123,16 @@ where
     }
 }
 
-impl<I> IteratorIO for Merge<I>
+impl<TMemTable, TSSTable> IteratorIO for Merge<TMemTable, TSSTable>
 where
-    I: IteratorIO<Item = BlockEntry>,
+    TMemTable: Iterator<Item = BlockEntry>,
+    TSSTable: IteratorIO<Item = BlockEntry>,
 {
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         if self.fill_caches()? {
-            return Ok(self.pull_from_cache());
+            return Ok(self.pull_from_caches());
         }
 
         Ok(None)

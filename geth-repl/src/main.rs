@@ -79,7 +79,7 @@ async fn main() -> eyre::Result<()> {
                             Ok(s) => s,
                         };
 
-                        let index = match Lsm::load(LsmSettings::default(), storage.clone()) {
+                        let mut index = match Lsm::load(LsmSettings::default(), storage.clone()) {
                             Err(e) => {
                                 println!(
                                     "ERR: Error when loading index data structure in {:?}: {}",
@@ -293,7 +293,7 @@ async fn main() -> eyre::Result<()> {
                     match cmd.commands {
                         MikoshiCommands::Read(args) => {
                             let state = repl_state.mikoshi();
-                            match storage_read_stream(&state.index, &state.wal, args) {
+                            match storage_read_stream(&mut state.index, &state.wal, args) {
                                 Err(e) => {
                                     println!("ERR: Error when reading directly events from GethDB files: {}", e);
                                     continue;
@@ -320,7 +320,7 @@ async fn main() -> eyre::Result<()> {
                             };
 
                             match storage_append_stream(
-                                &state.index,
+                                &mut state.index,
                                 &state.wal,
                                 args.stream.clone(),
                                 proposes,
@@ -457,7 +457,7 @@ fn load_events_from_file(path: impl AsRef<Path>) -> eyre::Result<Vec<Propose>> {
 }
 
 fn storage_append_stream<WAL, S>(
-    index: &Lsm<S>,
+    index: &mut Lsm<S>,
     wal: &WALRef<WAL>,
     stream_name: String,
     proposes: Vec<Propose>,
@@ -509,7 +509,7 @@ where
 }
 
 fn storage_read_stream<WAL, S>(
-    index: &Lsm<S>,
+    index: &mut Lsm<S>,
     wal: &WALRef<WAL>,
     args: ReadStream,
 ) -> io::Result<VecDeque<Record>>
@@ -527,7 +527,7 @@ where
 }
 
 fn storage_read_stream_with_index<WAL, S>(
-    index: &Lsm<S>,
+    index: &mut Lsm<S>,
     manager: &WALRef<WAL>,
     args: ReadStream,
 ) -> io::Result<VecDeque<Record>>
@@ -536,7 +536,7 @@ where
     S: Storage + Send + Sync + 'static,
 {
     let stream_key = mikoshi_hash(&args.stream);
-    let mut entries = index.scan(stream_key, Direction::Forward, Revision::Start, usize::MAX);
+    let mut entries = index.scan_forward(stream_key, 0, usize::MAX);
     let mut records = VecDeque::new();
 
     while let Some(entry) = entries.next()? {

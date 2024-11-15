@@ -1,6 +1,6 @@
-use std::io;
+use std::{io, u64};
 
-use geth_common::{Direction, IteratorIO, Revision};
+use geth_common::IteratorIO;
 use geth_mikoshi::InMemoryStorage;
 
 use crate::index::lsm::{Lsm, LsmSettings};
@@ -8,7 +8,7 @@ use crate::index::mem_table::MEM_TABLE_ENTRY_SIZE;
 
 #[test]
 fn test_in_mem_lsm_get() -> io::Result<()> {
-    let lsm = Lsm::with_default(InMemoryStorage::new());
+    let mut lsm = Lsm::with_default(InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
@@ -21,11 +21,11 @@ fn test_in_mem_lsm_get() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
-    let lsm = Lsm::with_default(InMemoryStorage::new());
+    let mut lsm = Lsm::with_default(InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
-    let mut iter = lsm.scan(2, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = lsm.scan_forward(2, 0, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -39,7 +39,7 @@ fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = lsm.scan(2, Direction::Forward, Revision::Start, 2);
+    let mut iter = lsm.scan_forward(2, 0, 2);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -53,7 +53,7 @@ fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = lsm.scan(2, Direction::Forward, Revision::Start, 1);
+    let mut iter = lsm.scan_forward(2, 0, 1);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(0, entry.revision);
@@ -61,7 +61,7 @@ fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = lsm.scan(2, Direction::Forward, Revision::Revision(1), usize::MAX);
+    let mut iter = lsm.scan_forward(2, 1, usize::MAX);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(1, entry.revision);
@@ -74,11 +74,11 @@ fn test_in_mem_lsm_mem_table_scan() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_lsm_mem_table_scan_backward() -> io::Result<()> {
-    let lsm = Lsm::with_default(InMemoryStorage::new());
+    let mut lsm = Lsm::with_default(InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
-    let mut iter = lsm.scan(2, Direction::Backward, Revision::End, usize::MAX);
+    let mut iter = lsm.scan_backward(2, u64::MAX, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -92,7 +92,7 @@ fn test_in_mem_lsm_mem_table_scan_backward() -> io::Result<()> {
 
     assert!(iter.next()?.is_none());
 
-    let mut iter = lsm.scan(2, Direction::Backward, Revision::End, 1);
+    let mut iter = lsm.scan_backward(2, u64::MAX, 1);
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
     assert_eq!(1, entry.revision);
@@ -110,7 +110,7 @@ fn test_in_mem_lsm_sync() -> io::Result<()> {
     let mut setts = LsmSettings::default();
     setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
 
-    let lsm = Lsm::new(setts, InMemoryStorage::new());
+    let mut lsm = Lsm::new(setts, InMemoryStorage::new());
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -119,7 +119,7 @@ fn test_in_mem_lsm_sync() -> io::Result<()> {
     let block = table.read_block(0)?;
     block.dump();
 
-    let mut iter = lsm.scan(2, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = lsm.scan_forward(2, 0, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);

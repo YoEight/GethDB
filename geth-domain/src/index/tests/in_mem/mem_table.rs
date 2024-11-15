@@ -1,8 +1,8 @@
-use std::io;
+use std::{io, u64};
 
 use bytes::BytesMut;
 
-use geth_common::{Direction, IteratorIO, Revision};
+use geth_common::IteratorIO;
 use geth_mikoshi::InMemoryStorage;
 
 use crate::index::block::BlockEntry;
@@ -30,7 +30,7 @@ fn test_mem_table_forward_iter() {
     mem_table.put(1, 1, 5);
     mem_table.put(1, 2, 10);
 
-    let mut iter = mem_table.scan(1, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = mem_table.scan_forward(1, 0, usize::MAX);
     assert_eq!(
         BlockEntry {
             key: 1,
@@ -58,7 +58,7 @@ fn test_mem_table_forward_iter() {
         iter.next().unwrap()
     );
 
-    let mut iter = mem_table.scan(1, Direction::Forward, Revision::Revision(1), usize::MAX);
+    let mut iter = mem_table.scan_forward(1, 1, usize::MAX);
 
     assert_eq!(
         BlockEntry {
@@ -79,7 +79,7 @@ fn test_mem_table_forward_iter() {
     );
     assert!(iter.next().is_none());
 
-    let mut iter = mem_table.scan(1, Direction::Forward, Revision::Start, 3);
+    let mut iter = mem_table.scan_forward(1, 0, 3);
 
     assert_eq!(
         BlockEntry {
@@ -119,7 +119,7 @@ fn test_mem_table_backward_iter() {
     mem_table.put(1, 1, 5);
     mem_table.put(1, 2, 10);
 
-    let mut iter = mem_table.scan(1, Direction::Backward, Revision::End, usize::MAX);
+    let mut iter = mem_table.scan_backward(1, u64::MAX, usize::MAX);
     assert_eq!(
         BlockEntry {
             key: 1,
@@ -149,7 +149,7 @@ fn test_mem_table_backward_iter() {
 
     assert!(iter.next().is_none());
 
-    let mut iter = mem_table.scan(1, Direction::Backward, Revision::Revision(1), usize::MAX);
+    let mut iter = mem_table.scan_backward(1, 1, usize::MAX);
 
     assert_eq!(
         BlockEntry {
@@ -170,7 +170,7 @@ fn test_mem_table_backward_iter() {
     );
     assert!(iter.next().is_none());
 
-    let mut iter = mem_table.scan(1, Direction::Backward, Revision::Revision(2), 3);
+    let mut iter = mem_table.scan_backward(1, 2, 3);
 
     assert_eq!(
         BlockEntry {

@@ -5,7 +5,7 @@ use tokio::task::JoinHandle;
 use geth_common::Client;
 use geth_mikoshi::storage::Storage;
 
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::process::SubscriptionsClient;
 
 mod index;
@@ -41,7 +41,7 @@ impl Services {
     }
 }
 
-pub fn start<C, S>(client: C, index: Index<S>, sub_client: SubscriptionsClient) -> Services
+pub fn start<C, S>(client: C, index: IndexRef<S>, sub_client: SubscriptionsClient) -> Services
 where
     C: Client + Send + 'static,
     S: Storage + Sync + Send + 'static,
