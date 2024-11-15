@@ -1,8 +1,6 @@
 use std::collections::BTreeMap;
 use std::iter::Rev;
 
-use geth_common::{Direction, Revision};
-
 use crate::index::block::BlockEntry;
 
 pub const MEM_TABLE_ENTRY_SIZE: usize = 16;
@@ -145,15 +143,6 @@ impl<'a> Iterator for ScanBackward<'a> {
         self.count = self.max;
         None
     }
-}
-
-pub struct Scan<'a> {
-    key: u64,
-    len: usize,
-    index: usize,
-    buffer: std::collections::btree_map::Iter<'a, u64, u64>,
-    count: usize,
-    direction: Direction,
 }
 
 pub struct IntoIter {

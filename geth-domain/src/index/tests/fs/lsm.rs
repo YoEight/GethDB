@@ -4,7 +4,7 @@ use std::path::PathBuf;
 use bytes::BytesMut;
 use temp_testdir::TempDir;
 
-use geth_common::{Direction, IteratorIO, Revision};
+use geth_common::IteratorIO;
 use geth_mikoshi::FileSystemStorage;
 
 use crate::index::lsm::{Lsm, LsmSettings};
@@ -30,7 +30,7 @@ fn test_fs_lsm_get() -> io::Result<()> {
 fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let lsm = Lsm::with_default(FileSystemStorage::new(root)?);
+    let mut lsm = Lsm::with_default(FileSystemStorage::new(root)?);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 

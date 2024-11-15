@@ -10,7 +10,6 @@ use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::index::MergeBuilder;
 
 mod fs;
 mod in_mem;
@@ -72,7 +71,10 @@ where
     mem_table
 }
 
-pub fn check_merge_io_result<TMemTable, TSSTable, Values>(mut target: Merge<TMemTable, TSSTable>, expecteds: Values) -> io::Result<()>
+pub fn check_merge_io_result<TMemTable, TSSTable, Values>(
+    mut target: Merge<TMemTable, TSSTable>,
+    expecteds: Values,
+) -> io::Result<()>
 where
     TMemTable: Iterator<Item = BlockEntry>,
     TSSTable: IteratorIO<Item = BlockEntry>,

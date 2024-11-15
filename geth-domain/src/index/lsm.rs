@@ -1,7 +1,6 @@
 use std::collections::{BTreeMap, VecDeque};
 use std::io;
 use std::iter::once;
-use std::sync::{Arc, RwLock};
 
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
@@ -13,10 +12,9 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::binary::models::Event;
 use crate::index::block::BlockEntry;
-use crate::index::mem_table::{MemTable, ScanForward};
+use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::index::MergeBuilder;
 use crate::parse_event_io;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
@@ -40,45 +38,6 @@ impl Default for LsmSettings {
             ss_table_max_count: LSM_BASE_SSTABLE_BLOCK_COUNT,
             base_block_size: 4_096,
         }
-    }
-}
-
-#[derive(Debug)]
-pub(crate) struct State<S> {
-    pub active_table: MemTable,
-    pub logical_position: u64,
-    pub immutable_tables: VecDeque<MemTable>,
-    pub levels: BTreeMap<u8, VecDeque<SsTable<S>>>,
-}
-
-impl<S> Default for State<S> {
-    fn default() -> Self {
-        Self {
-            active_table: Default::default(),
-            logical_position: 0,
-            immutable_tables: Default::default(),
-            levels: Default::default(),
-        }
-    }
-}
-
-impl<S> State<S>
-where
-    S: Storage,
-{
-    pub(crate) fn persist(&mut self, buffer: &mut BytesMut, storage: &S) -> io::Result<()> {
-        buffer.put_u64_le(self.logical_position);
-
-        for (level, tables) in &self.levels {
-            for table in tables {
-                buffer.put_u8(*level);
-                buffer.put_u128_le(table.id.as_u128());
-            }
-        }
-
-        storage.write_to(FileId::IndexMap, 0, buffer.split().freeze())?;
-
-        Ok(())
     }
 }
 
