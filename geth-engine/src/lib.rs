@@ -24,7 +24,7 @@ mod services;
 pub async fn run(options: Options) -> eyre::Result<()> {
     let storage = FileSystemStorage::new(PathBuf::from(&options.db))?;
     let lsm = Lsm::load(LsmSettings::default(), storage.clone())?;
-    let index = Index::new(lsm);
+    let index = Index::new(lsm).guarded();
     let wal = WALRef::new(ChunkBasedWAL::load(storage.clone())?);
     let processes = Processes::new(wal, index.clone());
     let sub_client = processes.subscriptions_client().clone();

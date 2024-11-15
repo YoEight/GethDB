@@ -109,7 +109,7 @@ where
                 let value = if index < self.mem_tables.len() {
                     Ok(self.mem_tables[index].next())
                 } else {
-                    self.ss_tables[index - (self.mem_tables.len() + 1)].next()
+                    self.ss_tables[index - self.mem_tables.len()].next()
                 }?;
 
                 found |= value.is_some();

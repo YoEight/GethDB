@@ -1,5 +1,4 @@
 use std::io;
-use std::sync::{Arc, RwLock};
 
 use geth_domain::index::BlockEntry;
 use tokio::sync::oneshot;
@@ -12,7 +11,7 @@ use geth_domain::RecordedEvent;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use geth_mikoshi::{storage::Storage, MikoshiStream};
 
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::messages::{ReadStream, ReadStreamCompleted};
 use crate::names;
 
@@ -22,7 +21,7 @@ where
     S: Storage,
 {
     wal: WALRef<WAL>,
-    index: Arc<RwLock<Index<S>>>,
+    index: IndexRef<S>,
 }
 
 impl<WAL, S> StorageReader<WAL, S>
@@ -30,11 +29,8 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
-        Self {
-            wal,
-            index: Arc::new(RwLock::new(index)),
-        }
+    pub fn new(wal: WALRef<WAL>, index: IndexRef<S>) -> Self {
+        Self { wal, index }
     }
 
     pub async fn read(&self, params: ReadStream) -> ReadStreamCompleted {
@@ -59,7 +55,7 @@ where
 }
 
 fn indexed_read<WAL, S>(
-    index_ref: Arc<RwLock<Index<S>>>,
+    index_ref: IndexRef<S>,
     wal: WALRef<WAL>,
     send_result: oneshot::Sender<ReadStreamCompleted>,
     params: ReadStream,
@@ -68,7 +64,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    let index = index_ref.read().unwrap();
+    let index = index_ref.inner.read().unwrap();
     let current_revision = index.stream_current_revision(&params.stream_name)?;
 
     if current_revision.is_deleted() {

@@ -4,7 +4,7 @@ use geth_common::{AppendStreamCompleted, DeleteStreamCompleted};
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::messages::{AppendStream, DeleteStream, ReadStream, ReadStreamCompleted};
 use crate::process::storage::reader::StorageReader;
 use crate::process::storage::writer::{new_storage_writer, StorageWriter};
@@ -27,7 +27,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Index<S>, sub_client: SubscriptionsClient) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: IndexRef<S>, sub_client: SubscriptionsClient) -> Self {
         Self {
             writer: new_storage_writer(wal.clone(), index.clone(), sub_client),
             reader: StorageReader::new(wal, index),

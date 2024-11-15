@@ -99,6 +99,8 @@ impl<'a> Iterator for ScanForward<'a> {
                 continue;
             }
 
+            self.count += 1;
+
             return Some(BlockEntry {
                 key: self.key,
                 revision: *rev,
@@ -132,6 +134,8 @@ impl<'a> Iterator for ScanBackward<'a> {
             if *rev > self.start {
                 continue;
             }
+
+            self.count += 1;
 
             return Some(BlockEntry {
                 key: self.key,

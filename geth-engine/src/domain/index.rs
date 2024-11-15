@@ -1,10 +1,10 @@
-use std::io;
-
 use geth_common::{ExpectedRevision, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::Lsm;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
+use std::io;
+use std::sync::{Arc, RwLock};
 
 pub type RevisionCache = moka::sync::Cache<String, u64>;
 
@@ -16,9 +16,21 @@ pub fn new_revision_cache() -> RevisionCache {
 }
 
 #[derive(Clone)]
+pub struct IndexRef<S> {
+    pub inner: Arc<RwLock<Index<S>>>,
+    storage: S,
+}
+
+impl<S> IndexRef<S> {
+    pub fn storage(&self) -> &S {
+        &self.storage
+    }
+}
+
+#[derive(Clone)]
 pub struct Index<S> {
-    lsm: Lsm<S>,
-    revision_cache: RevisionCache,
+    pub lsm: Lsm<S>,
+    pub revision_cache: RevisionCache,
 }
 
 impl<S> Index<S>
@@ -29,6 +41,15 @@ where
         Self {
             lsm,
             revision_cache: new_revision_cache(),
+        }
+    }
+
+    pub fn guarded(self) -> IndexRef<S> {
+        let storage = self.lsm.storage.clone();
+
+        IndexRef {
+            inner: Arc::new(RwLock::new(self)),
+            storage,
         }
     }
 
@@ -74,10 +95,6 @@ where
     ) -> impl IteratorIO<Item = BlockEntry> + use<'_, S> {
         self.lsm
             .scan_backward(mikoshi_hash(stream_name), start, count)
-    }
-
-    pub fn storage(&self) -> &S {
-        self.lsm.storage()
     }
 
     pub fn register(&mut self, stream_hash: u64, revision: u64, position: u64) -> eyre::Result<()> {

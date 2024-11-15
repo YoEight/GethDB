@@ -15,7 +15,7 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::messages::{
     AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
     SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
@@ -308,7 +308,7 @@ where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
 {
-    pub fn new(wal: WALRef<WAL>, index: Index<S>) -> Self {
+    pub fn new(wal: WALRef<WAL>, index: IndexRef<S>) -> Self {
         let subscriptions = subscriptions::start();
         let write_request_manager_client = write_request_manager::start(subscriptions.clone());
         let storage = StorageService::new(wal, index, subscriptions.clone());

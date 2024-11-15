@@ -7,13 +7,13 @@ use geth_common::{Client, Direction, Position, Record, Revision, SubscriptionEve
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileId, Storage};
 
-use crate::domain::index::Index;
+use crate::domain::index::IndexRef;
 use crate::names;
 use crate::process::SubscriptionsClient;
 
 pub async fn indexing<C, S>(
     client: C,
-    index: Index<S>,
+    index: IndexRef<S>,
     sub_client: SubscriptionsClient,
 ) -> eyre::Result<()>
 where
@@ -101,7 +101,7 @@ const INDEX_CHK: FileId = FileId::index_chk();
 const INDEX_GLOBAL_CHK: FileId = FileId::index_global_chk();
 
 struct Internal<S> {
-    index: Index<S>,
+    index: IndexRef<S>,
     sub_client: SubscriptionsClient,
     global_hash: u64,
     index_pos: u64,
@@ -112,7 +112,7 @@ impl<S> Internal<S>
 where
     S: Storage + Send + Sync + 'static,
 {
-    fn new(index: Index<S>, sub_client: SubscriptionsClient) -> eyre::Result<Self> {
+    fn new(index: IndexRef<S>, sub_client: SubscriptionsClient) -> eyre::Result<Self> {
         let mut index_pos = 0u64;
         let mut index_global_pos = 0u64;
 
@@ -148,9 +148,13 @@ where
         let revision = record.revision;
 
         if is_deleted {
-            self.index.register(stream_hash, u64::MAX, position)?;
+            self.index
+                .inner
+                .write()
+                .unwrap()
+                .register(stream_hash, u64::MAX, position)?;
         } else {
-            self.index.register_multiple([
+            self.index.inner.write().unwrap().register_multiple([
                 (stream_hash, revision, position),
                 (self.global_hash, global, position),
             ])?;
