@@ -6,10 +6,16 @@ pub mod mutable;
 pub use immutable::Block;
 pub use immutable::Scan;
 
-pub const BLOCK_KEY_SIZE: usize = 8;
-pub const BLOCK_VERSION_SIZE: usize = 8;
-pub const BLOCK_LOG_POSITION_SIZE: usize = 8;
+pub const BLOCK_KEY_SIZE: usize = std::mem::size_of::<u64>();
+pub const BLOCK_VERSION_SIZE: usize = std::mem::size_of::<u64>();
+pub const BLOCK_LOG_POSITION_SIZE: usize = std::mem::size_of::<u64>();
+pub const BLOCK_OFFSET_SIZE: usize = std::mem::size_of::<u64>();
+pub const BLOCK_ENTRY_COUNT_SIZE: usize = std::mem::size_of::<u16>();
 pub const BLOCK_ENTRY_SIZE: usize = BLOCK_KEY_SIZE + BLOCK_VERSION_SIZE + BLOCK_LOG_POSITION_SIZE;
+
+pub fn get_block_size(count: usize) -> usize {
+    count * (BLOCK_ENTRY_SIZE + BLOCK_OFFSET_SIZE) + BLOCK_ENTRY_COUNT_SIZE
+}
 
 #[derive(Copy, Clone)]
 pub struct KeyId {
