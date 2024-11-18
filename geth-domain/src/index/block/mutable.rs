@@ -91,9 +91,9 @@ impl BlockMut {
         true
     }
 
-    pub fn try_read(&self, index: usize, entry: &mut BlockEntry) -> bool {
+    pub fn try_read(&self, index: usize) -> Option<BlockEntry> {
         if index > self.len() - 1 {
-            return false;
+            return None;
         }
 
         let offset = self.offsets[index] as usize;
@@ -103,13 +103,11 @@ impl BlockMut {
         let revision = entry_section.get_u64_le();
         let position = entry_section.get_u64_le();
 
-        *entry = BlockEntry {
+        Some(BlockEntry {
             key,
             revision,
             position,
-        };
-
-        true
+        })
     }
 
     pub fn estimated_size(&self) -> usize {
@@ -121,7 +119,7 @@ impl BlockMut {
     }
 
     pub fn freeze(self) -> Block {
-        let offset_section_start = self.capacity - (self.len() * BLOCK_OFFSET_SIZE + 2);)
+        let offset_section_start = self.capacity - (self.len() * BLOCK_OFFSET_SIZE + 2);
         todo!()
     }
 }
