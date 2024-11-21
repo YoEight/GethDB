@@ -1,5 +1,7 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
+use crate::index::block::BLOCK_ENTRY_COUNT_SIZE;
+
 use super::{
     get_block_size, Block, BlockEntry, BLOCK_ENTRY_SIZE, BLOCK_KEY_SIZE, BLOCK_OFFSET_SIZE,
 };
@@ -60,7 +62,7 @@ impl BlockMut {
             let last_entry = offsets.last().copied()? as usize;
             last_key = Some(
                 bytes
-                    .slice(first_entry..(first_entry + BLOCK_KEY_SIZE))
+                    .slice(last_entry..(last_entry + BLOCK_KEY_SIZE))
                     .get_u64_le(),
             );
         }
@@ -118,8 +120,142 @@ impl BlockMut {
         self.len
     }
 
-    pub fn freeze(self) -> Block {
-        let offset_section_start = self.capacity - (self.len() * BLOCK_OFFSET_SIZE + 2);
-        todo!()
+    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward<'_> {
+        ScanForward {
+            inner: &self.data,
+            key,
+            start,
+            count: 0,
+            max,
+        }
+    }
+    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward<'_> {
+        ScanBackward {
+            inner: &self.data,
+            key,
+            start,
+            count: 0,
+            max,
+        }
+    }
+
+    pub fn freeze(mut self) -> Block {
+        let entries_end = self.len() * BLOCK_ENTRY_SIZE;
+        let offset_section_start =
+            self.capacity - (self.len() * BLOCK_OFFSET_SIZE + BLOCK_ENTRY_COUNT_SIZE);
+
+        self.data.put_bytes(0, offset_section_start - entries_end);
+
+        for offset in self.offsets {
+            self.data.put_u16_le(offset);
+        }
+
+        self.data.put_u16_le(self.len as u16);
+
+        Block::new(self.data.freeze())
+    }
+}
+
+pub struct ScanForward<'a> {
+    inner: &'a [u8],
+    key: u64,
+    start: u64,
+    count: usize,
+    max: usize,
+}
+
+impl<'a> Iterator for ScanForward<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.count >= self.max {
+                return None;
+            }
+
+            if self.inner.is_empty() {
+                return None;
+            }
+
+            let current_key = self.inner.get_u64_le();
+
+            if self.key < current_key {
+                self.count = self.max;
+                return None;
+            }
+
+            if self.key > current_key {
+                self.inner.advance(std::mem::size_of::<u64>() * 2);
+                continue;
+            }
+
+            let revision = self.inner.get_u64_le();
+
+            if self.start > revision {
+                self.inner.advance(std::mem::size_of::<u64>());
+                continue;
+            }
+
+            self.count += 1;
+
+            return Some(BlockEntry {
+                key: self.key,
+                revision,
+                position: self.inner.get_u64_le(),
+            });
+        }
+    }
+}
+
+pub struct ScanBackward<'a> {
+    inner: &'a [u8],
+    key: u64,
+    start: u64,
+    count: usize,
+    max: usize,
+}
+
+impl<'a> Iterator for ScanBackward<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.count >= self.max {
+                return None;
+            }
+
+            if self.inner.is_empty() {
+                return None;
+            }
+
+            let mut section = &self.inner[(self.inner.len() - BLOCK_ENTRY_SIZE)..];
+            let current_key = section.get_u64_le();
+
+            if self.key > current_key {
+                self.count = self.max;
+                return None;
+            }
+
+            if self.key < current_key {
+                self.inner = &self.inner[(self.inner.len() - BLOCK_ENTRY_SIZE)..];
+                continue;
+            }
+
+            let revision = section.get_u64_le();
+
+            if self.start > revision {
+                self.inner = &self.inner[(self.inner.len() - BLOCK_ENTRY_SIZE)..];
+                continue;
+            }
+
+            self.count += 1;
+            self.inner = &self.inner[(self.inner.len() - BLOCK_ENTRY_SIZE)..];
+
+            return Some(BlockEntry {
+                key: self.key,
+                revision,
+                position: section.get_u64_le(),
+            });
+        }
     }
 }

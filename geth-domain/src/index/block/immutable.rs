@@ -27,8 +27,7 @@ impl Block {
     }
 
     pub fn decode(mut src: Bytes) -> Block {
-        let mut count = &src[src.len() - 2..];
-        let count = count.get_u16_le();
+        let count = src.slice(src.len() - 2..).get_u16_le();
 
         Self {
             data: src.copy_to_bytes(count as usize * BLOCK_ENTRY_SIZE),
