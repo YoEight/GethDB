@@ -4,7 +4,6 @@ pub mod immutable;
 pub mod mutable;
 
 pub use immutable::Block;
-pub use immutable::Scan;
 
 pub const BLOCK_KEY_SIZE: usize = std::mem::size_of::<u64>();
 pub const BLOCK_VERSION_SIZE: usize = std::mem::size_of::<u64>();

@@ -88,7 +88,7 @@ where
             while bytes.remaining() >= 17 {
                 let level = bytes.get_u8();
                 let id = Uuid::from_u128(bytes.get_u128_le());
-                let table = SsTable::load(storage.clone(), id)?;
+                let table = SsTable::load_with_buffer(storage.clone(), id, lsm.buffer.split())?;
 
                 lsm.levels.entry(level).or_default().push_back(table);
             }
@@ -145,8 +145,6 @@ where
         Values: IteratorIO<Item = (u64, u64, u64)>,
         S: Storage,
     {
-        let mut buffer = self.buffer.clone();
-
         while let Some((key, revision, position)) = values.next()? {
             self.active_table.put(key, revision, position);
             self.logical_position = position;
@@ -159,7 +157,7 @@ where
         let mem_table = std::mem::take(&mut self.active_table);
         let mut new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
 
-        new_table.put(&mut buffer, mem_table.entries().lift())?;
+        new_table.put(&mut self.buffer, mem_table.entries().lift())?;
 
         let mut level = 0u8;
         let mut cleanups = Vec::new();
@@ -178,7 +176,7 @@ where
                     let values = builder.build().map(|e| (e.key, e.revision, e.position));
 
                     new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
-                    new_table.put(&mut buffer, values)?;
+                    new_table.put(&mut self.buffer, values)?;
 
                     if new_table.len() >= sst_table_block_count_limit(level) {
                         level += 1;

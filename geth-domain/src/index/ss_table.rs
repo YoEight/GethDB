@@ -7,10 +7,12 @@ use uuid::Uuid;
 use geth_common::{Direction, IteratorIO, IteratorIOExt, Revision};
 use geth_mikoshi::storage::{FileId, Storage};
 
-use crate::index::block::{Block, BlockEntry, Scan, BLOCK_ENTRY_SIZE};
+use crate::index::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
 
-const SSTABLE_META_ENTRY_SIZE: usize = 4 + 8 + 8;
-const SSTABLE_HEADER_SIZE: usize = 4;
+const SSTABLE_META_ENTRY_SIZE: usize =
+    std::mem::size_of::<u32>() + std::mem::size_of::<u64>() + std::mem::size_of::<u64>();
+
+const SSTABLE_HEADER_SIZE: usize = std::mem::size_of::<u32>();
 
 #[derive(Debug, Clone, Copy)]
 pub struct BlockMeta {
@@ -77,6 +79,7 @@ pub struct SsTable<S> {
     pub metas: BlockMetas,
     pub meta_offset: u64,
     pub block_size: usize,
+    pub buffer: BytesMut,
 }
 
 impl<S> SsTable<S>
@@ -84,12 +87,17 @@ where
     S: Storage,
 {
     pub fn new(storage: S, block_size: usize) -> Self {
+        Self::with_buffer(storage, block_size, BytesMut::new())
+    }
+
+    pub fn with_buffer(storage: S, block_size: usize, buffer: BytesMut) -> Self {
         Self {
             id: Uuid::new_v4(),
             storage,
             metas: BlockMetas(Default::default()),
             meta_offset: 0,
             block_size,
+            buffer,
         }
     }
 
@@ -97,7 +105,7 @@ where
         SsTable::new(storage, 4_096)
     }
 
-    pub fn load(storage: S, raw_id: Uuid) -> io::Result<Self> {
+    pub fn load_with_buffer(storage: S, raw_id: Uuid, buffer: BytesMut) -> io::Result<Self> {
         let id = FileId::SSTable(raw_id);
         let len = storage.len(id)?;
         let block_size = storage.read_from(id, 0, SSTABLE_HEADER_SIZE)?.get_u32_le() as usize;
@@ -110,7 +118,12 @@ where
             metas: BlockMetas::new(metas),
             meta_offset,
             block_size,
+            buffer,
         })
+    }
+
+    pub fn load(storage: S, raw_id: Uuid) -> io::Result<Self> {
+        Self::load_with_buffer(storage, raw_id, BytesMut::new())
     }
 
     pub fn file_id(&self) -> FileId {
@@ -160,14 +173,14 @@ where
             .storage
             .read_from(self.file_id(), meta.offset as u64, block_size)?;
 
-        Ok(Block::new(block_bytes))
+        Ok(Block::from(block_bytes))
     }
 
     pub fn find_key(&self, key: u64, revision: u64) -> io::Result<Option<BlockEntry>> {
         for block_idx in self.find_best_candidates(key, revision) {
             let block = self.read_block(block_idx)?;
 
-            if let Some(entry) = block.find_entry(key, revision) {
+            if let Some(entry) = block.find(key, revision) {
                 return Ok(Some(entry));
             }
         }
@@ -304,7 +317,7 @@ where
                     continue;
                 }
 
-                if let Some(entry) = block.read_entry(self.entry_idx) {
+                if let Some(entry) = block.try_read(self.entry_idx) {
                     self.entry_idx += 1;
 
                     return Ok(Some(entry));

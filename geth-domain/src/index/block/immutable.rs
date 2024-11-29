@@ -1,273 +1,344 @@
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use std::cmp::Ordering;
 
-use geth_common::{Direction, Revision};
-
-use super::{BlockEntry, KeyId, BLOCK_ENTRY_SIZE};
+use super::{BlockEntry, BLOCK_ENTRY_SIZE, BLOCK_KEY_SIZE, BLOCK_OFFSET_SIZE};
 
 #[derive(Debug, Clone)]
 pub struct Block {
-    data: Bytes,
+    pub(crate) data: Bytes,
+    pub(crate) len: usize,
+    pub(crate) offsets: Vec<u16>,
+    pub(crate) first_key: Option<u64>,
+    pub(crate) last_key: Option<u64>,
 }
 
 impl Block {
-    pub fn new(data: Bytes) -> Self {
-        Self { data }
+    pub fn len(&self) -> usize {
+        self.len
     }
 
-    pub fn count(&self) -> usize {
-        self.data.len() / BLOCK_ENTRY_SIZE
+    pub fn from(bytes: Bytes) -> Block {
+        let capacity = bytes.len();
+        let len = bytes.slice(capacity - 2..).get_u16_le() as usize;
+        let mut offset_section =
+            bytes.slice((capacity - (len * BLOCK_OFFSET_SIZE + 2))..(capacity - 2));
+        let mut offsets = Vec::with_capacity(offset_section.len() / BLOCK_OFFSET_SIZE);
+
+        while offset_section.has_remaining() {
+            let offset = offset_section.slice(..BLOCK_OFFSET_SIZE).get_u16_le();
+            offsets.push(offset);
+            offset_section.advance(BLOCK_OFFSET_SIZE);
+        }
+
+        let data = bytes.slice(..len * BLOCK_ENTRY_SIZE);
+
+        let mut first_key = None;
+        let mut last_key = None;
+
+        if !offsets.is_empty() {
+            let first_entry = offsets.first().copied().unwrap() as usize;
+            first_key = Some(
+                bytes
+                    .slice(first_entry..(first_entry + BLOCK_KEY_SIZE))
+                    .get_u64_le(),
+            );
+
+            let last_entry = offsets.last().copied().unwrap() as usize;
+            last_key = Some(
+                bytes
+                    .slice(last_entry..(last_entry + BLOCK_KEY_SIZE))
+                    .get_u64_le(),
+            );
+        }
+
+        Block {
+            data,
+            len,
+            offsets,
+            first_key,
+            last_key,
+        }
     }
 
-    pub fn encode(&self, buffer: &mut BytesMut) -> Bytes {
-        buffer.put(self.data.clone());
-        buffer.put_u16_le(self.count() as u16);
-
-        buffer.split().freeze()
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
-    pub fn decode(mut src: Bytes) -> Block {
-        let count = src.slice(src.len() - 2..).get_u16_le();
-
-        Self {
-            data: src.copy_to_bytes(count as usize * BLOCK_ENTRY_SIZE),
+    pub fn iter(&self) -> Iter<'_> {
+        Iter {
+            index: 0,
+            max: self.len(),
+            inner: self,
         }
     }
 
     pub fn dump(&self) {
-        if self.count() == 0 {
+        if self.is_empty() {
             println!("<empty_block>");
         }
 
-        let mut temp = self.data.as_ref();
-
-        for _ in 0..self.count() {
+        for entry in self.iter() {
             println!(
                 "key = {}, revision = {}, position = {}",
-                temp.get_u64_le(),
-                temp.get_u64_le(),
-                temp.get_u64_le()
+                entry.key, entry.revision, entry.position,
             );
         }
     }
 
-    pub fn read_entry(&self, idx: usize) -> Option<BlockEntry> {
-        if idx >= self.count() {
+    pub fn try_read(&self, index: usize) -> Option<BlockEntry> {
+        if index > self.len() - 1 {
             return None;
         }
 
-        let offset = idx * BLOCK_ENTRY_SIZE;
-        let mut temp = &self.data[offset..offset + BLOCK_ENTRY_SIZE];
+        let offset = self.offsets[index] as usize;
+        let mut entry_section = self.data.slice(offset..(offset + BLOCK_ENTRY_SIZE));
 
-        let entry = BlockEntry {
-            key: temp.get_u64_le(),
-            revision: temp.get_u64_le(),
-            position: temp.get_u64_le(),
-        };
+        let key = entry_section.get_u64_le();
+        let revision = entry_section.get_u64_le();
+        let position = entry_section.get_u64_le();
+
+        Some(BlockEntry {
+            key,
+            revision,
+            position,
+        })
+    }
+
+    pub fn find(&self, key: u64, revision: u64) -> Option<BlockEntry> {
+        let mut low = 0usize;
+        let mut high = self.len();
+
+        while low <= high {
+            let mid = (low + high) / 2;
+            let entry = self.try_read(mid)?;
+
+            match entry.cmp_key_rev(key, revision) {
+                Ordering::Less => low = mid + 1,
+                Ordering::Greater => high = mid - 1,
+                Ordering::Equal => {
+                    return Some(entry);
+                }
+            }
+        }
+
+        None
+    }
+
+    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward<'_> {
+        if let Some(first) = self.first_key {
+            if first > key {
+                return ScanForward {
+                    inner: self,
+                    key,
+                    start,
+                    count: max,
+                    max,
+                    index: None,
+                };
+            }
+        }
+
+        if self.is_empty() {
+            return ScanForward {
+                inner: self,
+                key,
+                start,
+                count: max,
+                max,
+                index: None,
+            };
+        }
+
+        ScanForward {
+            inner: self,
+            key,
+            start,
+            count: 0,
+            max,
+            index: None,
+        }
+    }
+
+    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward<'_> {
+        if let Some(last) = self.last_key {
+            if last < key {
+                return ScanBackward {
+                    inner: self,
+                    key,
+                    start,
+                    count: max,
+                    max,
+                    index: None,
+                };
+            }
+        }
+
+        if self.is_empty() {
+            return ScanBackward {
+                inner: self,
+                key,
+                start,
+                count: max,
+                max,
+                index: None,
+            };
+        }
+
+        ScanBackward {
+            inner: self,
+            key,
+            start,
+            count: 0,
+            max,
+            index: None,
+        }
+    }
+}
+
+pub struct Iter<'a> {
+    index: usize,
+    max: usize,
+    inner: &'a Block,
+}
+
+impl<'a> Iterator for Iter<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.index + 1 >= self.max {
+            return None;
+        }
+
+        let entry = self.inner.try_read(self.index)?;
+        self.index += 1;
 
         Some(entry)
     }
-
-    pub fn find_entry(&self, key: u64, revision: u64) -> Option<BlockEntry> {
-        find_block_entry(&self.data, key, revision).some()
-    }
-
-    pub fn scan(&self, key: u64, direction: Direction, start: Revision<u64>, count: usize) -> Scan {
-        Scan::new(key, self.data.clone(), direction, start, count)
-    }
-
-    pub fn len(&self) -> usize {
-        self.count()
-    }
 }
 
-fn read_block_entry(bytes: &[u8], idx: usize) -> Option<BlockEntry> {
-    if bytes.remaining() < BLOCK_ENTRY_SIZE {
-        return None;
-    }
-
-    let offset = idx * BLOCK_ENTRY_SIZE;
-    let mut temp = &bytes[offset..offset + BLOCK_ENTRY_SIZE];
-
-    Some(BlockEntry {
-        key: temp.get_u64_le(),
-        revision: temp.get_u64_le(),
-        position: temp.get_u64_le(),
-    })
-}
-
-fn read_block_entry_mut(mut bytes: &[u8]) -> BlockEntry {
-    BlockEntry {
-        key: bytes.get_u64_le(),
-        revision: bytes.get_u64_le(),
-        position: bytes.get_u64_le(),
-    }
-}
-
-fn block_entry_len(bytes: &Bytes) -> usize {
-    bytes.len() / BLOCK_ENTRY_SIZE
-}
-
-enum SearchResult {
-    Found { index: usize, entry: BlockEntry },
-    NotFound { edge: usize },
-}
-
-impl SearchResult {
-    fn some(self) -> Option<BlockEntry> {
-        match self {
-            SearchResult::Found { entry, .. } => Some(entry),
-            SearchResult::NotFound { .. } => None,
-        }
-    }
-}
-
-fn find_block_entry(bytes: &Bytes, key: u64, revision: u64) -> SearchResult {
-    let key_id = KeyId { key, revision };
-    let mut low = 0i64;
-    let mut high = (block_entry_len(bytes) - 1) as i64;
-
-    while low <= high {
-        let mid = (low + high) / 2;
-        let entry = read_block_entry(bytes, mid as usize).unwrap();
-
-        match entry.partial_cmp(&key_id).unwrap() {
-            Ordering::Less => low = mid + 1,
-            Ordering::Greater => high = mid - 1,
-            Ordering::Equal => {
-                return SearchResult::Found {
-                    index: mid as usize,
-                    entry,
-                }
-            }
-        }
-    }
-
-    SearchResult::NotFound { edge: low as usize }
-}
-
-pub struct Scan {
+pub struct ScanForward<'a> {
+    inner: &'a Block,
     key: u64,
-    buffer: Bytes,
-    anchored: bool,
-    revision: u64,
-    index: usize,
-    direction: Direction,
-    len: usize,
+    start: u64,
     count: usize,
+    max: usize,
+    index: Option<usize>,
 }
 
-impl Scan {
-    fn new(
-        key: u64,
-        buffer: Bytes,
-        direction: Direction,
-        start: Revision<u64>,
-        mut count: usize,
-    ) -> Self {
-        let revision = match start {
-            Revision::Start => 0,
-            Revision::End => u64::MAX,
-            Revision::Revision(r) => r,
-        };
-
-        let len = buffer.len() / BLOCK_ENTRY_SIZE;
-
-        if len != 0 {
-            let first_entry = read_block_entry(&buffer, 0).unwrap();
-            let last_entry = read_block_entry(&buffer, len - 1).unwrap();
-
-            if first_entry.key > key || last_entry.key < key {
-                count = 0;
-            }
-        } else {
-            count = 0;
-        }
-
-        Self {
-            key,
-            direction,
-            revision,
-            buffer,
-            count,
-            len,
-            index: 0,
-            anchored: false,
-        }
-    }
-}
-
-impl Scan {
-    fn progress(&mut self) {
-        self.count -= 1;
-
-        match self.direction {
-            Direction::Forward => {
-                self.index += 1;
-
-                if self.index >= self.len {
-                    self.count = 0;
-                }
-            }
-
-            Direction::Backward => {
-                if let Some(value) = self.index.checked_sub(1) {
-                    self.index = value;
-                    return;
-                }
-
-                self.count = 0;
-            }
-        }
-    }
-}
-
-impl Iterator for Scan {
+impl<'a> Iterator for ScanForward<'a> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
         loop {
-            if self.count == 0 {
+            if self.count >= self.max {
                 return None;
             }
 
-            if !self.anchored {
-                self.anchored = true;
-                match find_block_entry(&self.buffer, self.key, self.revision) {
-                    SearchResult::Found { index, entry } => {
-                        self.index = index;
-                        self.progress();
+            if self.index.is_none() {
+                let mut low = 0usize;
+                let mut high = self.inner.len();
 
-                        return Some(entry);
-                    }
+                let anchor: Option<usize> = None;
+                while low <= high {
+                    let mid = (low + high) / 2;
+                    let entry = self.inner.try_read(mid)?;
 
-                    SearchResult::NotFound { edge } => {
-                        self.index = edge;
-
-                        if self.direction == Direction::Backward {
-                            if let Some(value) = self.index.checked_sub(1) {
-                                self.index = value;
-                            } else {
-                                self.count = 0;
-                            }
+                    match entry.cmp_key_rev(self.key, self.start) {
+                        Ordering::Less => low = mid + 1,
+                        Ordering::Greater => high = mid - 1,
+                        Ordering::Equal => {
+                            self.index = Some(mid + 1);
+                            return Some(entry);
                         }
+                    }
+                }
 
-                        continue;
+                if anchor.is_none() {
+                    self.index = Some(low);
+                }
+            }
+
+            let current_idx = self.index?;
+            let entry = self.inner.try_read(self.index?)?;
+
+            if self.key > entry.key {
+                self.index = Some(current_idx + 1);
+                continue;
+            }
+
+            if self.start > entry.revision {
+                self.index = Some(current_idx + 1);
+                continue;
+            }
+
+            self.count += 1;
+
+            return Some(entry);
+        }
+    }
+}
+
+pub struct ScanBackward<'a> {
+    inner: &'a Block,
+    key: u64,
+    start: u64,
+    count: usize,
+    max: usize,
+    index: Option<usize>,
+}
+
+impl<'a> Iterator for ScanBackward<'a> {
+    type Item = BlockEntry;
+
+    fn next(&mut self) -> Option<Self::Item> {
+        loop {
+            if self.count >= self.max {
+                return None;
+            }
+
+            if self.index.is_none() {
+                let mut low = 0usize;
+                let mut high = self.inner.len();
+
+                let anchor: Option<usize> = None;
+                while low <= high {
+                    let mid = (low + high) / 2;
+                    let entry = self.inner.try_read(mid)?;
+
+                    match entry.cmp_key_rev(self.key, self.start) {
+                        Ordering::Less => low = mid + 1,
+                        Ordering::Greater => high = mid - 1,
+                        Ordering::Equal => {
+                            self.index = Some(mid + 1);
+                            return Some(entry);
+                        }
+                    }
+                }
+
+                if anchor.is_none() {
+                    if let Some(index) = low.checked_sub(1) {
+                        self.index = Some(index);
+                    } else {
+                        self.count = self.max;
+                        return None;
                     }
                 }
             }
 
-            let offset = self.index * BLOCK_ENTRY_SIZE;
-            let temp = &self.buffer[offset..offset + BLOCK_ENTRY_SIZE];
-            let entry = read_block_entry_mut(temp);
+            let current_idx = self.index?;
+            let entry = self.inner.try_read(self.index?)?;
 
-            if entry.key != self.key {
-                self.count = 0;
-
-                return None;
+            if self.key > entry.key {
+                self.index = Some(current_idx + 1);
+                continue;
             }
 
-            self.progress();
+            if self.start > entry.revision {
+                self.index = Some(current_idx + 1);
+                continue;
+            }
+
+            self.count += 1;
 
             return Some(entry);
         }
