@@ -1,5 +1,5 @@
-use std::cmp::Ordering;
 use std::io;
+use std::{cmp::Ordering, collections::VecDeque};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use uuid::Uuid;
@@ -259,29 +259,40 @@ where
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan(
-        &self,
-        key: u64,
-        direction: Direction,
-        start: Revision<u64>,
-        count: usize,
-    ) -> SsTableScan<S> {
-        let mut candidates = self.find_best_candidates(key, start.raw());
+    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> io::Result<ScanForward<S>> {
+        let mut candidates = Vec::new();
 
-        if direction == Direction::Backward {
-            candidates.reverse();
+        for candidate_index in self.find_best_candidates(key, start) {
+            candidates.push(self.read_block(candidate_index)?);
         }
 
-        SsTableScan {
+        Ok(ScanForward {
             key,
             revision: start,
-            direction,
             count,
             block_idx: 0,
-            block: None,
-            table: self.clone(),
+            block_scan: None,
+            table: self,
             candidates,
+        })
+    }
+
+    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> io::Result<ScanForward<S>> {
+        let mut candidates = Vec::new();
+
+        for candidate_index in self.find_best_candidates(key, start).into_iter().rev() {
+            candidates.push(self.read_block(candidate_index)?);
         }
+
+        Ok(ScanForward {
+            key,
+            revision: start,
+            count,
+            block_idx: 0,
+            block_scan: None,
+            table: self,
+            candidates,
+        })
     }
 }
 
@@ -309,19 +320,15 @@ where
             }
 
             if let Some(block) = self.block.as_ref() {
-                if self.entry_idx >= block.len() {
-                    self.block = None;
-                    self.entry_idx = 0;
-                    self.block_idx += 1;
-
-                    continue;
-                }
-
                 if let Some(entry) = block.try_read(self.entry_idx) {
                     self.entry_idx += 1;
 
                     return Ok(Some(entry));
                 }
+
+                self.block = None;
+                self.entry_idx = 0;
+                self.block_idx += 1;
             }
 
             return Ok(None);
@@ -329,71 +336,98 @@ where
     }
 }
 
-pub struct SsTableScan<S> {
+pub struct ScanForward<'a, S> {
     key: u64,
-    revision: Revision<u64>,
-    direction: Direction,
+    revision: u64,
     count: usize,
     block_idx: usize,
-    block: Option<Scan>,
-    table: SsTable<S>,
-    candidates: Vec<usize>,
+    block_scan: Option<crate::index::block::immutable::ScanForward>,
+    table: &'a SsTable<S>,
+    candidates: VecDeque<usize>,
 }
 
-impl<S> IteratorIO for SsTableScan<S>
+impl<'a, S> IteratorIO for ScanForward<'a, S>
 where
     S: Storage,
 {
     type Item = BlockEntry;
 
+    // TODO - implement shortcut exit when we know other block can't contains the key that we are looking for.
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         loop {
             if self.count == 0 {
                 return Ok(None);
             }
 
-            if let Some(mut block) = self.block.take() {
-                if let Some(entry) = block.next() {
-                    self.revision = Revision::Revision(entry.revision);
-                    self.block = Some(block);
-                    self.count -= 1;
-
-                    return Ok(Some(entry));
-                }
+            if self.block_idx >= self.table.len() {
+                return Ok(None);
             }
 
-            if !self.candidates.is_empty() {
-                self.block_idx = self.candidates.remove(0);
+            if self.block_scan.is_none() {
+                if let Some(block_idx) = self.candidates.pop_front() {
+                    self.block_idx = block_idx;
+                }
+
                 let block = self.table.read_block(self.block_idx)?;
+                self.block_scan = Some(block.scan_forward(self.key, self.revision, self.count));
 
-                self.block = Some(block.scan(self.key, self.direction, self.revision, self.count));
-
-                continue;
+                self.block_idx += 1;
             }
 
-            match self.direction {
-                Direction::Forward => {
-                    self.block_idx += 1;
-
-                    if self.block_idx >= self.table.len() {
-                        self.count = 0;
-                    }
-                }
-
-                Direction::Backward => {
-                    if let Some(value) = self.block_idx.checked_sub(1) {
-                        self.block_idx = value;
-                    } else {
-                        self.count = 0;
-                    }
-                }
+            if let Some(entry) = self.block_scan.as_mut().unwrap().next() {
+                self.count = self.count.checked_sub(1).unwrap_or_default();
+                return Ok(Some(entry));
             }
 
-            self.candidates.push(self.block_idx);
+            self.block_scan = None;
         }
     }
 }
 
+pub struct ScanBackward<'a, S> {
+    key: u64,
+    revision: u64,
+    count: usize,
+    block_idx: usize,
+    block_scan: Option<crate::index::block::immutable::ScanBackward>,
+    table: &'a SsTable<S>,
+    candidates: VecDeque<usize>,
+}
+
+impl<'a, S> IteratorIO for ScanBackward<'a, S>
+where
+    S: Storage,
+{
+    type Item = BlockEntry;
+
+    // TODO - implement shortcut exit when we know other block can't contains the key that we are looking for.
+    fn next(&mut self) -> io::Result<Option<Self::Item>> {
+        loop {
+            if self.count == 0 {
+                return Ok(None);
+            }
+
+            if self.block_scan.is_none() {
+                if let Some(block_idx) = self.candidates.pop_front() {
+                    self.block_idx = block_idx;
+                }
+
+                let block = self.table.read_block(self.block_idx)?;
+                self.block_scan = Some(block.scan_backward(self.key, self.revision, self.count));
+                self.block_idx = self.block_idx.checked_sub(1).unwrap();
+                // hack but that's the only way to detect that we already reached the end of the LSM block.
+                self.candidates.push_back(self.block_idx);
+            }
+
+            if let Some(entry) = self.block_scan.as_mut().unwrap().next() {
+                self.count = self.count.checked_sub(1).unwrap_or_default();
+                return Ok(Some(entry));
+            }
+
+            self.block_scan = None;
+        }
+    }
+}
 pub enum NoSSTable {}
 
 impl IteratorIO for NoSSTable {

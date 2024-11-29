@@ -1,4 +1,4 @@
-use std::cmp::Ordering;
+use std::{cmp::Ordering, sync::Arc};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 
@@ -240,7 +240,7 @@ impl BlockMut {
         Block {
             data: self.data.freeze(),
             len: self.len,
-            offsets: self.offsets,
+            offsets: Arc::new(self.offsets),
             first_key: self.first_key,
             last_key: self.last_key,
         }

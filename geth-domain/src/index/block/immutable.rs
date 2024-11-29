@@ -1,5 +1,5 @@
 use bytes::{Buf, Bytes};
-use std::cmp::Ordering;
+use std::{cmp::Ordering, sync::Arc};
 
 use super::{BlockEntry, BLOCK_ENTRY_SIZE, BLOCK_KEY_SIZE, BLOCK_OFFSET_SIZE};
 
@@ -7,7 +7,7 @@ use super::{BlockEntry, BLOCK_ENTRY_SIZE, BLOCK_KEY_SIZE, BLOCK_OFFSET_SIZE};
 pub struct Block {
     pub(crate) data: Bytes,
     pub(crate) len: usize,
-    pub(crate) offsets: Vec<u16>,
+    pub(crate) offsets: Arc<Vec<u16>>,
     pub(crate) first_key: Option<u64>,
     pub(crate) last_key: Option<u64>,
 }
@@ -54,7 +54,7 @@ impl Block {
         Block {
             data,
             len,
-            offsets,
+            offsets: Arc::new(offsets),
             first_key,
             last_key,
         }
@@ -124,11 +124,11 @@ impl Block {
         None
     }
 
-    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward<'_> {
+    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward {
         if let Some(first) = self.first_key {
             if first > key {
                 return ScanForward {
-                    inner: self,
+                    inner: self.clone(),
                     key,
                     start,
                     count: max,
@@ -140,7 +140,7 @@ impl Block {
 
         if self.is_empty() {
             return ScanForward {
-                inner: self,
+                inner: self.clone(),
                 key,
                 start,
                 count: max,
@@ -150,7 +150,7 @@ impl Block {
         }
 
         ScanForward {
-            inner: self,
+            inner: self.clone(),
             key,
             start,
             count: 0,
@@ -159,11 +159,11 @@ impl Block {
         }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward<'_> {
+    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward {
         if let Some(last) = self.last_key {
             if last < key {
                 return ScanBackward {
-                    inner: self,
+                    inner: self.clone(),
                     key,
                     start,
                     count: max,
@@ -175,7 +175,7 @@ impl Block {
 
         if self.is_empty() {
             return ScanBackward {
-                inner: self,
+                inner: self.clone(),
                 key,
                 start,
                 count: max,
@@ -185,7 +185,7 @@ impl Block {
         }
 
         ScanBackward {
-            inner: self,
+            inner: self.clone(),
             key,
             start,
             count: 0,
@@ -216,8 +216,8 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
-pub struct ScanForward<'a> {
-    inner: &'a Block,
+pub struct ScanForward {
+    inner: Block,
     key: u64,
     start: u64,
     count: usize,
@@ -225,7 +225,7 @@ pub struct ScanForward<'a> {
     index: Option<usize>,
 }
 
-impl<'a> Iterator for ScanForward<'a> {
+impl Iterator for ScanForward {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -278,8 +278,8 @@ impl<'a> Iterator for ScanForward<'a> {
     }
 }
 
-pub struct ScanBackward<'a> {
-    inner: &'a Block,
+pub struct ScanBackward {
+    inner: Block,
     key: u64,
     start: u64,
     count: usize,
@@ -287,7 +287,7 @@ pub struct ScanBackward<'a> {
     index: Option<usize>,
 }
 
-impl<'a> Iterator for ScanBackward<'a> {
+impl Iterator for ScanBackward {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
