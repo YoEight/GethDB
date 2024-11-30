@@ -193,6 +193,13 @@ impl Block {
             index: None,
         }
     }
+
+    pub fn contains(&self, key: u64) -> bool {
+        self.first_key
+            .zip(self.last_key)
+            .map(|(f, l)| f <= key && key <= l)
+            .unwrap_or_default()
+    }
 }
 
 pub struct Iter<'a> {

@@ -352,7 +352,6 @@ where
 {
     type Item = BlockEntry;
 
-    // TODO - implement shortcut exit when we know other block can't contains the key that we are looking for.
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         loop {
             if self.count == 0 {
@@ -369,6 +368,13 @@ where
                 }
 
                 let block = self.table.read_block(self.block_idx)?;
+
+                // There is no need to continue loading blocks because from that point, no further block will contains the key we are looking for.
+                if !block.contains(self.key) {
+                    self.count = 0;
+                    return Ok(None);
+                }
+
                 self.block_scan = Some(block.scan_forward(self.key, self.revision, self.count));
 
                 self.block_idx += 1;
@@ -400,7 +406,6 @@ where
 {
     type Item = BlockEntry;
 
-    // TODO - implement shortcut exit when we know other block can't contains the key that we are looking for.
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
         loop {
             if self.count == 0 {
@@ -413,6 +418,15 @@ where
                 }
 
                 let block = self.table.read_block(self.block_idx)?;
+
+                let last_key = block.last_key.unwrap_or_default();
+
+                // There is no need to continue loading blocks because from that point, no further block will contains the key we are looking for.
+                if last_key < self.key {
+                    self.count = 0;
+                    return Ok(None);
+                }
+
                 self.block_scan = Some(block.scan_backward(self.key, self.revision, self.count));
                 self.block_idx = self.block_idx.checked_sub(1).unwrap();
                 // hack but that's the only way to detect that we already reached the end of the LSM block.
