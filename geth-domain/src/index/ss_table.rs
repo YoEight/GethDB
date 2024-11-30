@@ -4,10 +4,12 @@ use std::{cmp::Ordering, collections::VecDeque};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{Direction, IteratorIO, IteratorIOExt, Revision};
+use geth_common::{IteratorIO, IteratorIOExt};
 use geth_mikoshi::storage::{FileId, Storage};
 
-use crate::index::block::{Block, BlockEntry, BLOCK_ENTRY_SIZE};
+use crate::index::block::{Block, BlockEntry};
+
+use super::block::mutable::BlockMut;
 
 const SSTABLE_META_ENTRY_SIZE: usize =
     std::mem::size_of::<u32>() + std::mem::size_of::<u64>() + std::mem::size_of::<u64>();
@@ -34,6 +36,7 @@ impl BlockMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
+// TODO - Using bytes impedes peformance in our case because we can do many random accesses that waste time decoding integers.
 pub struct BlockMetas(Bytes);
 
 impl BlockMetas {
@@ -130,7 +133,7 @@ where
         FileId::SSTable(self.id)
     }
 
-    pub fn find_best_candidates(&self, key: u64, revision: u64) -> Vec<usize> {
+    pub fn find_best_candidates(&self, key: u64, revision: u64) -> VecDeque<usize> {
         let mut closest_lowest = 0usize;
         let mut closest_highest = 0usize;
         let mut low = 0i64;
@@ -151,15 +154,15 @@ where
                     high = mid - 1;
                 }
 
-                Ordering::Equal => return vec![mid as usize],
+                Ordering::Equal => return VecDeque::from([mid as usize]),
             }
         }
 
         if closest_lowest == closest_highest {
-            return vec![closest_lowest];
+            return VecDeque::from([closest_lowest]);
         }
 
-        vec![closest_lowest, closest_highest]
+        VecDeque::from([closest_lowest, closest_highest])
     }
 
     pub fn len(&self) -> usize {
@@ -173,7 +176,7 @@ where
             .storage
             .read_from(self.file_id(), meta.offset as u64, block_size)?;
 
-        Ok(Block::from(block_bytes))
+        Ok(Block::from(self.block_size, block_bytes))
     }
 
     pub fn find_key(&self, key: u64, revision: u64) -> io::Result<Option<BlockEntry>> {
@@ -199,39 +202,38 @@ where
     where
         Values: IteratorIO<Item = (u64, u64, u64)>,
     {
-        let mut block_current_size = 0usize;
-        let mut metas = Vec::new();
+        let mut builder = BlockMut::new(buffer.split(), self.block_size);
+        let mut metas = buffer.split();
+        let mut offset = 0usize;
+        let mut block_start_offset = 0usize;
 
-        buffer.put_u32_le(self.block_size as u32);
         while let Some((key, rev, pos)) = values.next()? {
-            if block_current_size + BLOCK_ENTRY_SIZE > self.block_size {
-                let remaining = self.block_size - block_current_size;
+            if let Some(block_local_offset) = builder.try_add(key, rev, pos) {
+                offset += block_local_offset;
 
-                buffer.put_bytes(0, remaining);
-                block_current_size = 0;
+                if builder.len() == 1 {
+                    block_start_offset = offset;
+                    metas.put_u32_le(block_start_offset as u32);
+                    metas.put_u64_le(key);
+                    metas.put_u64_le(rev);
+                }
+
+                continue;
             }
 
-            let offset = buffer.len() as u32;
-            buffer.put_u64_le(key);
-            buffer.put_u64_le(rev);
-            buffer.put_u64_le(pos);
-
-            if block_current_size == 0 {
-                metas.put_u32_le(offset);
-                metas.put_u64_le(key);
-                metas.put_u64_le(rev);
-            }
-
-            block_current_size += BLOCK_ENTRY_SIZE;
+            self.storage.write_to(
+                self.file_id(),
+                block_start_offset as u64,
+                builder.split_then_build(),
+            )?;
         }
 
-        let meta_offset = buffer.len() as u32;
-        let metas = Bytes::from(metas);
-        buffer.put(metas.clone());
-        buffer.put_u32_le(meta_offset);
+        let meta_offset = offset;
+        metas.put_u32_le(meta_offset as u32);
+        let metas = metas.freeze();
 
         self.storage
-            .write_to(self.file_id(), 0, buffer.split().freeze())?;
+            .write_to(self.file_id(), meta_offset as u64, metas.clone())?;
         self.metas = BlockMetas::new(metas);
         self.meta_offset = meta_offset as u64;
 
@@ -259,40 +261,32 @@ where
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> io::Result<ScanForward<S>> {
-        let mut candidates = Vec::new();
-
-        for candidate_index in self.find_best_candidates(key, start) {
-            candidates.push(self.read_block(candidate_index)?);
-        }
-
-        Ok(ScanForward {
+    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> ScanForward<S> {
+        ScanForward {
             key,
             revision: start,
             count,
             block_idx: 0,
             block_scan: None,
             table: self,
-            candidates,
-        })
+            candidates: self.find_best_candidates(key, start),
+        }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> io::Result<ScanForward<S>> {
-        let mut candidates = Vec::new();
+    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanForward<S> {
+        let mut candidates = self.find_best_candidates(key, start);
 
-        for candidate_index in self.find_best_candidates(key, start).into_iter().rev() {
-            candidates.push(self.read_block(candidate_index)?);
-        }
+        candidates.rotate_left(candidates.len() - 1);
 
-        Ok(ScanForward {
+        ScanForward {
             key,
             revision: start,
             count,
-            block_idx: 0,
+            block_idx: self.len().checked_sub(1).unwrap_or_default(),
             block_scan: None,
             table: self,
             candidates,
-        })
+        }
     }
 }
 
@@ -376,7 +370,6 @@ where
                 }
 
                 self.block_scan = Some(block.scan_forward(self.key, self.revision, self.count));
-
                 self.block_idx += 1;
             }
 

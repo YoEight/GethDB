@@ -5,7 +5,7 @@ use std::iter::once;
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{Direction, IteratorIO, IteratorIOExt, Revision};
+use geth_common::{IteratorIO, IteratorIOExt};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileId, Storage};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
@@ -250,12 +250,7 @@ where
 
         for tables in self.levels.values() {
             for table in tables {
-                builder.push_ss_table_scan(table.scan(
-                    key,
-                    Direction::Forward,
-                    Revision::Revision(start),
-                    count,
-                ));
+                builder.push_ss_table_scan(table.scan_forward(key, start, count));
             }
         }
 
@@ -278,12 +273,7 @@ where
 
         for tables in self.levels.values() {
             for table in tables {
-                builder.push_ss_table_scan(table.scan(
-                    key,
-                    Direction::Backward,
-                    Revision::Revision(start),
-                    count,
-                ));
+                builder.push_ss_table_scan(table.scan_backward(key, start, count));
             }
         }
 

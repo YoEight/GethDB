@@ -17,8 +17,7 @@ impl Block {
         self.len
     }
 
-    pub fn from(bytes: Bytes) -> Block {
-        let capacity = bytes.len();
+    pub fn from(capacity: usize, bytes: Bytes) -> Block {
         let len = bytes.slice(capacity - 2..).get_u16_le() as usize;
         let mut offset_section =
             bytes.slice((capacity - (len * BLOCK_OFFSET_SIZE + 2))..(capacity - 2));
