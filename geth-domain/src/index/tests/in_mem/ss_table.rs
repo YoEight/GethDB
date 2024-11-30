@@ -1,8 +1,8 @@
-use std::io;
+use std::{io, u64};
 
 use bytes::BytesMut;
 
-use geth_common::{Direction, IteratorIO, Revision};
+use geth_common::IteratorIO;
 use geth_mikoshi::InMemoryStorage;
 
 use crate::index::block::BLOCK_ENTRY_SIZE;
@@ -98,7 +98,7 @@ fn test_in_mem_ss_table_scan() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = table.scan_forward(2, 0, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -140,7 +140,7 @@ fn test_in_mem_ss_table_scan_backward() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
+    let mut iter = table.scan_backward(2, u64::MAX, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -184,7 +184,7 @@ fn test_in_mem_ss_table_scan_3_blocks() -> io::Result<()> {
 
     assert_eq!(3, table.len());
 
-    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = table.scan_forward(2, 0, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -228,7 +228,7 @@ fn test_in_mem_ss_table_scan_3_blocks_backward() -> io::Result<()> {
 
     assert_eq!(3, table.len());
 
-    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
+    let mut iter = table.scan_backward(2, u64::MAX, usize::MAX);
 
     let entry = iter.next()?.unwrap();
     assert_eq!(2, entry.key);
@@ -267,7 +267,7 @@ fn test_in_mem_ss_table_scan_not_found() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan(2, Direction::Forward, Revision::Start, usize::MAX);
+    let mut iter = table.scan_forward(2, 0, usize::MAX);
 
     assert!(iter.next()?.is_none());
 
@@ -291,7 +291,7 @@ fn test_in_mem_ss_table_scan_not_found_backward() -> io::Result<()> {
         ],
     )?;
 
-    let mut iter = table.scan(2, Direction::Backward, Revision::End, usize::MAX);
+    let mut iter = table.scan_backward(2, u64::MAX, usize::MAX);
 
     assert!(iter.next()?.is_none());
 
