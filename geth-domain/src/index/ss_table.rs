@@ -207,20 +207,34 @@ where
         let mut offset = 0usize;
         let mut block_start_offset = 0usize;
 
-        while let Some((key, rev, pos)) = values.next()? {
-            if let Some(block_local_offset) = builder.try_add(key, rev, pos) {
-                offset += block_local_offset;
+        buffer.put_u32_le(self.block_size as u32);
 
+        self.storage
+            .write_to(self.file_id(), offset as u64, buffer.split().freeze())?;
+
+        offset += std::mem::size_of::<u32>();
+
+        while let Some((key, rev, pos)) = values.next()? {
+            if let Some(written) = builder.try_add(key, rev, pos) {
                 if builder.len() == 1 {
-                    block_start_offset = offset;
+                    block_start_offset = offset + written.start_offset;
                     metas.put_u32_le(block_start_offset as u32);
                     metas.put_u64_le(key);
                     metas.put_u64_le(rev);
                 }
 
+                offset += written.len;
                 continue;
             }
 
+            self.storage.write_to(
+                self.file_id(),
+                block_start_offset as u64,
+                builder.split_then_build(),
+            )?;
+        }
+
+        if !builder.is_empty() {
             self.storage.write_to(
                 self.file_id(),
                 block_start_offset as u64,

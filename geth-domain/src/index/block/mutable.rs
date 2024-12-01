@@ -4,6 +4,11 @@ use crate::index::block::BLOCK_ENTRY_COUNT_SIZE;
 
 use super::{get_block_size, BLOCK_ENTRY_SIZE, BLOCK_OFFSET_SIZE};
 
+pub struct WrittenEntry {
+    pub start_offset: usize,
+    pub len: usize,
+}
+
 pub struct BlockMut {
     data: BytesMut,
     capacity: usize,
@@ -25,7 +30,7 @@ impl BlockMut {
         }
     }
 
-    pub fn try_add(&mut self, key: u64, revision: u64, position: u64) -> Option<usize> {
+    pub fn try_add(&mut self, key: u64, revision: u64, position: u64) -> Option<WrittenEntry> {
         if self.estimated_size() + BLOCK_ENTRY_SIZE + BLOCK_OFFSET_SIZE > self.capacity {
             return None;
         }
@@ -38,7 +43,10 @@ impl BlockMut {
 
         self.len += 1;
 
-        Some(offset)
+        Some(WrittenEntry {
+            start_offset: offset,
+            len: BLOCK_ENTRY_SIZE,
+        })
     }
 
     pub fn estimated_size(&self) -> usize {
@@ -47,6 +55,10 @@ impl BlockMut {
 
     pub fn len(&self) -> usize {
         self.len
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len == 0
     }
 
     pub fn split_then_build(&mut self) -> Bytes {
