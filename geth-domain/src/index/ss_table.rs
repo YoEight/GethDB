@@ -204,52 +204,46 @@ where
     {
         let mut builder = BlockMut::new(buffer.split(), self.block_size);
         let mut metas = buffer.split();
-        let mut offset = 0usize;
-        let mut block_start_offset = 0usize;
+        let mut block_start_offset = std::mem::size_of::<u32>();
 
         buffer.put_u32_le(self.block_size as u32);
 
         self.storage
-            .write_to(self.file_id(), offset as u64, buffer.split().freeze())?;
-
-        offset += std::mem::size_of::<u32>();
+            .write_to(self.file_id(), 0, buffer.split().freeze())?;
 
         while let Some((key, rev, pos)) = values.next()? {
-            if let Some(written) = builder.try_add(key, rev, pos) {
+            if builder.try_add(key, rev, pos) {
                 if builder.len() == 1 {
-                    block_start_offset = offset + written.start_offset;
                     metas.put_u32_le(block_start_offset as u32);
                     metas.put_u64_le(key);
                     metas.put_u64_le(rev);
                 }
 
-                offset += written.len;
                 continue;
             }
 
-            self.storage.write_to(
-                self.file_id(),
-                block_start_offset as u64,
-                builder.split_then_build(),
-            )?;
+            self.storage
+                .append(self.file_id(), builder.split_then_build())?;
+
+            block_start_offset = self.storage.offset(self.file_id())? as usize;
         }
 
         if !builder.is_empty() {
-            self.storage.write_to(
-                self.file_id(),
-                block_start_offset as u64,
-                builder.split_then_build(),
-            )?;
+            self.storage
+                .append(self.file_id(), builder.split_then_build())?;
         }
 
-        let meta_offset = offset;
-        metas.put_u32_le(meta_offset as u32);
+        let meta_offset = self.storage.offset(self.file_id())?;
         let metas = metas.freeze();
 
-        self.storage
-            .write_to(self.file_id(), meta_offset as u64, metas.clone())?;
+        self.storage.append(self.file_id(), metas.clone())?;
         self.metas = BlockMetas::new(metas);
         self.meta_offset = meta_offset as u64;
+
+        buffer.put_u32_le(meta_offset as u32);
+
+        self.storage
+            .append(self.file_id(), buffer.split().freeze())?;
 
         Ok(())
     }

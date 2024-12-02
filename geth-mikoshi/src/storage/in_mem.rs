@@ -47,7 +47,7 @@ impl Storage for InMemoryStorage {
 
         if let Some(buffer) = inner.map.get_mut(&id) {
             if buffer.len() == offset {
-                buffer.put(bytes);
+                buffer.extend_from_slice(&bytes);
             } else if offset < buffer.len() {
                 if offset + bytes.len() > buffer.len() {
                     let lower_part = buffer.len() - offset;
@@ -67,17 +67,66 @@ impl Storage for InMemoryStorage {
         } else {
             if let FileId::Chunk { .. } = id {
                 inner.buffer.resize(CHUNK_SIZE, 0);
+                inner.buffer[offset..offset + bytes.len()].copy_from_slice(&bytes);
             } else {
-                inner.buffer.resize(bytes.len(), 0);
+                if offset != 0 {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "write_to: offset exceed current byte buffer",
+                    ));
+                }
+
+                inner.buffer.extend_from_slice(&bytes);
             };
 
-            inner.buffer.put(bytes);
             let new_buffer = inner.buffer.split();
 
             inner.map.insert(id, new_buffer);
         }
 
         Ok(())
+    }
+
+    fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+        if let FileId::Chunk { .. } = id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "append: chunk files do not support append operation",
+            ));
+        }
+
+        let mut inner = self.inner.lock().unwrap();
+
+        if let Some(buffer) = inner.map.get_mut(&id) {
+            buffer.extend_from_slice(&bytes);
+        } else {
+            inner.buffer.extend_from_slice(&bytes);
+            let new_buffer = inner.buffer.split();
+
+            inner.map.insert(id, new_buffer);
+        }
+
+        Ok(())
+    }
+
+    fn offset(&self, id: FileId) -> io::Result<u64> {
+        if let FileId::Chunk { .. } = id {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "offset: chunk files do not support offset operation",
+            ));
+        }
+
+        let inner = self.inner.lock().unwrap();
+
+        if let Some(buffer) = inner.map.get(&id) {
+            return Ok(buffer.len() as u64);
+        }
+
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("offset: file {:?} does not exist", id),
+        ))
     }
 
     fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
