@@ -171,10 +171,9 @@ where
 
     pub fn read_block(&self, block_idx: usize) -> io::Result<Block> {
         let meta = self.metas.read(block_idx);
-        let block_size = self.block_actual_size(block_idx);
-        let block_bytes = self
-            .storage
-            .read_from(self.file_id(), meta.offset as u64, block_size)?;
+        let block_bytes =
+            self.storage
+                .read_from(self.file_id(), meta.offset as u64, self.block_size)?;
 
         Ok(Block::from(self.block_size, block_bytes))
     }
@@ -246,14 +245,6 @@ where
             .append(self.file_id(), buffer.split().freeze())?;
 
         Ok(())
-    }
-
-    pub fn block_actual_size(&self, block_idx: usize) -> usize {
-        if block_idx + 1 >= self.len() {
-            self.meta_offset as usize - self.metas.read(block_idx).offset as usize
-        } else {
-            self.block_size
-        }
     }
 
     pub fn iter(&self) -> SsTableIter<S> {

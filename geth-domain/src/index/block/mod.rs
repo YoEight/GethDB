@@ -8,7 +8,7 @@ pub use immutable::Block;
 pub const BLOCK_KEY_SIZE: usize = std::mem::size_of::<u64>();
 pub const BLOCK_VERSION_SIZE: usize = std::mem::size_of::<u64>();
 pub const BLOCK_LOG_POSITION_SIZE: usize = std::mem::size_of::<u64>();
-pub const BLOCK_OFFSET_SIZE: usize = std::mem::size_of::<u64>();
+pub const BLOCK_OFFSET_SIZE: usize = std::mem::size_of::<u16>();
 pub const BLOCK_ENTRY_COUNT_SIZE: usize = std::mem::size_of::<u16>();
 pub const BLOCK_ENTRY_SIZE: usize = BLOCK_KEY_SIZE + BLOCK_VERSION_SIZE + BLOCK_LOG_POSITION_SIZE;
 

@@ -14,7 +14,9 @@ pub struct BlockMut {
 }
 
 impl BlockMut {
-    pub fn new(buffer: BytesMut, capacity: usize) -> Self {
+    pub fn new(mut buffer: BytesMut, capacity: usize) -> Self {
+        buffer.reserve(capacity);
+
         Self {
             data: buffer,
             capacity,
@@ -72,6 +74,8 @@ impl BlockMut {
         self.first_key = None;
         self.last_key = None;
 
-        data.freeze()
+        let bytes = data.freeze();
+        assert_eq!(self.capacity, bytes.len());
+        bytes
     }
 }
