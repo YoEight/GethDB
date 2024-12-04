@@ -168,6 +168,7 @@ impl Block {
                     count: max,
                     max,
                     index: None,
+                    anchored: false,
                 };
             }
         }
@@ -180,6 +181,7 @@ impl Block {
                 count: max,
                 max,
                 index: None,
+                anchored: false,
             };
         }
 
@@ -190,6 +192,7 @@ impl Block {
             count: 0,
             max,
             index: None,
+            anchored: false,
         }
     }
 
@@ -251,9 +254,17 @@ impl Iterator for ScanForward {
 
                     match entry.cmp_key_rev(self.key, self.start) {
                         Ordering::Less => low = mid + 1,
-                        Ordering::Greater => high = mid - 1,
+                        Ordering::Greater => {
+                            if let Some(new_high) = mid.checked_sub(1) {
+                                high = new_high;
+                            } else {
+                                break;
+                            }
+                        }
                         Ordering::Equal => {
                             self.index = Some(mid + 1);
+                            self.count += 1;
+
                             return Some(entry);
                         }
                     }
@@ -265,21 +276,29 @@ impl Iterator for ScanForward {
             }
 
             let current_idx = self.index?;
-            let entry = self.inner.try_read(self.index?)?;
-
-            if self.key > entry.key {
+            if let Some(entry) = self.inner.try_read(self.index?) {
                 self.index = Some(current_idx + 1);
-                continue;
+
+                if self.key > entry.key {
+                    continue;
+                }
+
+                if self.key < entry.key {
+                    self.count = self.max;
+                    return None;
+                }
+
+                if self.start > entry.revision {
+                    continue;
+                }
+
+                self.count += 1;
+
+                return Some(entry);
             }
 
-            if self.start > entry.revision {
-                self.index = Some(current_idx + 1);
-                continue;
-            }
-
-            self.count += 1;
-
-            return Some(entry);
+            self.count = self.max;
+            return None;
         }
     }
 }
@@ -291,6 +310,7 @@ pub struct ScanBackward {
     count: usize,
     max: usize,
     index: Option<usize>,
+    anchored: bool,
 }
 
 impl Iterator for ScanBackward {
@@ -315,7 +335,14 @@ impl Iterator for ScanBackward {
                         Ordering::Less => low = mid + 1,
                         Ordering::Greater => high = mid - 1,
                         Ordering::Equal => {
-                            self.index = Some(mid + 1);
+                            self.count += 1;
+
+                            if let Some(next_index) = mid.checked_sub(1) {
+                                self.index = Some(next_index);
+                            } else {
+                                self.count = self.max;
+                            }
+
                             return Some(entry);
                         }
                     }
@@ -332,21 +359,44 @@ impl Iterator for ScanBackward {
             }
 
             let current_idx = self.index?;
-            let entry = self.inner.try_read(self.index?)?;
+            if let Some(entry) = self.inner.try_read(self.index?) {
+                // when scanning backward, if start is set to u64::MAX, it means we want to start to the highest revision
+                // possible.
+                if self.key == entry.key
+                    && !self.anchored
+                    && (self.start == u64::MAX || self.start >= entry.revision)
+                {
+                    self.anchored = true;
+                }
 
-            if self.key > entry.key {
-                self.index = Some(current_idx + 1);
-                continue;
+                if self.key > entry.key
+                    || (self.key == entry.key && !self.anchored && self.start > entry.revision)
+                {
+                    if let Some(new_index) = current_idx.checked_sub(1) {
+                        self.index = Some(new_index);
+                        continue;
+                    }
+
+                    self.count = self.max;
+                    return None;
+                } else if self.key < entry.key {
+                    self.count = self.max;
+                    return None;
+                }
+
+                self.count += 1;
+
+                if let Some(new_index) = current_idx.checked_sub(1) {
+                    self.index = Some(new_index);
+                } else {
+                    self.count = self.max;
+                }
+
+                return Some(entry);
             }
 
-            if self.start > entry.revision {
-                self.index = Some(current_idx + 1);
-                continue;
-            }
-
-            self.count += 1;
-
-            return Some(entry);
+            self.count = self.max;
+            return None;
         }
     }
 }

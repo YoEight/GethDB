@@ -9,6 +9,7 @@ use geth_mikoshi::storage::{FileId, Storage};
 
 use crate::index::block::{Block, BlockEntry};
 
+use super::block::get_block_size;
 use super::block::mutable::BlockMut;
 
 const SSTABLE_META_ENTRY_SIZE: usize =
@@ -93,7 +94,17 @@ where
         Self::with_buffer(storage, block_size, BytesMut::new())
     }
 
+    pub fn with_capacity(storage: S, num_elems: usize) -> Self {
+        Self::new(storage, get_block_size(num_elems))
+    }
+
     pub fn with_buffer(storage: S, block_size: usize, buffer: BytesMut) -> Self {
+        debug_assert!(
+            block_size >= get_block_size(1),
+            "block_size doesn't have the minimum viable value: {}",
+            get_block_size(1)
+        );
+
         Self {
             id: Uuid::new_v4(),
             storage,
@@ -211,20 +222,36 @@ where
             .write_to(self.file_id(), 0, buffer.split().freeze())?;
 
         while let Some((key, rev, pos)) = values.next()? {
-            if builder.try_add(key, rev, pos) {
-                if builder.len() == 1 {
-                    metas.put_u32_le(block_start_offset as u32);
-                    metas.put_u64_le(key);
-                    metas.put_u64_le(rev);
+            let mut retried = false;
+
+            loop {
+                if builder.try_add(key, rev, pos) {
+                    if builder.len() == 1 {
+                        metas.put_u32_le(block_start_offset as u32);
+                        metas.put_u64_le(key);
+                        metas.put_u64_le(rev);
+                    }
+
+                    break;
                 }
 
-                continue;
+                if retried {
+                    // This should be impossible since we have contingencies when creating a new ss table.
+                    return Err(io::Error::new(
+                        io::ErrorKind::WriteZero,
+                        format!(
+                            "invalid block_size of {} lead to not be able to perform any write",
+                            self.block_size
+                        ),
+                    ));
+                }
+
+                self.storage
+                    .append(self.file_id(), builder.split_then_build())?;
+
+                block_start_offset = self.storage.offset(self.file_id())? as usize;
+                retried = true;
             }
-
-            self.storage
-                .append(self.file_id(), builder.split_then_build())?;
-
-            block_start_offset = self.storage.offset(self.file_id())? as usize;
         }
 
         if !builder.is_empty() {

@@ -4,14 +4,13 @@ use bytes::BytesMut;
 
 use geth_mikoshi::InMemoryStorage;
 
-use crate::index::block::BLOCK_ENTRY_SIZE;
 use crate::index::ss_table::SsTable;
 use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_of, NUM_OF_KEYS};
 
 #[test]
 fn test_in_mem_block_build_single_key() -> io::Result<()> {
     let mut buffer = BytesMut::new();
-    let mut table = SsTable::new(InMemoryStorage::new(), BLOCK_ENTRY_SIZE);
+    let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
 
     table.put_iter(&mut buffer, [(1, 1, 1)])?;
 
@@ -31,7 +30,7 @@ fn test_in_mem_block_build_single_key() -> io::Result<()> {
 #[test]
 fn test_in_mem_block_build_full() -> io::Result<()> {
     let mut buffer = BytesMut::new();
-    let mut table = SsTable::new(InMemoryStorage::new(), BLOCK_ENTRY_SIZE);
+    let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
 
     table.put_iter(&mut buffer, [(1, 1, 10), (2, 2, 20)])?;
 
