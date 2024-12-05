@@ -225,6 +225,30 @@ impl<'a> Iterator for Iter<'a> {
     }
 }
 
+fn find_closest_entry(
+    block: &Block,
+    key: u64,
+    revision: u64,
+) -> Result<(usize, BlockEntry), usize> {
+    let mut low = 0i64;
+    let mut high = (block.len() - 1) as i64;
+
+    while low <= high {
+        let mid = (low + high) / 2;
+        let entry = block.try_read(mid as usize).unwrap();
+
+        match entry.cmp_key_rev(key, revision) {
+            Ordering::Less => low = mid + 1,
+            Ordering::Greater => high = mid - 1,
+            Ordering::Equal => {
+                return Ok((mid as usize, entry));
+            }
+        }
+    }
+
+    Err(low as usize)
+}
+
 pub struct ScanForward {
     inner: Block,
     key: u64,
@@ -244,34 +268,17 @@ impl Iterator for ScanForward {
             }
 
             if self.index.is_none() {
-                let mut low = 0usize;
-                let mut high = self.inner.len();
-
-                let anchor: Option<usize> = None;
-                while low <= high {
-                    let mid = (low + high) / 2;
-                    let entry = self.inner.try_read(mid)?;
-
-                    match entry.cmp_key_rev(self.key, self.start) {
-                        Ordering::Less => low = mid + 1,
-                        Ordering::Greater => {
-                            if let Some(new_high) = mid.checked_sub(1) {
-                                high = new_high;
-                            } else {
-                                break;
-                            }
-                        }
-                        Ordering::Equal => {
-                            self.index = Some(mid + 1);
-                            self.count += 1;
-
-                            return Some(entry);
-                        }
+                match find_closest_entry(&self.inner, self.key, self.start) {
+                    Err(edge) => {
+                        self.index = Some(edge);
                     }
-                }
 
-                if anchor.is_none() {
-                    self.index = Some(low);
+                    Ok((entry_index, entry)) => {
+                        self.count += 1;
+                        self.index = Some(entry_index + 1);
+
+                        return Some(entry);
+                    }
                 }
             }
 
@@ -323,37 +330,26 @@ impl Iterator for ScanBackward {
             }
 
             if self.index.is_none() {
-                let mut low = 0usize;
-                let mut high = self.inner.len();
-
-                let anchor: Option<usize> = None;
-                while low <= high {
-                    let mid = (low + high) / 2;
-                    let entry = self.inner.try_read(mid)?;
-
-                    match entry.cmp_key_rev(self.key, self.start) {
-                        Ordering::Less => low = mid + 1,
-                        Ordering::Greater => high = mid - 1,
-                        Ordering::Equal => {
-                            self.count += 1;
-
-                            if let Some(next_index) = mid.checked_sub(1) {
-                                self.index = Some(next_index);
-                            } else {
-                                self.count = self.max;
-                            }
-
-                            return Some(entry);
+                match find_closest_entry(&self.inner, self.key, self.start) {
+                    Err(edge) => {
+                        if edge > 0 {
+                            self.index = Some((edge - 1) as usize);
+                        } else {
+                            self.count = self.max;
+                            return None;
                         }
                     }
-                }
 
-                if anchor.is_none() {
-                    if let Some(index) = low.checked_sub(1) {
-                        self.index = Some(index);
-                    } else {
-                        self.count = self.max;
-                        return None;
+                    Ok((entry_index, entry)) => {
+                        self.count += 1;
+
+                        if entry_index > 0 {
+                            self.index = Some((entry_index - 1) as usize);
+                        } else {
+                            self.count = self.max;
+                        }
+
+                        return Some(entry);
                     }
                 }
             }
