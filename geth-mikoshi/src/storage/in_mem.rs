@@ -135,7 +135,7 @@ impl Storage for InMemoryStorage {
         if let Some(buffer) = inner.map.get(&id) {
             let offset = offset as usize;
 
-            if (offset + len) >= buffer.len() {
+            if (offset + len) > buffer.len() {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
                     "read_from: range exceeds current byte buffer",

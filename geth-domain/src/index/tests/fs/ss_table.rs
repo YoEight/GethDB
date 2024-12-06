@@ -1,7 +1,6 @@
 use std::path::PathBuf;
 use std::{io, u64};
 
-use bytes::BytesMut;
 use temp_testdir::TempDir;
 
 use geth_common::IteratorIO;
@@ -18,10 +17,9 @@ fn test_fs_sst_build_single_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(storage, 1);
 
-    table.put_iter(&mut buffer, [(1, 2, 3)])?;
+    table.put_iter([(1, 2, 3)])?;
 
     let entry = table.find_key(1, 2)?.unwrap();
 
@@ -37,10 +35,9 @@ fn test_fs_sst_build_two_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(storage, 1);
 
-    table.put_iter(&mut buffer, [(1, 2, 3), (2, 3, 4)])?;
+    table.put_iter([(1, 2, 3), (2, 3, 4)])?;
 
     let entry = table.find_key(1, 2)?.unwrap();
 
@@ -62,10 +59,9 @@ fn test_fs_sst_key_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(storage, 1);
 
-    table.put_iter(&mut buffer, [(1, 2, 3)])?;
+    table.put_iter([(1, 2, 3)])?;
 
     assert!(table.find_key(1, 3)?.is_none());
 
@@ -98,24 +94,20 @@ fn test_fs_sst_find_key() -> io::Result<()> {
 fn test_fs_ss_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let mut iter = table.scan_forward(2, 0, usize::MAX);
     let entry = iter.next()?.unwrap();
@@ -142,24 +134,20 @@ fn test_fs_ss_table_scan() -> io::Result<()> {
 fn test_fs_ss_table_scan_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let mut iter = table.scan_backward(2, u64::MAX, usize::MAX);
 
@@ -187,24 +175,20 @@ fn test_fs_ss_table_scan_backward() -> io::Result<()> {
 fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     assert_eq!(3, table.len());
 
@@ -233,24 +217,20 @@ fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
 fn test_fs_ss_table_scan_3_blocks_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     assert_eq!(3, table.len());
 
@@ -280,21 +260,17 @@ fn test_fs_ss_table_scan_3_blocks_backward() -> io::Result<()> {
 fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let mut iter = table.scan_forward(2, 0, usize::MAX);
 
@@ -307,21 +283,17 @@ fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
 fn test_fs_ss_table_scan_not_found_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let mut iter = table.scan_backward(2, u64::MAX, usize::MAX);
 
@@ -332,12 +304,11 @@ fn test_fs_ss_table_scan_not_found_backward() -> io::Result<()> {
 
 #[test]
 fn test_fs_ss_table_serialization() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let temp = TempDir::default();
     let storage = FileSystemStorage::new(PathBuf::from(temp.as_ref()))?;
     let mut table = SsTable::with_capacity(storage.clone(), 10);
 
-    table.put_iter(&mut buffer, [(1, 2, 3)])?;
+    table.put_iter([(1, 2, 3)])?;
 
     let actual = SsTable::load(storage, table.id)?;
 

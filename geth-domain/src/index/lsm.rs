@@ -155,9 +155,13 @@ where
         }
 
         let mem_table = std::mem::take(&mut self.active_table);
-        let mut new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
+        let mut new_table = SsTable::with_buffer(
+            self.storage.clone(),
+            self.settings.base_block_size,
+            self.buffer.split(),
+        );
 
-        new_table.put(&mut self.buffer, mem_table.entries().lift())?;
+        new_table.put(mem_table.entries().lift())?;
 
         let mut level = 0u8;
         let mut cleanups = Vec::new();
@@ -176,7 +180,7 @@ where
                     let values = builder.build().map(|e| (e.key, e.revision, e.position));
 
                     new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
-                    new_table.put(&mut self.buffer, values)?;
+                    new_table.put(values)?;
 
                     if new_table.len() >= sst_table_block_count_limit(level) {
                         level += 1;

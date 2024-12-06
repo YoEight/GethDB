@@ -1,7 +1,5 @@
 use std::{io, u64};
 
-use bytes::BytesMut;
-
 use geth_mikoshi::InMemoryStorage;
 
 use crate::index::ss_table::SsTable;
@@ -9,10 +7,9 @@ use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_o
 
 #[test]
 fn test_in_mem_block_build_single_key() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
 
-    table.put_iter(&mut buffer, [(1, 1, 1)])?;
+    table.put_iter([(1, 1, 1)])?;
 
     assert_eq!(1, table.len());
 
@@ -29,10 +26,9 @@ fn test_in_mem_block_build_single_key() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_build_full() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
 
-    table.put_iter(&mut buffer, [(1, 1, 10), (2, 2, 20)])?;
+    table.put_iter([(1, 1, 10), (2, 2, 20)])?;
 
     assert_eq!(2, table.len());
 
@@ -101,22 +97,18 @@ fn test_in_mem_block_find_key() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_skipped() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -138,22 +130,18 @@ fn test_in_mem_block_scan_skipped() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_skipped_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);
@@ -175,23 +163,19 @@ fn test_in_mem_block_scan_skipped_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_forward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -218,23 +202,19 @@ fn test_in_mem_block_scan_forward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (2, 0, 4),
-            (2, 1, 5),
-            (2, 2, 6),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (2, 0, 4),
+        (2, 1, 5),
+        (2, 2, 6),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);
@@ -261,10 +241,9 @@ fn test_in_mem_block_scan_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_gap() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(2, 1, 5), (2, 2, 6)])?;
+    table.put_iter([(2, 1, 5), (2, 2, 6)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -286,10 +265,9 @@ fn test_in_mem_block_scan_gap() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_gap_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(2, 1, 5), (2, 2, 6)])?;
+    table.put_iter([(2, 1, 5), (2, 2, 6)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);
@@ -311,10 +289,9 @@ fn test_in_mem_block_scan_gap_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
+    table.put_iter([(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -326,10 +303,9 @@ fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_1_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
+    table.put_iter([(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);
@@ -341,10 +317,9 @@ fn test_in_mem_block_scan_not_found_easy_1_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
+    table.put_iter([(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -356,10 +331,9 @@ fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_2_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(&mut buffer, [(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
+    table.put_iter([(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);
@@ -371,20 +345,16 @@ fn test_in_mem_block_scan_not_found_easy_2_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_forward(2, 0, usize::MAX);
@@ -396,20 +366,16 @@ fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_hard_backward() -> io::Result<()> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_default(InMemoryStorage::new());
 
-    table.put_iter(
-        &mut buffer,
-        [
-            (1, 0, 1),
-            (1, 1, 2),
-            (1, 2, 3),
-            (3, 0, 7),
-            (3, 1, 8),
-            (3, 2, 9),
-        ],
-    )?;
+    table.put_iter([
+        (1, 0, 1),
+        (1, 1, 2),
+        (1, 2, 3),
+        (3, 0, 7),
+        (3, 1, 8),
+        (3, 2, 9),
+    ])?;
 
     let block = table.read_block(0)?;
     let mut iter = block.scan_backward(2, u64::MAX, usize::MAX);

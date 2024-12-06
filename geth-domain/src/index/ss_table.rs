@@ -201,25 +201,25 @@ where
         Ok(None)
     }
 
-    pub fn put_iter<Values>(&mut self, buffer: &mut BytesMut, values: Values) -> io::Result<()>
+    pub fn put_iter<Values>(&mut self, values: Values) -> io::Result<()>
     where
         Values: IntoIterator<Item = (u64, u64, u64)>,
     {
-        self.put(buffer, values.into_iter().lift())
+        self.put(values.into_iter().lift())
     }
 
-    pub fn put<Values>(&mut self, buffer: &mut BytesMut, mut values: Values) -> io::Result<()>
+    pub fn put<Values>(&mut self, mut values: Values) -> io::Result<()>
     where
         Values: IteratorIO<Item = (u64, u64, u64)>,
     {
-        let mut builder = BlockMut::new(buffer.split(), self.block_size);
-        let mut metas = buffer.split();
+        let mut builder = BlockMut::new(self.buffer.split(), self.block_size);
+        let mut metas = self.buffer.split();
         let mut block_start_offset = std::mem::size_of::<u32>();
 
-        buffer.put_u32_le(self.block_size as u32);
+        self.buffer.put_u32_le(self.block_size as u32);
 
         self.storage
-            .write_to(self.file_id(), 0, buffer.split().freeze())?;
+            .write_to(self.file_id(), 0, self.buffer.split().freeze())?;
 
         while let Some((key, rev, pos)) = values.next()? {
             let mut retried = false;
@@ -266,10 +266,10 @@ where
         self.metas = BlockMetas::new(metas);
         self.meta_offset = meta_offset as u64;
 
-        buffer.put_u32_le(meta_offset as u32);
+        self.buffer.put_u32_le(meta_offset as u32);
 
         self.storage
-            .append(self.file_id(), buffer.split().freeze())?;
+            .append(self.file_id(), self.buffer.split().freeze())?;
 
         Ok(())
     }
@@ -299,16 +299,16 @@ where
         }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanForward<S> {
+    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanBackward<S> {
         let mut candidates = self.find_best_candidates(key, start);
 
         candidates.rotate_left(candidates.len() - 1);
 
-        ScanForward {
+        ScanBackward {
             key,
             revision: start,
             count,
-            block_idx: self.len().checked_sub(1).unwrap_or_default(),
+            block_idx: None,
             block_scan: None,
             table: self,
             candidates,
@@ -378,7 +378,7 @@ where
                 return Ok(None);
             }
 
-            if self.block_idx >= self.table.len() {
+            if self.block_scan.is_none() && self.block_idx >= self.table.len() {
                 return Ok(None);
             }
 
@@ -413,7 +413,7 @@ pub struct ScanBackward<'a, S> {
     key: u64,
     revision: u64,
     count: usize,
-    block_idx: usize,
+    block_idx: Option<usize>,
     block_scan: Option<crate::index::block::immutable::ScanBackward>,
     table: &'a SsTable<S>,
     candidates: VecDeque<usize>,
@@ -431,33 +431,36 @@ where
                 return Ok(None);
             }
 
-            if self.block_scan.is_none() {
-                if let Some(block_idx) = self.candidates.pop_front() {
-                    self.block_idx = block_idx;
+            if let Some(mut iter) = self.block_scan.take() {
+                if let Some(entry) = iter.next() {
+                    self.count = self.count.checked_sub(1).unwrap_or_default();
+                    self.block_scan = Some(iter);
+                    return Ok(Some(entry));
                 }
+            }
 
-                let block = self.table.read_block(self.block_idx)?;
-
-                let last_key = block.last_key.unwrap_or_default();
-
-                // There is no need to continue loading blocks because from that point, no further block will contains the key we are looking for.
-                if last_key < self.key {
+            let block_idx = if let Some(block_idx) = self.candidates.pop_front() {
+                block_idx
+            } else if let Some(prev_block_id) = self.block_idx {
+                if let Some(new_block_idx) = prev_block_id.checked_sub(1) {
+                    new_block_idx
+                } else {
                     self.count = 0;
                     return Ok(None);
                 }
+            } else {
+                self.count = 0;
+                return Ok(None);
+            };
 
-                self.block_scan = Some(block.scan_backward(self.key, self.revision, self.count));
-                self.block_idx = self.block_idx.checked_sub(1).unwrap();
-                // hack but that's the only way to detect that we already reached the end of the LSM block.
-                self.candidates.push_back(self.block_idx);
+            let block = self.table.read_block(block_idx)?;
+            let last_key = block.last_key.unwrap_or_default();
+
+            if !block.contains(last_key) {
+                continue;
             }
 
-            if let Some(entry) = self.block_scan.as_mut().unwrap().next() {
-                self.count = self.count.checked_sub(1).unwrap_or_default();
-                return Ok(Some(entry));
-            }
-
-            self.block_scan = None;
+            self.block_scan = Some(block.scan_backward(self.key, self.revision, self.count));
         }
     }
 }

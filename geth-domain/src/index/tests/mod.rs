@@ -1,7 +1,5 @@
 use std::io;
 
-use bytes::BytesMut;
-
 use geth_common::IteratorIO;
 use geth_mikoshi::FileSystemStorage;
 use geth_mikoshi::InMemoryStorage;
@@ -31,8 +29,7 @@ pub fn position_of(idx: usize) -> u64 {
 pub fn in_mem_generate_block() -> SsTable<InMemoryStorage> {
     let mut table = SsTable::new(InMemoryStorage::new(), 4_096);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
-    let mut buffer = BytesMut::new();
-    table.put_iter(&mut buffer, values).unwrap();
+    table.put_iter(values).unwrap();
 
     table
 }
@@ -40,8 +37,7 @@ pub fn in_mem_generate_block() -> SsTable<InMemoryStorage> {
 pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
     let mut table = SsTable::new(InMemoryStorage::new(), 128);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
-    let mut buffer = BytesMut::new();
-    table.put_iter(&mut buffer, values).unwrap();
+    table.put_iter(values).unwrap();
 
     table
 }
@@ -50,10 +46,9 @@ pub fn fs_generate_stt_with_size(
     storage: FileSystemStorage,
     num_elems: usize,
 ) -> io::Result<SsTable<FileSystemStorage>> {
-    let mut buffer = BytesMut::new();
     let mut table = SsTable::with_capacity(storage, num_elems);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
-    table.put_iter(&mut buffer, values)?;
+    table.put_iter(values)?;
 
     Ok(table)
 }
