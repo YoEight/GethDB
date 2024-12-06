@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 use std::fs::{read_dir, File, OpenOptions};
-use std::io::{self, ErrorKind};
+use std::io::{self, ErrorKind, Seek};
 #[cfg(target_family = "unix")]
 use std::os::unix::fs::FileExt;
 #[cfg(target_os = "windows")]
@@ -88,6 +88,25 @@ impl Storage for FileSystemStorage {
         file.sync_all()?;
 
         Ok(())
+    }
+
+    fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+        let mut file = self.load_or_create(id)?;
+
+        let offset = file.seek(io::SeekFrom::End(0))?;
+
+        #[cfg(target_family = "unix")]
+        file.write_all_at(&bytes, offset)?;
+        #[cfg(target_os = "windows")]
+        win_write_all(&file, &bytes, offset)?;
+        file.sync_all()?;
+
+        Ok(())
+    }
+
+    fn offset(&self, id: FileId) -> io::Result<u64> {
+        let mut file = self.load_or_create(id)?;
+        file.seek(io::SeekFrom::End(0))
     }
 
     fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {

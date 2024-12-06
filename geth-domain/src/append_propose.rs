@@ -33,7 +33,7 @@ where
     }
 }
 
-impl<'a, I> Iterator for AppendProposes<'a, I>
+impl<I> Iterator for AppendProposes<'_, I>
 where
     I: Iterator<Item = Propose>,
 {

@@ -1,7 +1,5 @@
 use std::{io, u64};
 
-use bytes::BytesMut;
-
 use geth_common::IteratorIO;
 use geth_mikoshi::InMemoryStorage;
 
@@ -206,7 +204,6 @@ fn test_mem_table_backward_iter() {
 fn test_mem_table_flush() -> io::Result<()> {
     let storage = InMemoryStorage::new();
     let mut table = SsTable::new(storage, 128);
-    let mut buffer = BytesMut::new();
     let mut mem_table = MemTable::default();
 
     mem_table.put(1, 0, 1);
@@ -217,7 +214,7 @@ fn test_mem_table_flush() -> io::Result<()> {
         .into_iter()
         .map(|entry| (entry.key, entry.revision, entry.position));
 
-    table.put_iter(&mut buffer, values)?;
+    table.put_iter(values)?;
     let block = table.read_block(0)?;
     block.dump();
     let mut iter = table.iter();

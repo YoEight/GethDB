@@ -5,7 +5,7 @@ use std::iter::once;
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{Direction, IteratorIO, IteratorIOExt, Revision};
+use geth_common::{IteratorIO, IteratorIOExt};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileId, Storage};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
@@ -88,7 +88,7 @@ where
             while bytes.remaining() >= 17 {
                 let level = bytes.get_u8();
                 let id = Uuid::from_u128(bytes.get_u128_le());
-                let table = SsTable::load(storage.clone(), id)?;
+                let table = SsTable::load_with_buffer(storage.clone(), id, lsm.buffer.split())?;
 
                 lsm.levels.entry(level).or_default().push_back(table);
             }
@@ -145,8 +145,6 @@ where
         Values: IteratorIO<Item = (u64, u64, u64)>,
         S: Storage,
     {
-        let mut buffer = self.buffer.clone();
-
         while let Some((key, revision, position)) = values.next()? {
             self.active_table.put(key, revision, position);
             self.logical_position = position;
@@ -157,9 +155,13 @@ where
         }
 
         let mem_table = std::mem::take(&mut self.active_table);
-        let mut new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
+        let mut new_table = SsTable::with_buffer(
+            self.storage.clone(),
+            self.settings.base_block_size,
+            self.buffer.split(),
+        );
 
-        new_table.put(&mut buffer, mem_table.entries().lift())?;
+        new_table.put(mem_table.entries().lift())?;
 
         let mut level = 0u8;
         let mut cleanups = Vec::new();
@@ -178,7 +180,7 @@ where
                     let values = builder.build().map(|e| (e.key, e.revision, e.position));
 
                     new_table = SsTable::new(self.storage.clone(), self.settings.base_block_size);
-                    new_table.put(&mut buffer, values)?;
+                    new_table.put(values)?;
 
                     if new_table.len() >= sst_table_block_count_limit(level) {
                         level += 1;
@@ -252,12 +254,7 @@ where
 
         for tables in self.levels.values() {
             for table in tables {
-                builder.push_ss_table_scan(table.scan(
-                    key,
-                    Direction::Forward,
-                    Revision::Revision(start),
-                    count,
-                ));
+                builder.push_ss_table_scan(table.scan_forward(key, start, count));
             }
         }
 
@@ -280,12 +277,7 @@ where
 
         for tables in self.levels.values() {
             for table in tables {
-                builder.push_ss_table_scan(table.scan(
-                    key,
-                    Direction::Backward,
-                    Revision::Revision(start),
-                    count,
-                ));
+                builder.push_ss_table_scan(table.scan_backward(key, start, count));
             }
         }
 

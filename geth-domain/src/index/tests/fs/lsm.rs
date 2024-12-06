@@ -1,7 +1,6 @@
 use std::io;
 use std::path::PathBuf;
 
-use bytes::BytesMut;
 use temp_testdir::TempDir;
 
 use geth_common::IteratorIO;
@@ -113,14 +112,13 @@ fn test_fs_lsm_serialization() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
     let storage = FileSystemStorage::new(root)?;
-    let mut buffer = BytesMut::new();
     let mut lsm = Lsm::with_default(storage.clone());
 
     let mut table1 = SsTable::with_default(storage.clone());
     let mut table2 = SsTable::with_default(storage.clone());
 
-    table1.put_iter(&mut buffer, [(1, 2, 3)])?;
-    table2.put_iter(&mut buffer, [(4, 5, 6)])?;
+    table1.put_iter([(1, 2, 3)])?;
+    table2.put_iter([(4, 5, 6)])?;
 
     lsm.logical_position = 1234;
 

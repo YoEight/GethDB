@@ -1,4 +1,4 @@
-use std::io;
+use std::{fmt, io};
 
 use bytes::Bytes;
 use uuid::Uuid;
@@ -39,6 +39,17 @@ impl FileId {
     }
 }
 
+impl fmt::Debug for FileId {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            FileId::SSTable(uuid) => write!(f, "ss_table-{}", uuid),
+            FileId::IndexMap => write!(f, "indexmap"),
+            FileId::Chunk { num, version } => write!(f, "chunk-{:06}.{:06}", num, version),
+            FileId::Checkpoint(checkpoint) => write!(f, "{}", checkpoint.as_str()),
+        }
+    }
+}
+
 #[derive(Copy, Clone, Hash, PartialEq, Eq, PartialOrd, Ord)]
 pub enum Checkpoint {
     Writer,
@@ -68,6 +79,8 @@ pub trait FileCategory {
 
 pub trait Storage: Clone {
     fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()>;
+    fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()>;
+    fn offset(&self, id: FileId) -> io::Result<u64>;
     fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes>;
     fn read_all(&self, id: FileId) -> io::Result<Bytes>;
     fn exists(&self, id: FileId) -> io::Result<bool>;
