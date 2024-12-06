@@ -454,9 +454,9 @@ where
             };
 
             let block = self.table.read_block(block_idx)?;
-            let last_key = block.last_key.unwrap_or_default();
+            self.block_idx = Some(block_idx);
 
-            if !block.contains(last_key) {
+            if !block.contains(self.key) {
                 continue;
             }
 
