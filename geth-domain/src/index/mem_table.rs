@@ -85,7 +85,7 @@ pub struct ScanForward<'a> {
     max: usize,
 }
 
-impl<'a> Iterator for ScanForward<'a> {
+impl Iterator for ScanForward<'_> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -121,7 +121,7 @@ pub struct ScanBackward<'a> {
     max: usize,
 }
 
-impl<'a> Iterator for ScanBackward<'a> {
+impl Iterator for ScanBackward<'_> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {

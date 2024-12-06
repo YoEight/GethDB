@@ -210,7 +210,7 @@ pub struct Iter<'a> {
     inner: &'a Block,
 }
 
-impl<'a> Iterator for Iter<'a> {
+impl Iterator for Iter<'_> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> Option<Self::Item> {
@@ -333,7 +333,7 @@ impl Iterator for ScanBackward {
                 match find_closest_entry(&self.inner, self.key, self.start) {
                     Err(edge) => {
                         if edge > 0 {
-                            self.index = Some((edge - 1) as usize);
+                            self.index = Some(edge - 1);
                         } else {
                             self.count = self.max;
                             return None;
@@ -344,7 +344,7 @@ impl Iterator for ScanBackward {
                         self.count += 1;
 
                         if entry_index > 0 {
-                            self.index = Some((entry_index - 1) as usize);
+                            self.index = Some(entry_index - 1);
                         } else {
                             self.count = self.max;
                         }

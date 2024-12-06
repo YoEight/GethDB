@@ -46,23 +46,30 @@ impl Storage for InMemoryStorage {
         let offset = offset as usize;
 
         if let Some(buffer) = inner.map.get_mut(&id) {
-            if buffer.len() == offset {
-                buffer.extend_from_slice(&bytes);
-            } else if offset < buffer.len() {
-                if offset + bytes.len() > buffer.len() {
-                    let lower_part = buffer.len() - offset;
-                    let additional_bytes = (offset + bytes.len()) - buffer.len();
-                    buffer[offset..lower_part].copy_from_slice(bytes.slice(0..lower_part).as_ref());
-                    buffer.reserve(additional_bytes);
-                    buffer.put(bytes.slice(lower_part..));
-                } else {
-                    buffer[offset..offset + bytes.len()].copy_from_slice(&bytes);
+            match buffer.len().cmp(&offset) {
+                std::cmp::Ordering::Equal => {
+                    buffer.extend_from_slice(&bytes);
                 }
-            } else {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "write_to: offset exceed current byte buffer",
-                ));
+
+                std::cmp::Ordering::Greater => {
+                    if offset + bytes.len() > buffer.len() {
+                        let lower_part = buffer.len() - offset;
+                        let additional_bytes = (offset + bytes.len()) - buffer.len();
+                        buffer[offset..lower_part]
+                            .copy_from_slice(bytes.slice(0..lower_part).as_ref());
+                        buffer.reserve(additional_bytes);
+                        buffer.put(bytes.slice(lower_part..));
+                    } else {
+                        buffer[offset..offset + bytes.len()].copy_from_slice(&bytes);
+                    }
+                }
+
+                std::cmp::Ordering::Less => {
+                    return Err(io::Error::new(
+                        io::ErrorKind::InvalidInput,
+                        "write_to: offset exceed current byte buffer",
+                    ))
+                }
             }
         } else {
             if let FileId::Chunk { .. } = id {

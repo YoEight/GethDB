@@ -36,14 +36,10 @@ impl BlockMeta {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct BlockMetas(Vec<BlockMeta>);
 
 impl BlockMetas {
-    pub fn new() -> Self {
-        Self(vec![])
-    }
-
     pub fn get_or_unwrap(&self, idx: usize) -> BlockMeta {
         self.0[idx]
     }
@@ -272,7 +268,7 @@ where
         let meta_offset = self.storage.offset(self.file_id())?;
         self.storage
             .append(self.file_id(), self.metas.serialize(self.buffer.split()))?;
-        self.meta_offset = meta_offset as u64;
+        self.meta_offset = meta_offset;
 
         self.buffer.put_u32_le(meta_offset as u32);
 
@@ -338,29 +334,27 @@ where
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
-        loop {
-            if self.block_idx >= self.table.len() {
-                return Ok(None);
-            }
-
-            if self.block.is_none() {
-                self.block = Some(self.table.read_block(self.block_idx)?);
-            }
-
-            if let Some(block) = self.block.as_ref() {
-                if let Some(entry) = block.try_read(self.entry_idx) {
-                    self.entry_idx += 1;
-
-                    return Ok(Some(entry));
-                }
-
-                self.block = None;
-                self.entry_idx = 0;
-                self.block_idx += 1;
-            }
-
+        if self.block_idx >= self.table.len() {
             return Ok(None);
         }
+
+        if self.block.is_none() {
+            self.block = Some(self.table.read_block(self.block_idx)?);
+        }
+
+        if let Some(block) = self.block.as_ref() {
+            if let Some(entry) = block.try_read(self.entry_idx) {
+                self.entry_idx += 1;
+
+                return Ok(Some(entry));
+            }
+
+            self.block = None;
+            self.entry_idx = 0;
+            self.block_idx += 1;
+        }
+
+        Ok(None)
     }
 }
 
@@ -374,7 +368,7 @@ pub struct ScanForward<'a, S> {
     candidates: VecDeque<usize>,
 }
 
-impl<'a, S> IteratorIO for ScanForward<'a, S>
+impl<S> IteratorIO for ScanForward<'_, S>
 where
     S: Storage,
 {
@@ -427,7 +421,7 @@ pub struct ScanBackward<'a, S> {
     candidates: VecDeque<usize>,
 }
 
-impl<'a, S> IteratorIO for ScanBackward<'a, S>
+impl<S> IteratorIO for ScanBackward<'_, S>
 where
     S: Storage,
 {
