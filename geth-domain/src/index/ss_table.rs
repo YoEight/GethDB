@@ -17,7 +17,7 @@ const SSTABLE_META_ENTRY_SIZE: usize =
 
 const SSTABLE_HEADER_SIZE: usize = std::mem::size_of::<u32>();
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BlockMeta {
     pub offset: u32,
     pub key: u64,
@@ -37,42 +37,55 @@ impl BlockMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-// TODO - Using bytes impedes peformance in our case because we can do many random accesses that waste time decoding integers.
-pub struct BlockMetas(Bytes);
+pub struct BlockMetas(Vec<BlockMeta>);
 
 impl BlockMetas {
-    pub fn new(bytes: Bytes) -> Self {
-        Self(bytes)
+    pub fn new() -> Self {
+        Self(vec![])
     }
 
-    pub fn read(&self, idx: usize) -> BlockMeta {
-        let offset = idx * SSTABLE_META_ENTRY_SIZE;
-        let mut bytes = self.0.clone();
+    pub fn get_or_unwrap(&self, idx: usize) -> BlockMeta {
+        self.0[idx]
+    }
 
-        bytes.advance(offset);
-        let mut bytes = bytes.copy_to_bytes(SSTABLE_META_ENTRY_SIZE);
-
-        BlockMeta {
-            offset: bytes.get_u32_le(),
-            key: bytes.get_u64_le(),
-            revision: bytes.get_u64_le(),
-        }
+    pub fn push(&mut self, offset: u32, key: u64, revision: u64) {
+        self.0.push(BlockMeta {
+            offset,
+            key,
+            revision,
+        });
     }
 
     pub fn len(&self) -> usize {
-        self.0.len() / SSTABLE_META_ENTRY_SIZE
+        self.0.len()
     }
 
     pub fn last_block_first_key_offset(&self) -> Option<usize> {
-        if self.len() == 0 {
-            return None;
-        }
-
-        Some(self.read(self.len() - 1).offset as usize)
+        Some(self.0.last()?.offset as usize)
     }
 
-    pub fn as_slice(&self) -> &[u8] {
-        self.0.as_ref()
+    pub fn from(mut buffer: Bytes) -> Self {
+        let mut inner = Vec::with_capacity(buffer.len() / SSTABLE_META_ENTRY_SIZE);
+
+        while buffer.has_remaining() {
+            inner.push(BlockMeta {
+                offset: buffer.get_u32_le(),
+                key: buffer.get_u64_le(),
+                revision: buffer.get_u64_le(),
+            });
+        }
+
+        Self(inner)
+    }
+
+    pub fn serialize(&self, mut buffer: BytesMut) -> Bytes {
+        for meta in &self.0 {
+            buffer.put_u32_le(meta.offset);
+            buffer.put_u64_le(meta.key);
+            buffer.put_u64_le(meta.revision);
+        }
+
+        buffer.freeze()
     }
 }
 
@@ -129,7 +142,7 @@ where
         Ok(SsTable {
             id: raw_id,
             storage,
-            metas: BlockMetas::new(metas),
+            metas: BlockMetas::from(metas),
             meta_offset,
             block_size,
             buffer,
@@ -152,7 +165,7 @@ where
 
         while low <= high {
             let mid = (low + high) / 2;
-            let meta = self.metas.read(mid as usize);
+            let meta = self.metas.get_or_unwrap(mid as usize);
 
             match meta.compare_key_id(key, revision) {
                 Ordering::Less => {
@@ -181,7 +194,7 @@ where
     }
 
     pub fn read_block(&self, block_idx: usize) -> io::Result<Block> {
-        let meta = self.metas.read(block_idx);
+        let meta = self.metas.get_or_unwrap(block_idx);
         let block_bytes =
             self.storage
                 .read_from(self.file_id(), meta.offset as u64, self.block_size)?;
@@ -213,7 +226,6 @@ where
         Values: IteratorIO<Item = (u64, u64, u64)>,
     {
         let mut builder = BlockMut::new(self.buffer.split(), self.block_size);
-        let mut metas = self.buffer.split();
         let mut block_start_offset = std::mem::size_of::<u32>();
 
         self.buffer.put_u32_le(self.block_size as u32);
@@ -227,9 +239,7 @@ where
             loop {
                 if builder.try_add(key, rev, pos) {
                     if builder.len() == 1 {
-                        metas.put_u32_le(block_start_offset as u32);
-                        metas.put_u64_le(key);
-                        metas.put_u64_le(rev);
+                        self.metas.push(block_start_offset as u32, key, rev);
                     }
 
                     break;
@@ -260,10 +270,8 @@ where
         }
 
         let meta_offset = self.storage.offset(self.file_id())?;
-        let metas = metas.freeze();
-
-        self.storage.append(self.file_id(), metas.clone())?;
-        self.metas = BlockMetas::new(metas);
+        self.storage
+            .append(self.file_id(), self.metas.serialize(self.buffer.split()))?;
         self.meta_offset = meta_offset as u64;
 
         self.buffer.put_u32_le(meta_offset as u32);
