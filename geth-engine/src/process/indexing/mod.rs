@@ -9,7 +9,7 @@ use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
 use std::io::BufRead;
-use std::sync::atomic::AtomicU64;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::task::JoinHandle;
 
@@ -32,6 +32,10 @@ enum IndexingReq {
         count: u64,
         dir: Direction,
     },
+
+    Chase {
+        position: u64,
+    },
 }
 
 impl IndexingReq {
@@ -47,6 +51,11 @@ impl IndexingReq {
                     _ => unreachable!(),
                 },
             }),
+
+            0x01 => Some(Self::Chase {
+                position: bytes.get_u64_le(),
+            }),
+
             _ => unreachable!(),
         }
     }
@@ -59,6 +68,7 @@ impl IndexingReq {
                 count,
                 dir,
             } => {
+                buffer.put_u8(0x00);
                 buffer.put_u64_le(key);
                 buffer.put_u64_le(start);
                 buffer.put_u64_le(count);
@@ -66,6 +76,11 @@ impl IndexingReq {
                     Direction::Forward => 0,
                     Direction::Backward => 1,
                 });
+            }
+
+            IndexingReq::Chase { position } => {
+                buffer.put_u8(0x01);
+                buffer.put_u64_le(position);
             }
         }
 
@@ -75,12 +90,14 @@ impl IndexingReq {
 
 pub enum IndexingResp {
     StreamDeleted,
+    Committed,
 }
 
 impl IndexingResp {
     fn serialize(self, mut buffer: BytesMut) -> Bytes {
         match self {
             IndexingResp::StreamDeleted => buffer.put_u8(0x00),
+            IndexingResp::Committed => buffer.put_u8(0x01),
         }
 
         buffer.split().freeze()
@@ -89,6 +106,7 @@ impl IndexingResp {
     fn deserialize(mut bytes: Bytes) -> Self {
         match bytes.get_u8() {
             0x00 => IndexingResp::StreamDeleted,
+            0x01 => IndexingResp::Committed,
             _ => unreachable!(),
         }
     }
@@ -122,12 +140,30 @@ where
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 
-        env.client.spawn(Chaser::new(chase_chk, lsm.clone()));
+        env.client
+            .spawn(Chaser::new(chase_chk.clone(), lsm.clone()));
 
         while let Some(item) = env.queue.recv().await {
             if let Item::Mail(mail) = item {
                 if let Some(req) = IndexingReq::try_from(mail.payload) {
                     match req {
+                        IndexingReq::Chase { position } => {
+                            // If we already know that the chaser process covered passed that
+                            // position, we can immediately return that data was committed to the
+                            // origin of the message.
+                            if chase_chk.load(Ordering::Acquire) >= position {
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    IndexingResp::Committed.serialize(env.buffer.split()),
+                                );
+
+                                continue;
+                            }
+
+                            // TODO - delegate to the chaser process.
+                        }
+
                         IndexingReq::Read {
                             key,
                             start,
