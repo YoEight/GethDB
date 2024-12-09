@@ -341,6 +341,8 @@ pub struct Mail {
     pub created: Instant,
 }
 
+impl Mail {}
+
 #[derive(Clone)]
 pub struct Process {
     pub id: Uuid,
@@ -592,7 +594,7 @@ impl ManagerClient {
         recv
     }
 
-    pub async fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
+    pub fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
         let _ = self.inner.send(ManagerCommand::Send {
             dest,
             item: Item::Mail(Mail {

@@ -1,32 +1,37 @@
-use super::{Item, Mail, ManagerClient, ProcessEnv, Runnable};
-use crate::domain::index::{new_revision_cache, CurrentRevision};
+use super::{Item, ProcessEnv, Runnable};
+use crate::domain::index::CurrentRevision;
 use crate::process::indexing::chaser::Chaser;
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use geth_common::{Direction, IteratorIO};
+use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
 use std::io::BufRead;
 use std::sync::atomic::AtomicU64;
-use std::sync::Arc;
-use tokio::sync::RwLock;
+use std::sync::{Arc, RwLock};
+use tokio::task::JoinHandle;
 
 mod chaser;
 mod committer;
 
 type RevisionCache = moka::sync::Cache<u64, u64>;
+
+pub fn new_revision_cache() -> RevisionCache {
+    moka::sync::Cache::<u64, u64>::builder()
+        .max_capacity(10_000)
+        .name("revision-cache")
+        .build()
+}
+
 enum IndexingReq {
-    Read { key: u64, start: u64, count: u64 },
-}
-
-enum IndexingResp {
-    StreamDeleted,
-}
-
-impl IndexingResp {
-    fn serialize(&self, buffer: &mut BytesMut) -> Bytes {
-        buffer.split().freeze()
-    }
+    Read {
+        key: u64,
+        start: u64,
+        count: u64,
+        dir: Direction,
+    },
 }
 
 impl IndexingReq {
@@ -36,7 +41,54 @@ impl IndexingReq {
                 key: bytes.get_u64_le(),
                 start: bytes.get_u64_le(),
                 count: bytes.get_u64_le(),
+                dir: match bytes.get_u8() {
+                    0x00 => Direction::Forward,
+                    0x01 => Direction::Backward,
+                    _ => unreachable!(),
+                },
             }),
+            _ => unreachable!(),
+        }
+    }
+
+    pub fn serialize(self, mut buffer: BytesMut) -> Bytes {
+        match self {
+            IndexingReq::Read {
+                key,
+                start,
+                count,
+                dir,
+            } => {
+                buffer.put_u64_le(key);
+                buffer.put_u64_le(start);
+                buffer.put_u64_le(count);
+                buffer.put_u8(match dir {
+                    Direction::Forward => 0,
+                    Direction::Backward => 1,
+                });
+            }
+        }
+
+        buffer.split().freeze()
+    }
+}
+
+pub enum IndexingResp {
+    StreamDeleted,
+}
+
+impl IndexingResp {
+    fn serialize(self, mut buffer: BytesMut) -> Bytes {
+        match self {
+            IndexingResp::StreamDeleted => buffer.put_u8(0x00),
+        }
+
+        buffer.split().freeze()
+    }
+
+    fn deserialize(mut bytes: Bytes) -> Self {
+        match bytes.get_u8() {
+            0x00 => IndexingResp::StreamDeleted,
             _ => unreachable!(),
         }
     }
@@ -76,12 +128,51 @@ where
             if let Item::Mail(mail) = item {
                 if let Some(req) = IndexingReq::try_from(mail.payload) {
                     match req {
-                        IndexingReq::Read { key, start, count } => {
+                        IndexingReq::Read {
+                            key,
+                            start,
+                            count,
+                            dir,
+                        } => {
                             let client = env.client.clone();
                             let wal = self.wal.clone();
                             let stream_cache = revision_cache.clone();
+                            let stream_lsm = lsm.clone();
+                            let stream_buffer = env.buffer.split();
 
-                            tokio::task::spawn_blocking(move || {});
+                            let _: JoinHandle<io::Result<()>> =
+                                tokio::task::spawn_blocking(move || {
+                                    let lsm = stream_lsm.read().unwrap();
+                                    let current_revision =
+                                        key_latest_revision(&lsm, stream_cache, key)?;
+
+                                    if current_revision.is_deleted() {
+                                        client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            IndexingResp::StreamDeleted.serialize(stream_buffer),
+                                        );
+
+                                        return Ok(());
+                                    }
+
+                                    let mut iter: Box<dyn IteratorIO<Item = BlockEntry>> = match dir
+                                    {
+                                        Direction::Forward => {
+                                            Box::new(lsm.scan_forward(key, start, count as usize))
+                                        }
+                                        Direction::Backward => {
+                                            Box::new(lsm.scan_backward(key, start, count as usize))
+                                        }
+                                    };
+
+                                    while let Some(item) = iter.next()? {
+                                        let record = wal.read_at(item.position)?;
+                                        client.reply(mail.origin, mail.correlation, record.payload);
+                                    }
+
+                                    Ok(())
+                                });
                         }
                     }
                 }
@@ -90,8 +181,8 @@ where
     }
 }
 
-pub fn current_revision<S>(
-    lsm: Lsm<S>,
+pub fn key_latest_revision<S>(
+    lsm: &Lsm<S>,
     cache: RevisionCache,
     stream_key: u64,
 ) -> io::Result<CurrentRevision>
