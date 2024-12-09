@@ -1,4 +1,4 @@
-use super::{Item, ProcessEnv, Runnable};
+use super::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::chaser::Chaser;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -117,8 +117,7 @@ pub struct Indexing<S, WAL> {
     wal: WALRef<WAL>,
 }
 
-#[async_trait::async_trait]
-impl<S, WAL> Runnable for Indexing<S, WAL>
+impl<S, WAL> RunnableRaw for Indexing<S, WAL>
 where
     S: Storage + Send + Sync + 'static,
     WAL: WriteAheadLog + Send + Sync + 'static,
@@ -127,23 +126,17 @@ where
         "indexing"
     }
 
-    async fn run(self: Box<Self>, mut env: ProcessEnv) {
+    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> io::Result<()> {
         let chase_chk = Arc::new(AtomicU64::new(0));
-        let lsm_storage = self.storage.clone();
-        // TODO - implement reporting to the manager when the indexing process crashed.
-        let lsm =
-            tokio::task::spawn_blocking(move || Lsm::load(LsmSettings::default(), lsm_storage))
-                .await
-                .unwrap()
-                .unwrap();
-
+        let lsm = Lsm::load(LsmSettings::default(), self.storage.clone())?;
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 
-        env.client
-            .spawn(Chaser::new(chase_chk.clone(), lsm.clone()));
+        let chaser_proc_id = env
+            .client
+            .spawn_raw(Chaser::new(chase_chk.clone(), lsm.clone()));
 
-        while let Some(item) = env.queue.recv().await {
+        while let Some(item) = env.queue.recv().ok() {
             if let Item::Mail(mail) = item {
                 if let Some(req) = IndexingReq::try_from(mail.payload) {
                     match req {
@@ -161,7 +154,10 @@ where
                                 continue;
                             }
 
-                            // TODO - delegate to the chaser process.
+                            let mut goalpost = env.buffer.split();
+                            goalpost.put_u64_le(position);
+
+                            env.client.send(chaser_proc_id, goalpost.freeze());
                         }
 
                         IndexingReq::Read {
@@ -214,6 +210,8 @@ where
                 }
             }
         }
+
+        Ok(())
     }
 }
 

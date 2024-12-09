@@ -1,6 +1,7 @@
-use crate::process::{ProcessEnv, Runnable};
+use crate::process::{ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
 use geth_domain::Lsm;
 use geth_mikoshi::storage::Storage;
+use std::io;
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, RwLock};
 
@@ -15,8 +16,7 @@ impl<S> Chaser<S> {
     }
 }
 
-#[async_trait::async_trait]
-impl<S> Runnable for Chaser<S>
+impl<S> RunnableRaw for Chaser<S>
 where
     S: Storage + Sync + Send + 'static,
 {
@@ -24,7 +24,7 @@ where
         "chaser"
     }
 
-    async fn run(self: Box<Self>, env: ProcessEnv) {
-        todo!()
+    fn run(self: Box<Self>, env: ProcessRawEnv) -> io::Result<()> {
+        Ok(())
     }
 }
