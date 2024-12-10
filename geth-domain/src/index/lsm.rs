@@ -147,6 +147,8 @@ where
     {
         while let Some((key, revision, position)) = values.next()? {
             self.active_table.put(key, revision, position);
+            // TODO - we shouldn't update the logical position when pushing to memtables. We must
+            // update logical_position only when flushing entries to ss_tables.
             self.logical_position = position;
         }
 

@@ -115,6 +115,7 @@ impl IndexingResp {
 pub struct Indexing<S, WAL> {
     storage: S,
     wal: WALRef<WAL>,
+    writer: Arc<AtomicU64>,
 }
 
 impl<S, WAL> RunnableRaw for Indexing<S, WAL>
@@ -132,9 +133,12 @@ where
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 
-        let chaser_proc_id = env
-            .client
-            .spawn_raw(Chaser::new(chase_chk.clone(), lsm.clone()));
+        let chaser_proc_id = env.client.spawn_raw(Chaser::new(
+            chase_chk.clone(),
+            self.writer.clone(),
+            lsm.clone(),
+            self.wal.clone(),
+        ));
 
         while let Some(item) = env.queue.recv().ok() {
             if let Item::Mail(mail) = item {
@@ -157,6 +161,7 @@ where
                             let mut goalpost = env.buffer.split();
                             goalpost.put_u64_le(position);
 
+                            // TODO - Serialize the target that needs its confirmation.
                             env.client.send(chaser_proc_id, goalpost.freeze());
                         }
 
