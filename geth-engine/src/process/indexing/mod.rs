@@ -1,6 +1,6 @@
 use super::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
 use crate::domain::index::CurrentRevision;
-use crate::process::indexing::chaser::Chaser;
+use crate::process::indexing::chaser::{Chaser, Chasing};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
@@ -158,11 +158,11 @@ where
                                 continue;
                             }
 
-                            let mut goalpost = env.buffer.split();
-                            goalpost.put_u64_le(position);
-
-                            // TODO - Serialize the target that needs its confirmation.
-                            env.client.send(chaser_proc_id, goalpost.freeze());
+                            env.client.send(
+                                chaser_proc_id,
+                                Chasing::new(mail.origin, mail.correlation, position)
+                                    .serialize(env.buffer.split()),
+                            );
                         }
 
                         IndexingReq::Read {

@@ -1,6 +1,5 @@
-use crate::process::indexing::IndexingReq::Chase;
 use crate::process::indexing::IndexingResp;
-use crate::process::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
+use crate::process::{Item, ProcessRawEnv, RunnableRaw};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::IteratorIO;
 use geth_domain::binary::models::{Event, Events};
@@ -8,7 +7,7 @@ use geth_domain::Lsm;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{Checkpoint, FileId, Storage};
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-use prost::{DecodeError, Message};
+use prost::Message;
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::mpsc::RecvTimeoutError;
@@ -23,7 +22,7 @@ pub struct Chaser<S, WAL> {
     wal: WALRef<WAL>,
 }
 
-struct Chasing {
+pub struct Chasing {
     origin: Uuid,
     correlation: Uuid,
     position: u64,
@@ -38,7 +37,7 @@ impl Chasing {
         }
     }
 
-    fn new(origin: Uuid, correlation: Uuid, position: u64) -> Self {
+    pub fn new(origin: Uuid, correlation: Uuid, position: u64) -> Self {
         Self {
             origin,
             correlation,
@@ -46,7 +45,7 @@ impl Chasing {
         }
     }
 
-    fn serialize(self, mut buffer: BytesMut) -> Bytes {
+    pub fn serialize(self, mut buffer: BytesMut) -> Bytes {
         buffer.put_u128_le(self.origin.to_u128_le());
         buffer.put_u128_le(self.correlation.to_u128_le());
         buffer.put_u64_le(self.position);
