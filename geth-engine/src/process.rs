@@ -30,6 +30,9 @@ use crate::process::storage::StorageService;
 pub use crate::process::subscriptions::SubscriptionsClient;
 use crate::process::write_request_manager::WriteRequestManagerClient;
 
+#[cfg(test)]
+mod tests;
+
 pub mod indexing;
 pub mod storage;
 mod subscriptions;
@@ -538,6 +541,16 @@ enum Item {
     Stream(Stream),
 }
 
+impl Item {
+    fn into_mail(self) -> Mail {
+        if let Item::Mail(mail) = self {
+            return mail;
+        }
+
+        panic!("item was not a mail");
+    }
+}
+
 enum RunnableType {
     Tokio {
         runnable: Box<dyn Runnable + Send + Sync + 'static>,
@@ -619,7 +632,7 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn spawn<R>(&self, run: R)
+    pub fn spawn<R>(&self, run: R)
     where
         R: Runnable + Send + Sync + 'static,
     {
@@ -656,11 +669,15 @@ impl ManagerClient {
     }
 
     pub fn send(&self, dest: Uuid, payload: Bytes) {
+        self.send_with_correlation(dest, Uuid::new_v4(), payload);
+    }
+
+    pub fn send_with_correlation(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
         let _ = self.inner.send(ManagerCommand::Send {
             dest,
             item: Item::Mail(Mail {
                 origin: self.id,
-                correlation: Uuid::new_v4(),
+                correlation,
                 payload,
                 created: Instant::now(),
             }),
@@ -744,7 +761,6 @@ async fn process_manager(
     sender: UnboundedSender<ManagerCommand>,
     mut queue: UnboundedReceiver<ManagerCommand>,
 ) {
-    let (sender, mut queue) = unbounded_channel();
     let mut manager = Manager {
         processes: Default::default(),
         sender,

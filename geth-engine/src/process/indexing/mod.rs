@@ -1,4 +1,4 @@
-use super::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
+use super::{Item, ProcessRawEnv, Runnable, RunnableRaw};
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::chaser::{Chaser, Chasing};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
