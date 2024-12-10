@@ -1,6 +1,12 @@
+use std::collections::HashMap;
+use std::time::Instant;
+use std::{io, thread};
+
+use bytes::{Bytes, BytesMut};
 use eyre::bail;
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use uuid::Uuid;
 
@@ -24,6 +30,7 @@ use crate::process::storage::StorageService;
 pub use crate::process::subscriptions::SubscriptionsClient;
 use crate::process::write_request_manager::WriteRequestManagerClient;
 
+pub mod indexing;
 pub mod storage;
 mod subscriptions;
 mod write_request_manager;
@@ -322,5 +329,432 @@ where
 
     pub fn subscriptions_client(&self) -> &SubscriptionsClient {
         &self.subscriptions
+    }
+}
+
+#[derive(Clone)]
+pub enum Mailbox {
+    Tokio(UnboundedSender<Item>),
+    Raw(std::sync::mpsc::Sender<Item>),
+}
+
+impl Mailbox {
+    pub fn send(&self, item: Item) -> bool {
+        match self {
+            Mailbox::Tokio(x) => x.send(item).is_ok(),
+            Mailbox::Raw(x) => x.send(item).is_ok(),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub struct Mail {
+    pub origin: Uuid,
+    pub correlation: Uuid,
+    pub payload: Bytes,
+    pub created: Instant,
+}
+
+impl Mail {}
+
+#[derive(Clone)]
+pub struct Process {
+    pub id: Uuid,
+    pub parent: Option<Uuid>,
+    pub name: &'static str,
+    pub mailbox: Mailbox,
+    pub created: Instant,
+}
+
+#[derive(Clone, Copy, PartialOrd, PartialEq, Ord, Eq, Hash)]
+struct ExchangeId {
+    dest: Uuid,
+    correlation: Uuid,
+}
+
+impl ExchangeId {
+    fn new(dest: Uuid, correlation: Uuid) -> Self {
+        Self { dest, correlation }
+    }
+}
+
+pub struct Manager {
+    processes: HashMap<Uuid, Process>,
+    sender: UnboundedSender<ManagerCommand>,
+    requests: HashMap<ExchangeId, oneshot::Sender<Mail>>,
+    wait_fors: HashMap<&'static str, Vec<oneshot::Sender<Uuid>>>,
+    streams: HashMap<Uuid, UnboundedSender<Bytes>>,
+    buffer: BytesMut,
+}
+
+impl Manager {
+    fn handle(&mut self, cmd: ManagerCommand) {
+        match cmd {
+            ManagerCommand::Spawn { parent, runnable } => {
+                let id = Uuid::new_v4();
+                let name = runnable.name();
+
+                let proc = match runnable {
+                    RunnableType::Tokio { runnable, resp } => {
+                        let (proc_sender, proc_queue) = unbounded_channel();
+
+                        tokio::spawn(runnable.run(ProcessEnv {
+                            id,
+                            queue: proc_queue,
+                            client: ManagerClient {
+                                id,
+                                parent,
+                                inner: self.sender.clone(),
+                            },
+                            buffer: self.buffer.split(),
+                        }));
+
+                        if let Some(resp) = resp {
+                            let _ = resp.send(id);
+                        }
+
+                        Process {
+                            id,
+                            parent: None,
+                            mailbox: Mailbox::Tokio(proc_sender),
+                            name,
+                            created: Instant::now(),
+                        }
+                    }
+
+                    RunnableType::Raw { runnable, resp } => {
+                        let (proc_sender, proc_queue) = std::sync::mpsc::channel();
+                        let manager_client = self.sender.clone();
+                        let manager_buffer = self.buffer.split();
+
+                        thread::spawn(move || {
+                            runnable.run(ProcessRawEnv {
+                                id,
+                                queue: proc_queue,
+                                client: ManagerClient {
+                                    id,
+                                    parent,
+                                    inner: manager_client,
+                                },
+                                buffer: manager_buffer,
+                            })
+                        });
+
+                        if let Some(resp) = resp {
+                            let _ = resp.send(id);
+                        }
+
+                        Process {
+                            id,
+                            parent: None,
+                            mailbox: Mailbox::Raw(proc_sender),
+                            name,
+                            created: Instant::now(),
+                        }
+                    }
+                };
+
+                self.processes.insert(id, proc);
+            }
+
+            ManagerCommand::Find { name, resp } => {
+                for proc in self.processes.values() {
+                    if proc.name == name {
+                        let _ = resp.send(Some(proc.id));
+                        return;
+                    }
+                }
+
+                let _ = resp.send(None);
+            }
+
+            ManagerCommand::Send { dest, item, resp } => match item {
+                Item::Mail(mail) => {
+                    if let Some(resp) = self
+                        .requests
+                        .remove(&ExchangeId::new(dest, mail.correlation))
+                    {
+                        let _ = resp.send(mail);
+                    } else if let Some(proc) = self.processes.get(&dest) {
+                        if let Some(resp) = resp {
+                            self.requests
+                                .insert(ExchangeId::new(dest, mail.correlation), resp);
+                        }
+
+                        let _ = proc.mailbox.send(Item::Mail(mail));
+                    }
+                }
+
+                Item::Stream(stream) => {
+                    if let Some(proc) = self.processes.get_mut(&dest) {
+                        self.streams.insert(stream.correlation, stream.sender);
+                        let mail = Mail {
+                            origin: stream.origin,
+                            correlation: stream.correlation,
+                            payload: stream.payload,
+                            created: stream.created,
+                        };
+
+                        let _ = proc.mailbox.send(Item::Mail(mail));
+                    }
+                }
+            },
+
+            ManagerCommand::WaitFor { name, resp } => {
+                for proc in self.processes.values() {
+                    if proc.name != name {
+                        continue;
+                    }
+
+                    let _ = resp.send(proc.id);
+                    return;
+                }
+
+                if let Some(backlog) = self.wait_fors.get_mut(name) {
+                    backlog.push(resp);
+                } else {
+                    self.wait_fors.insert(name, vec![resp]);
+                }
+            }
+
+            ManagerCommand::Shutdown { resp } => {
+                // TODO - implement the shutdown logic.
+                let _ = resp.send(());
+            }
+        }
+    }
+}
+
+struct Stream {
+    origin: Uuid,
+    correlation: Uuid,
+    payload: Bytes,
+    sender: UnboundedSender<Bytes>,
+    created: Instant,
+}
+
+enum Item {
+    Mail(Mail),
+    Stream(Stream),
+}
+
+enum RunnableType {
+    Tokio {
+        runnable: Box<dyn Runnable + Send + Sync + 'static>,
+        resp: Option<oneshot::Sender<Uuid>>,
+    },
+
+    Raw {
+        runnable: Box<dyn RunnableRaw + Send + Sync + 'static>,
+        resp: Option<std::sync::mpsc::Sender<Uuid>>,
+    },
+}
+
+impl RunnableType {
+    fn name(&self) -> &'static str {
+        match self {
+            RunnableType::Tokio { runnable, .. } => runnable.name(),
+            RunnableType::Raw { runnable, .. } => runnable.name(),
+        }
+    }
+}
+
+pub enum ManagerCommand {
+    Spawn {
+        parent: Option<Uuid>,
+        runnable: RunnableType,
+    },
+
+    Find {
+        name: &'static str,
+        resp: oneshot::Sender<Option<Uuid>>,
+    },
+
+    Send {
+        dest: Uuid,
+        item: Item,
+        resp: Option<oneshot::Sender<Mail>>,
+    },
+
+    WaitFor {
+        name: &'static str,
+        resp: oneshot::Sender<Uuid>,
+    },
+
+    Shutdown {
+        resp: oneshot::Sender<()>,
+    },
+}
+
+pub struct ProcessEnv {
+    id: Uuid,
+    queue: UnboundedReceiver<Item>,
+    client: ManagerClient,
+    buffer: BytesMut,
+}
+
+pub struct ProcessRawEnv {
+    id: Uuid,
+    queue: std::sync::mpsc::Receiver<Item>,
+    client: ManagerClient,
+    buffer: BytesMut,
+}
+
+#[async_trait::async_trait]
+pub trait Runnable {
+    fn name(&self) -> &'static str;
+    async fn run(self: Box<Self>, env: ProcessEnv);
+}
+
+pub trait RunnableRaw {
+    fn name(&self) -> &'static str;
+    fn run(self: Box<Self>, env: ProcessRawEnv) -> io::Result<()>;
+}
+
+#[derive(Clone)]
+pub struct ManagerClient {
+    id: Uuid,
+    parent: Option<Uuid>,
+    inner: UnboundedSender<ManagerCommand>,
+}
+
+impl ManagerClient {
+    pub async fn spawn<R>(&self, run: R)
+    where
+        R: Runnable + Send + Sync + 'static,
+    {
+        let _ = self.inner.send(ManagerCommand::Spawn {
+            parent: self.parent,
+            runnable: RunnableType::Tokio {
+                runnable: Box::new(run),
+                resp: None,
+            },
+        });
+    }
+
+    pub fn spawn_raw<R>(&self, run: R) -> Uuid
+    where
+        R: RunnableRaw + Send + Sync + 'static,
+    {
+        let (sender, receiver) = std::sync::mpsc::channel();
+        let _ = self.inner.send(ManagerCommand::Spawn {
+            parent: self.parent,
+            runnable: RunnableType::Raw {
+                runnable: Box::new(run),
+                resp: Some(sender),
+            },
+        });
+
+        receiver.recv().unwrap()
+    }
+
+    pub async fn find(&self, name: &'static str) -> Option<Uuid> {
+        let (resp, recv) = oneshot::channel();
+        let _ = self.inner.send(ManagerCommand::Find { name, resp });
+
+        recv.await.unwrap()
+    }
+
+    pub fn send(&self, dest: Uuid, payload: Bytes) {
+        let _ = self.inner.send(ManagerCommand::Send {
+            dest,
+            item: Item::Mail(Mail {
+                origin: self.id,
+                correlation: Uuid::new_v4(),
+                payload,
+                created: Instant::now(),
+            }),
+            resp: None,
+        });
+    }
+
+    pub async fn request(&self, dest: Uuid, payload: Bytes) -> Mail {
+        let (resp, recv) = oneshot::channel();
+        let _ = self.inner.send(ManagerCommand::Send {
+            dest,
+            item: Item::Mail(Mail {
+                origin: self.id,
+                correlation: Default::default(),
+                payload,
+                created: Instant::now(),
+            }),
+            resp: Some(resp),
+        });
+
+        recv.await.unwrap()
+    }
+
+    pub async fn request_stream(&self, dest: Uuid, payload: Bytes) -> UnboundedReceiver<Bytes> {
+        let (sender, recv) = unbounded_channel();
+        let _ = self.inner.send(ManagerCommand::Send {
+            dest,
+            item: Item::Stream(Stream {
+                origin: self.id,
+                correlation: Uuid::new_v4(),
+                created: Instant::now(),
+                payload,
+                sender,
+            }),
+            resp: None,
+        });
+
+        recv
+    }
+
+    pub fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
+        let _ = self.inner.send(ManagerCommand::Send {
+            dest,
+            item: Item::Mail(Mail {
+                origin: self.id,
+                correlation,
+                payload,
+                created: Instant::now(),
+            }),
+            resp: None,
+        });
+    }
+
+    pub async fn wait_for(&self, name: &'static str) -> Uuid {
+        let (resp, recv) = oneshot::channel();
+        let _ = self.inner.send(ManagerCommand::WaitFor { name, resp });
+
+        recv.await.unwrap()
+    }
+
+    pub async fn shutdown(&self) {
+        let (resp, recv) = oneshot::channel();
+        let _ = self.inner.send(ManagerCommand::Shutdown { resp });
+
+        recv.await.unwrap()
+    }
+}
+
+pub fn start_process_manager() -> ManagerClient {
+    let (sender, queue) = unbounded_channel();
+    tokio::spawn(process_manager(sender.clone(), queue));
+
+    ManagerClient {
+        id: Uuid::new_v4(),
+        parent: None,
+        inner: sender,
+    }
+}
+
+async fn process_manager(
+    sender: UnboundedSender<ManagerCommand>,
+    mut queue: UnboundedReceiver<ManagerCommand>,
+) {
+    let (sender, mut queue) = unbounded_channel();
+    let mut manager = Manager {
+        processes: Default::default(),
+        sender,
+        requests: Default::default(),
+        wait_fors: Default::default(),
+        streams: Default::default(),
+        buffer: BytesMut::new(),
+    };
+
+    while let Some(cmd) = queue.recv().await {
+        manager.handle(cmd);
     }
 }
