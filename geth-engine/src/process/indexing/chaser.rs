@@ -154,7 +154,9 @@ where
             let mut buffer = env.buffer.split();
             buffer.put_u64_le(chase_chk);
             lsm.storage()
-                .write_to(FileId::Checkpoint(Checkpoint::Index), 0, buffer.freeze())?
+                .write_to(FileId::Checkpoint(Checkpoint::Index), 0, buffer.freeze())?;
+
+            self.chk.store(chase_chk, Ordering::Release);
         }
     }
 }
