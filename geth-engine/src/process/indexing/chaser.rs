@@ -78,7 +78,7 @@ where
         "chaser"
     }
 
-    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> io::Result<()> {
+    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
         let mut target = None;
         let mut chase_chk = self.chk.load(Ordering::Acquire);
 
@@ -117,7 +117,7 @@ where
                 }
             };
 
-            let mut entries = self.wal.entries(chase_chk);
+            let entries = self.wal.entries(chase_chk);
             let mut lsm = self.lsm.write().unwrap();
             let values = entries.map(|entry| {
                 chase_chk += entry.position;

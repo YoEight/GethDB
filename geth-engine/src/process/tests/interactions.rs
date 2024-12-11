@@ -12,13 +12,15 @@ impl Runnable for EchoProc {
         "echo"
     }
 
-    async fn run(self: Box<Self>, mut env: ProcessEnv) {
+    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
         while let Some(item) = env.queue.recv().await {
             if let Item::Mail(mail) = item {
                 env.client
                     .reply(mail.origin, mail.correlation, mail.payload);
             }
         }
+
+        Ok(())
     }
 }
 
@@ -34,7 +36,7 @@ impl Runnable for Sink {
         "sink"
     }
 
-    async fn run(self: Box<Self>, mut env: ProcessEnv) {
+    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
         let proc_id = env.client.wait_for(self.target).await;
 
         for mail in self.mails {
@@ -47,6 +49,8 @@ impl Runnable for Sink {
                 let _ = self.sender.send(mail);
             }
         }
+
+        Ok(())
     }
 }
 
@@ -70,14 +74,14 @@ async fn test_spawn_and_receive_mails() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let manager = start_process_manager();
 
-    manager.spawn(EchoProc);
-    manager.spawn(Sink {
-        target: "echo",
-        sender,
-        mails,
-    });
-
-    let echo_proc_id = manager.wait_for("echo").await;
+    let echo_proc_id = manager.spawn(EchoProc).await;
+    manager
+        .spawn(Sink {
+            target: "echo",
+            sender,
+            mails,
+        })
+        .await;
 
     let mut count = 0u64;
     while count < 10 {

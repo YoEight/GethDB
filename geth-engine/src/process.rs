@@ -6,6 +6,7 @@ use bytes::{Bytes, BytesMut};
 use eyre::bail;
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use uuid::Uuid;
@@ -388,33 +389,55 @@ pub struct Manager {
     wait_fors: HashMap<&'static str, Vec<oneshot::Sender<Uuid>>>,
     streams: HashMap<Uuid, UnboundedSender<Bytes>>,
     buffer: BytesMut,
+    queue: UnboundedReceiver<ManagerCommand>,
+    closing: bool,
+    close_resp: Vec<oneshot::Sender<()>>,
 }
 
 impl Manager {
     fn handle(&mut self, cmd: ManagerCommand) {
         match cmd {
-            ManagerCommand::Spawn { parent, runnable } => {
+            ManagerCommand::Spawn {
+                parent,
+                runnable,
+                resp,
+            } => {
+                if self.closing {
+                    tracing::warn!(
+                        "process {} was not started because the process manager is shutting down",
+                        runnable.name()
+                    );
+
+                    return;
+                }
+
                 let id = Uuid::new_v4();
-                let name = runnable.name();
 
                 let proc = match runnable {
-                    RunnableType::Tokio { runnable, resp } => {
+                    RunnableType::Tokio(runnable) => {
                         let (proc_sender, proc_queue) = unbounded_channel();
+                        let name = runnable.name();
+                        let manager_sender = self.sender.clone();
+                        let buffer = self.buffer.split();
 
-                        tokio::spawn(runnable.run(ProcessEnv {
-                            id,
-                            queue: proc_queue,
-                            client: ManagerClient {
-                                id,
-                                parent,
-                                inner: self.sender.clone(),
-                            },
-                            buffer: self.buffer.split(),
-                        }));
+                        tokio::spawn(async move {
+                            let error = runnable
+                                .run(ProcessEnv {
+                                    id,
+                                    queue: proc_queue,
+                                    client: ManagerClient {
+                                        id,
+                                        parent,
+                                        inner: manager_sender.clone(),
+                                    },
+                                    buffer,
+                                })
+                                .await
+                                .err();
 
-                        if let Some(resp) = resp {
-                            let _ = resp.send(id);
-                        }
+                            let _ =
+                                manager_sender.send(ManagerCommand::ProcTerminated { id, error });
+                        });
 
                         Process {
                             id,
@@ -425,27 +448,30 @@ impl Manager {
                         }
                     }
 
-                    RunnableType::Raw { runnable, resp } => {
+                    RunnableType::Raw(runnable) => {
                         let (proc_sender, proc_queue) = std::sync::mpsc::channel();
                         let manager_client = self.sender.clone();
                         let manager_buffer = self.buffer.split();
+                        let name = runnable.name();
 
                         thread::spawn(move || {
-                            runnable.run(ProcessRawEnv {
-                                id,
-                                queue: proc_queue,
-                                client: ManagerClient {
+                            let error = runnable
+                                .run(ProcessRawEnv {
                                     id,
-                                    parent,
-                                    inner: manager_client,
-                                },
-                                buffer: manager_buffer,
-                            })
-                        });
+                                    queue: proc_queue,
+                                    client: ManagerClient {
+                                        id,
+                                        parent,
+                                        inner: manager_client.clone(),
+                                    },
+                                    buffer: manager_buffer,
+                                    handle: Handle::current(),
+                                })
+                                .err();
 
-                        if let Some(resp) = resp {
-                            let _ = resp.send(id);
-                        }
+                            let _ =
+                                manager_client.send(ManagerCommand::ProcTerminated { id, error });
+                        });
 
                         Process {
                             id,
@@ -457,6 +483,8 @@ impl Manager {
                     }
                 };
 
+                tracing::info!("process {}:{} has started", proc.name, id);
+                let _ = resp.send(id);
                 self.processes.insert(id, proc);
             }
 
@@ -520,9 +548,38 @@ impl Manager {
                 }
             }
 
+            ManagerCommand::ProcTerminated { id, error } => {
+                if let Some(proc) = self.processes.remove(&id) {
+                    if let Some(e) = error {
+                        tracing::error!("process {}:{} terminated with error {}", proc.name, id, e);
+                    } else {
+                        tracing::info!("process {}:{} terminated", proc.name, id);
+                    }
+
+                    tracing::debug!(
+                        "proceeding to terminate all child-processes related to {}:{}",
+                        proc.name,
+                        id
+                    );
+
+                    let mut ids = vec![];
+                    for (child_id, child) in &self.processes {
+                        if child.parent == Some(id) {
+                            ids.push(*child_id);
+                        }
+                    }
+
+                    for id in ids {
+                        if let Some(child) = self.processes.remove(&id) {
+                            tracing::info!("terminated child-process {}:{}", child.name, id);
+                        }
+                    }
+                }
+            }
+
             ManagerCommand::Shutdown { resp } => {
-                // TODO - implement the shutdown logic.
-                let _ = resp.send(());
+                self.closing = true;
+                self.close_resp.push(resp);
             }
         }
     }
@@ -552,22 +609,15 @@ impl Item {
 }
 
 enum RunnableType {
-    Tokio {
-        runnable: Box<dyn Runnable + Send + Sync + 'static>,
-        resp: Option<oneshot::Sender<Uuid>>,
-    },
-
-    Raw {
-        runnable: Box<dyn RunnableRaw + Send + Sync + 'static>,
-        resp: Option<std::sync::mpsc::Sender<Uuid>>,
-    },
+    Tokio(Box<dyn Runnable + Send + Sync + 'static>),
+    Raw(Box<dyn RunnableRaw + Send + Sync + 'static>),
 }
 
 impl RunnableType {
     fn name(&self) -> &'static str {
         match self {
-            RunnableType::Tokio { runnable, .. } => runnable.name(),
-            RunnableType::Raw { runnable, .. } => runnable.name(),
+            RunnableType::Tokio(x) => x.name(),
+            RunnableType::Raw(x) => x.name(),
         }
     }
 }
@@ -576,6 +626,7 @@ pub enum ManagerCommand {
     Spawn {
         parent: Option<Uuid>,
         runnable: RunnableType,
+        resp: oneshot::Sender<Uuid>,
     },
 
     Find {
@@ -592,6 +643,11 @@ pub enum ManagerCommand {
     WaitFor {
         name: &'static str,
         resp: oneshot::Sender<Uuid>,
+    },
+
+    ProcTerminated {
+        id: Uuid,
+        error: Option<eyre::Report>,
     },
 
     Shutdown {
@@ -611,17 +667,18 @@ pub struct ProcessRawEnv {
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     buffer: BytesMut,
+    handle: Handle,
 }
 
 #[async_trait::async_trait]
 pub trait Runnable {
     fn name(&self) -> &'static str;
-    async fn run(self: Box<Self>, env: ProcessEnv);
+    async fn run(self: Box<Self>, env: ProcessEnv) -> eyre::Result<()>;
 }
 
 pub trait RunnableRaw {
     fn name(&self) -> &'static str;
-    fn run(self: Box<Self>, env: ProcessRawEnv) -> io::Result<()>;
+    fn run(self: Box<Self>, env: ProcessRawEnv) -> eyre::Result<()>;
 }
 
 #[derive(Clone)]
@@ -632,33 +689,32 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub fn spawn<R>(&self, run: R)
+    pub async fn spawn<R>(&self, run: R) -> Uuid
     where
         R: Runnable + Send + Sync + 'static,
     {
+        let (resp, receiver) = oneshot::channel();
         let _ = self.inner.send(ManagerCommand::Spawn {
             parent: self.parent,
-            runnable: RunnableType::Tokio {
-                runnable: Box::new(run),
-                resp: None,
-            },
+            runnable: RunnableType::Tokio(Box::new(run)),
+            resp,
         });
+
+        receiver.await.unwrap()
     }
 
-    pub fn spawn_raw<R>(&self, run: R) -> Uuid
+    pub async fn spawn_raw<R>(&self, run: R) -> Uuid
     where
         R: RunnableRaw + Send + Sync + 'static,
     {
-        let (sender, receiver) = std::sync::mpsc::channel();
+        let (resp, receiver) = oneshot::channel();
         let _ = self.inner.send(ManagerCommand::Spawn {
             parent: self.parent,
-            runnable: RunnableType::Raw {
-                runnable: Box::new(run),
-                resp: Some(sender),
-            },
+            runnable: RunnableType::Raw(Box::new(run)),
+            resp,
         });
 
-        receiver.recv().unwrap()
+        receiver.await.unwrap()
     }
 
     pub async fn find(&self, name: &'static str) -> Option<Uuid> {
@@ -759,7 +815,7 @@ pub fn start_process_manager() -> ManagerClient {
 
 async fn process_manager(
     sender: UnboundedSender<ManagerCommand>,
-    mut queue: UnboundedReceiver<ManagerCommand>,
+    queue: UnboundedReceiver<ManagerCommand>,
 ) {
     let mut manager = Manager {
         processes: Default::default(),
@@ -768,9 +824,12 @@ async fn process_manager(
         wait_fors: Default::default(),
         streams: Default::default(),
         buffer: BytesMut::new(),
+        closing: false,
+        close_resp: vec![],
+        queue,
     };
 
-    while let Some(cmd) = queue.recv().await {
+    while let Some(cmd) = manager.queue.recv().await {
         manager.handle(cmd);
     }
 }

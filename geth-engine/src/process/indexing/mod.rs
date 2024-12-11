@@ -1,4 +1,4 @@
-use super::{Item, ProcessRawEnv, Runnable, RunnableRaw};
+use super::{Item, ProcessRawEnv, RunnableRaw};
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::chaser::{Chaser, Chasing};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
@@ -8,7 +8,6 @@ use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
-use std::io::BufRead;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
 use tokio::task::JoinHandle;
@@ -127,18 +126,18 @@ where
         "indexing"
     }
 
-    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> io::Result<()> {
+    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
         let chase_chk = Arc::new(AtomicU64::new(0));
         let lsm = Lsm::load(LsmSettings::default(), self.storage.clone())?;
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 
-        let chaser_proc_id = env.client.spawn_raw(Chaser::new(
+        let chaser_proc_id = env.handle.block_on(env.client.spawn_raw(Chaser::new(
             chase_chk.clone(),
             self.writer.clone(),
             lsm.clone(),
             self.wal.clone(),
-        ));
+        )));
 
         while let Some(item) = env.queue.recv().ok() {
             if let Item::Mail(mail) = item {
