@@ -96,3 +96,39 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_simple_request() -> eyre::Result<()> {
+    let mut buffer = BytesMut::new();
+    let manager = start_process_manager();
+    let proc_id = manager.spawn(EchoProc).await?;
+
+    let random_uuid = Uuid::new_v4();
+    buffer.put_u128_le(random_uuid.to_u128_le());
+    let mut resp = manager.request(proc_id, buffer.split().freeze()).await?;
+
+    assert_eq!(proc_id, resp.origin);
+    assert_eq!(random_uuid, Uuid::from_u128_le(resp.payload.get_u128_le()));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_shutdown_reported_properly() -> eyre::Result<()> {
+    let mut buffer = BytesMut::new();
+    let manager = start_process_manager();
+    let proc_id = manager.spawn(EchoProc).await?;
+
+    let random_uuid = Uuid::new_v4();
+    buffer.put_u128_le(random_uuid.to_u128_le());
+    let mut resp = manager.request(proc_id, buffer.split().freeze()).await?;
+
+    assert_eq!(proc_id, resp.origin);
+    assert_eq!(random_uuid, Uuid::from_u128_le(resp.payload.get_u128_le()));
+
+    manager.shutdown().await?;
+
+    assert!(manager.spawn(EchoProc).await.is_err());
+
+    Ok(())
+}

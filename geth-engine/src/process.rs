@@ -392,25 +392,21 @@ pub struct Manager {
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
     close_resp: Vec<oneshot::Sender<()>>,
+    processes_shutting_down: usize,
 }
 
 impl Manager {
     fn handle(&mut self, cmd: ManagerCommand) {
+        if self.closing && !cmd.is_shutdown_related() {
+            return;
+        }
+
         match cmd {
             ManagerCommand::Spawn {
                 parent,
                 runnable,
                 resp,
             } => {
-                if self.closing {
-                    tracing::warn!(
-                        "process {} was not started because the process manager is shutting down",
-                        runnable.name()
-                    );
-
-                    return;
-                }
-
                 let id = Uuid::new_v4();
 
                 let proc = match runnable {
@@ -503,7 +499,7 @@ impl Manager {
                 Item::Mail(mail) => {
                     if let Some(resp) = self
                         .requests
-                        .remove(&ExchangeId::new(dest, mail.correlation))
+                        .remove(&ExchangeId::new(mail.origin, mail.correlation))
                     {
                         let _ = resp.send(mail);
                     } else if let Some(proc) = self.processes.get(&dest) {
@@ -575,10 +571,38 @@ impl Manager {
                         }
                     }
                 }
+
+                if self.closing {
+                    self.processes_shutting_down = self
+                        .processes_shutting_down
+                        .checked_sub(1)
+                        .unwrap_or_default();
+
+                    if self.processes_shutting_down == 0 {
+                        tracing::info!("process manager completed shutdown");
+                        for resp in self.close_resp.drain(..) {
+                            let _ = resp.send(());
+                        }
+
+                        self.queue.close();
+                    }
+                }
             }
 
             ManagerCommand::Shutdown { resp } => {
-                self.closing = true;
+                if !self.closing {
+                    self.closing = true;
+                    self.processes_shutting_down = self.processes.len();
+
+                    if self.processes_shutting_down == 0 {
+                        let _ = resp.send(());
+                        self.queue.close();
+                        return;
+                    }
+
+                    self.processes.clear();
+                }
+
                 self.close_resp.push(resp);
             }
         }
@@ -653,6 +677,15 @@ pub enum ManagerCommand {
     Shutdown {
         resp: oneshot::Sender<()>,
     },
+}
+
+impl ManagerCommand {
+    fn is_shutdown_related(&self) -> bool {
+        match self {
+            ManagerCommand::ProcTerminated { .. } | ManagerCommand::Shutdown { .. } => true,
+            _ => false,
+        }
+    }
 }
 
 pub struct ProcessEnv {
@@ -870,11 +903,14 @@ impl ManagerClient {
         }
     }
 
-    pub async fn shutdown(&self) {
+    pub async fn shutdown(&self) -> eyre::Result<()> {
         let (resp, recv) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::Shutdown { resp });
+        if self.inner.send(ManagerCommand::Shutdown { resp }).is_err() {
+            return Ok(());
+        }
 
-        recv.await.unwrap()
+        let _ = recv.await;
+        Ok(())
     }
 }
 
@@ -903,6 +939,7 @@ async fn process_manager(
         closing: false,
         close_resp: vec![],
         queue,
+        processes_shutting_down: 0,
     };
 
     while let Some(cmd) = manager.queue.recv().await {
