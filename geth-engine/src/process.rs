@@ -689,109 +689,185 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn spawn<R>(&self, run: R) -> Uuid
+    pub async fn spawn<R>(&self, run: R) -> eyre::Result<Uuid>
     where
         R: Runnable + Send + Sync + 'static,
     {
         let (resp, receiver) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::Spawn {
-            parent: self.parent,
-            runnable: RunnableType::Tokio(Box::new(run)),
-            resp,
-        });
+        if self
+            .inner
+            .send(ManagerCommand::Spawn {
+                parent: self.parent,
+                runnable: RunnableType::Tokio(Box::new(run)),
+                resp,
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        receiver.await.unwrap()
+        match receiver.await {
+            Ok(id) => Ok(id),
+            Err(_) => eyre::bail!("process manager has shutdown"),
+        }
     }
 
-    pub async fn spawn_raw<R>(&self, run: R) -> Uuid
+    pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<Uuid>
     where
         R: RunnableRaw + Send + Sync + 'static,
     {
         let (resp, receiver) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::Spawn {
-            parent: self.parent,
-            runnable: RunnableType::Raw(Box::new(run)),
-            resp,
-        });
+        if self
+            .inner
+            .send(ManagerCommand::Spawn {
+                parent: self.parent,
+                runnable: RunnableType::Raw(Box::new(run)),
+                resp,
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        receiver.await.unwrap()
+        match receiver.await {
+            Ok(id) => Ok(id),
+            Err(_) => eyre::bail!("process manager has shutdown"),
+        }
     }
 
-    pub async fn find(&self, name: &'static str) -> Option<Uuid> {
-        let (resp, recv) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::Find { name, resp });
+    pub async fn find(&self, name: &'static str) -> eyre::Result<Option<Uuid>> {
+        let (resp, receiver) = oneshot::channel();
+        if self
+            .inner
+            .send(ManagerCommand::Find { name, resp })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        recv.await.unwrap()
+        match receiver.await {
+            Ok(id) => Ok(id),
+            Err(_) => eyre::bail!("process manager has shutdown"),
+        }
     }
 
-    pub fn send(&self, dest: Uuid, payload: Bytes) {
-        self.send_with_correlation(dest, Uuid::new_v4(), payload);
+    pub fn send(&self, dest: Uuid, payload: Bytes) -> eyre::Result<()> {
+        self.send_with_correlation(dest, Uuid::new_v4(), payload)
     }
 
-    pub fn send_with_correlation(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
-        let _ = self.inner.send(ManagerCommand::Send {
-            dest,
-            item: Item::Mail(Mail {
-                origin: self.id,
-                correlation,
-                payload,
-                created: Instant::now(),
-            }),
-            resp: None,
-        });
+    pub fn send_with_correlation(
+        &self,
+        dest: Uuid,
+        correlation: Uuid,
+        payload: Bytes,
+    ) -> eyre::Result<()> {
+        if self
+            .inner
+            .send(ManagerCommand::Send {
+                dest,
+                item: Item::Mail(Mail {
+                    origin: self.id,
+                    correlation,
+                    payload,
+                    created: Instant::now(),
+                }),
+                resp: None,
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
+
+        Ok(())
     }
 
-    pub async fn request(&self, dest: Uuid, payload: Bytes) -> Mail {
-        let (resp, recv) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::Send {
-            dest,
-            item: Item::Mail(Mail {
-                origin: self.id,
-                correlation: Default::default(),
-                payload,
-                created: Instant::now(),
-            }),
-            resp: Some(resp),
-        });
+    pub async fn request(&self, dest: Uuid, payload: Bytes) -> eyre::Result<Mail> {
+        let (resp, receiver) = oneshot::channel();
+        if self
+            .inner
+            .send(ManagerCommand::Send {
+                dest,
+                item: Item::Mail(Mail {
+                    origin: self.id,
+                    correlation: Default::default(),
+                    payload,
+                    created: Instant::now(),
+                }),
+                resp: Some(resp),
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        recv.await.unwrap()
+        match receiver.await {
+            Ok(mail) => Ok(mail),
+            Err(_) => eyre::bail!("process manager has shutdown"),
+        }
     }
 
-    pub async fn request_stream(&self, dest: Uuid, payload: Bytes) -> UnboundedReceiver<Bytes> {
-        let (sender, recv) = unbounded_channel();
-        let _ = self.inner.send(ManagerCommand::Send {
-            dest,
-            item: Item::Stream(Stream {
-                origin: self.id,
-                correlation: Uuid::new_v4(),
-                created: Instant::now(),
-                payload,
-                sender,
-            }),
-            resp: None,
-        });
+    pub async fn request_stream(
+        &self,
+        dest: Uuid,
+        payload: Bytes,
+    ) -> eyre::Result<UnboundedReceiver<Bytes>> {
+        let (sender, receiver) = unbounded_channel();
+        if self
+            .inner
+            .send(ManagerCommand::Send {
+                dest,
+                item: Item::Stream(Stream {
+                    origin: self.id,
+                    correlation: Uuid::new_v4(),
+                    created: Instant::now(),
+                    payload,
+                    sender,
+                }),
+                resp: None,
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        recv
+        Ok(receiver)
     }
 
-    pub fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) {
-        let _ = self.inner.send(ManagerCommand::Send {
-            dest,
-            item: Item::Mail(Mail {
-                origin: self.id,
-                correlation,
-                payload,
-                created: Instant::now(),
-            }),
-            resp: None,
-        });
+    pub fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) -> eyre::Result<()> {
+        if self
+            .inner
+            .send(ManagerCommand::Send {
+                dest,
+                item: Item::Mail(Mail {
+                    origin: self.id,
+                    correlation,
+                    payload,
+                    created: Instant::now(),
+                }),
+                resp: None,
+            })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
+
+        Ok(())
     }
 
-    pub async fn wait_for(&self, name: &'static str) -> Uuid {
-        let (resp, recv) = oneshot::channel();
-        let _ = self.inner.send(ManagerCommand::WaitFor { name, resp });
+    pub async fn wait_for(&self, name: &'static str) -> eyre::Result<Uuid> {
+        let (resp, receiver) = oneshot::channel();
+        if self
+            .inner
+            .send(ManagerCommand::WaitFor { name, resp })
+            .is_err()
+        {
+            eyre::bail!("process manager has shutdown");
+        }
 
-        recv.await.unwrap()
+        match receiver.await {
+            Ok(id) => Ok(id),
+            Err(_) => eyre::bail!("process manager has shutdown"),
+        }
     }
 
     pub async fn shutdown(&self) {

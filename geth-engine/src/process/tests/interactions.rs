@@ -16,7 +16,7 @@ impl Runnable for EchoProc {
         while let Some(item) = env.queue.recv().await {
             if let Item::Mail(mail) = item {
                 env.client
-                    .reply(mail.origin, mail.correlation, mail.payload);
+                    .reply(mail.origin, mail.correlation, mail.payload)?;
             }
         }
 
@@ -37,11 +37,11 @@ impl Runnable for Sink {
     }
 
     async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
-        let proc_id = env.client.wait_for(self.target).await;
+        let proc_id = env.client.wait_for(self.target).await?;
 
         for mail in self.mails {
             env.client
-                .send_with_correlation(proc_id, mail.correlation, mail.payload);
+                .send_with_correlation(proc_id, mail.correlation, mail.payload)?;
         }
 
         while let Some(item) = env.queue.recv().await {
@@ -55,7 +55,7 @@ impl Runnable for Sink {
 }
 
 #[tokio::test(flavor = "multi_thread")]
-async fn test_spawn_and_receive_mails() {
+async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let mut mails = vec![];
     let correlation = Uuid::new_v4();
@@ -74,14 +74,14 @@ async fn test_spawn_and_receive_mails() {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel();
     let manager = start_process_manager();
 
-    let echo_proc_id = manager.spawn(EchoProc).await;
+    let echo_proc_id = manager.spawn(EchoProc).await?;
     manager
         .spawn(Sink {
             target: "echo",
             sender,
             mails,
         })
-        .await;
+        .await?;
 
     let mut count = 0u64;
     while count < 10 {
@@ -93,4 +93,6 @@ async fn test_spawn_and_receive_mails() {
 
         count += 1;
     }
+
+    Ok(())
 }

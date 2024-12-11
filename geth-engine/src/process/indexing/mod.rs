@@ -2,6 +2,7 @@ use super::{Item, ProcessRawEnv, RunnableRaw};
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::chaser::{Chaser, Chasing};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use eyre::Context;
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -137,7 +138,7 @@ where
             self.writer.clone(),
             lsm.clone(),
             self.wal.clone(),
-        )));
+        )))?;
 
         while let Some(item) = env.queue.recv().ok() {
             if let Item::Mail(mail) = item {
@@ -152,7 +153,7 @@ where
                                     mail.origin,
                                     mail.correlation,
                                     IndexingResp::Committed.serialize(env.buffer.split()),
-                                );
+                                )?;
 
                                 continue;
                             }
@@ -161,7 +162,7 @@ where
                                 chaser_proc_id,
                                 Chasing::new(mail.origin, mail.correlation, position)
                                     .serialize(env.buffer.split()),
-                            );
+                            )?;
                         }
 
                         IndexingReq::Read {
@@ -176,9 +177,15 @@ where
                             let stream_lsm = lsm.clone();
                             let stream_buffer = env.buffer.split();
 
-                            let _: JoinHandle<io::Result<()>> =
+                            // TODO - Need to handle cases when the spawn computation failed.
+                            // We need to communicate that something when bad for whoever asked for
+                            // that request to be executed.
+                            let _: JoinHandle<eyre::Result<()>> =
                                 tokio::task::spawn_blocking(move || {
-                                    let lsm = stream_lsm.read().unwrap();
+                                    let lsm = stream_lsm.read().map_err(|e| {
+                                        eyre::eyre!("posoined lock when reading the index: {}", e)
+                                    })?;
+
                                     let current_revision =
                                         key_latest_revision(&lsm, stream_cache, key)?;
 
@@ -187,7 +194,7 @@ where
                                             mail.origin,
                                             mail.correlation,
                                             IndexingResp::StreamDeleted.serialize(stream_buffer),
-                                        );
+                                        )?;
 
                                         return Ok(());
                                     }
@@ -204,7 +211,11 @@ where
 
                                     while let Some(item) = iter.next()? {
                                         let record = wal.read_at(item.position)?;
-                                        client.reply(mail.origin, mail.correlation, record.payload);
+                                        client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            record.payload,
+                                        )?;
                                     }
 
                                     Ok(())

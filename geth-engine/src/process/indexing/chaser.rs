@@ -105,7 +105,7 @@ where
                                 msg.origin,
                                 msg.correlation,
                                 IndexingResp::Committed.serialize(env.buffer.split()),
-                            );
+                            )?;
 
                             continue;
                         }
@@ -119,22 +119,25 @@ where
 
             let entries = self.wal.entries(chase_chk);
             let mut lsm = self.lsm.write().unwrap();
-            let values = entries.map(|entry| {
+            let values = entries.map_io(|entry| {
                 chase_chk += entry.position;
 
                 match Events::decode(entry.payload) {
                     Err(e) => {
-                        panic!("cannot decode recorded events: {}", e);
+                        return Err(io::Error::new(
+                            io::ErrorKind::InvalidData,
+                            format!("cannot decode recorded events: {}", e),
+                        ));
                     }
 
                     Ok(record) => match record.event.unwrap() {
-                        Event::RecordedEvent(event) => (
+                        Event::RecordedEvent(event) => Ok((
                             mikoshi_hash(&event.stream_name),
                             event.revision,
                             entry.position,
-                        ),
+                        )),
                         Event::StreamDeleted(deleted) => {
-                            (mikoshi_hash(&deleted.stream_name), u64::MAX, entry.position)
+                            Ok((mikoshi_hash(&deleted.stream_name), u64::MAX, entry.position))
                         }
                     },
                 }
@@ -147,7 +150,7 @@ where
                     origin,
                     correlation,
                     IndexingResp::Committed.serialize(env.buffer.split()),
-                );
+                )?;
             }
 
             let mut buffer = env.buffer.split();
