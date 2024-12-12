@@ -387,7 +387,6 @@ pub struct Manager {
     sender: UnboundedSender<ManagerCommand>,
     requests: HashMap<ExchangeId, oneshot::Sender<Mail>>,
     wait_fors: HashMap<&'static str, Vec<oneshot::Sender<Uuid>>>,
-    streams: HashMap<Uuid, UnboundedSender<Bytes>>,
     buffer: BytesMut,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
@@ -514,15 +513,7 @@ impl Manager {
 
                 Item::Stream(stream) => {
                     if let Some(proc) = self.processes.get_mut(&dest) {
-                        self.streams.insert(stream.correlation, stream.sender);
-                        let mail = Mail {
-                            origin: stream.origin,
-                            correlation: stream.correlation,
-                            payload: stream.payload,
-                            created: stream.created,
-                        };
-
-                        let _ = proc.mailbox.send(Item::Mail(mail));
+                        let _ = proc.mailbox.send(Item::Stream(stream));
                     }
                 }
             },
@@ -934,7 +925,6 @@ async fn process_manager(
         sender,
         requests: Default::default(),
         wait_fors: Default::default(),
-        streams: Default::default(),
         buffer: BytesMut::new(),
         closing: false,
         close_resp: vec![],

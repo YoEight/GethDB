@@ -54,6 +54,32 @@ impl Runnable for Sink {
     }
 }
 
+struct StreamerProc;
+
+#[async_trait::async_trait]
+impl Runnable for StreamerProc {
+    fn name(&self) -> &'static str {
+        "streamer"
+    }
+
+    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
+        while let Some(item) = env.queue.recv().await {
+            if let Item::Stream(mut stream) = item {
+                while stream.payload.has_remaining() {
+                    let value = stream.payload.get_u64_le();
+                    env.buffer.put_u64_le(value);
+
+                    if stream.sender.send(env.buffer.split().freeze()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
 #[tokio::test(flavor = "multi_thread")]
 async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
@@ -98,6 +124,18 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
 }
 
 #[tokio::test(flavor = "multi_thread")]
+async fn test_find_proc() -> eyre::Result<()> {
+    let manager = start_process_manager();
+    let proc_id = manager.spawn(EchoProc).await?;
+    let find_proc_id = manager.find("echo").await?;
+
+    assert!(find_proc_id.is_some());
+    assert_eq!(proc_id, find_proc_id.unwrap());
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
 async fn test_simple_request() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager();
@@ -109,6 +147,34 @@ async fn test_simple_request() -> eyre::Result<()> {
 
     assert_eq!(proc_id, resp.origin);
     assert_eq!(random_uuid, Uuid::from_u128_le(resp.payload.get_u128_le()));
+
+    Ok(())
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn test_simple_streaming() -> eyre::Result<()> {
+    let mut buffer = BytesMut::new();
+    let manager = start_process_manager();
+    let proc_id = manager.spawn(StreamerProc).await?;
+    let mut input = vec![];
+
+    for i in 0..10 {
+        buffer.put_u64_le(i);
+        input.push(i);
+    }
+
+    let mut resp = manager
+        .request_stream(proc_id, buffer.split().freeze())
+        .await?;
+
+    let mut output = vec![];
+
+    while let Some(mut msg) = resp.recv().await {
+        output.push(msg.get_u64_le());
+    }
+
+    assert_eq!(input.len(), output.len());
+    assert_eq!(input, output);
 
     Ok(())
 }
