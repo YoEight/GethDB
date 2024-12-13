@@ -80,7 +80,7 @@ impl Runnable for StreamerProc {
     }
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let mut mails = vec![];
@@ -123,7 +123,7 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_find_proc() -> eyre::Result<()> {
     let manager = start_process_manager();
     let proc_id = manager.spawn(EchoProc).await?;
@@ -135,7 +135,7 @@ async fn test_find_proc() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_simple_request() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager();
@@ -151,7 +151,7 @@ async fn test_simple_request() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_simple_streaming() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager();
@@ -179,7 +179,7 @@ async fn test_simple_streaming() -> eyre::Result<()> {
     Ok(())
 }
 
-#[tokio::test(flavor = "multi_thread")]
+#[tokio::test]
 async fn test_shutdown_reported_properly() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager();

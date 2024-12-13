@@ -1,8 +1,6 @@
 use super::{Item, ManagerClient, ProcessEnv, ProcessRawEnv, RunnableRaw};
 use crate::domain::index::CurrentRevision;
-use crate::process::indexing::chaser::{Chaser, Chasing};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use futures::SinkExt;
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -11,12 +9,10 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 use std::io;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
+use tokio::runtime::Handle;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
-
-mod chaser;
-mod committer;
 
 type RevisionCache = moka::sync::Cache<u64, u64>;
 
@@ -67,13 +63,6 @@ impl IndexClient {
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 
-    pub async fn chase(&mut self, position: u64) -> eyre::Result<()> {
-        let payload = IndexingReq::Chase { position }.serialize(self.buffer.split());
-        let resp = self.inner.request(self.target, payload).await?;
-
-        IndexingResp::try_from(resp.payload)?.expect(IndexingResp::Committed)
-    }
-
     pub async fn read(
         &mut self,
         key: u64,
@@ -81,14 +70,7 @@ impl IndexClient {
         count: usize,
         dir: Direction,
     ) -> eyre::Result<Streaming> {
-        let payload = IndexingReq::Read {
-            key,
-            start,
-            count: count as u64,
-            dir,
-        }
-        .serialize(self.buffer.split());
-
+        let payload = IndexingReq::read(self.buffer.split(), key, start, count, dir);
         let mut inner = self.inner.request_stream(self.target, payload).await?;
 
         if let Some(bytes) = inner.recv().await {
@@ -103,6 +85,54 @@ impl IndexClient {
 
         eyre::bail!("index process is no longer reachable");
     }
+
+    pub async fn store<I>(&mut self, key: u64, entries: I) -> eyre::Result<()>
+    where
+        I: IntoIterator<Item = (u64, u64)>,
+    {
+        let mut req = IndexingReq::store(self.buffer.split(), key);
+
+        for (revision, position) in entries {
+            req.put_entry(revision, position);
+        }
+
+        let resp = self.inner.request(self.target, req.build()).await?;
+
+        IndexingResp::try_from(resp.payload)?.expect(IndexingResp::Committed)
+    }
+
+    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<u64> {
+        let req = IndexingReq::latest_revision(self.buffer.split(), key);
+        let mut resp = self.inner.request(self.target, req).await?;
+
+        if resp.payload.len() == 1 {
+            eyre::bail!("error when looking the latest version of key {}", key);
+        }
+
+        Ok(resp.payload.get_u64_le())
+    }
+}
+
+pub struct StoreRequestBuilder {
+    inner: BytesMut,
+}
+
+impl StoreRequestBuilder {
+    pub fn new(mut inner: BytesMut, key: u64) -> Self {
+        inner.put_u8(0x01);
+        inner.put_u64_le(key);
+
+        Self { inner }
+    }
+
+    pub fn put_entry(&mut self, revision: u64, position: u64) {
+        self.inner.put_u64_le(revision);
+        self.inner.put_u64_le(position);
+    }
+
+    pub fn build(self) -> Bytes {
+        self.inner.freeze()
+    }
 }
 
 enum IndexingReq {
@@ -113,8 +143,13 @@ enum IndexingReq {
         dir: Direction,
     },
 
-    Chase {
-        position: u64,
+    Store {
+        key: u64,
+        entries: Bytes,
+    },
+
+    LatestRevision {
+        key: u64,
     },
 }
 
@@ -132,39 +167,40 @@ impl IndexingReq {
                 },
             }),
 
-            0x01 => Some(Self::Chase {
-                position: bytes.get_u64_le(),
+            0x01 => Some(Self::Store {
+                key: bytes.get_u64_le(),
+                entries: bytes,
+            }),
+
+            0x02 => Some(Self::LatestRevision {
+                key: bytes.get_u64_le(),
             }),
 
             _ => unreachable!(),
         }
     }
 
-    pub fn serialize(self, mut buffer: BytesMut) -> Bytes {
-        match self {
-            IndexingReq::Read {
-                key,
-                start,
-                count,
-                dir,
-            } => {
-                buffer.put_u8(0x00);
-                buffer.put_u64_le(key);
-                buffer.put_u64_le(start);
-                buffer.put_u64_le(count);
-                buffer.put_u8(match dir {
-                    Direction::Forward => 0,
-                    Direction::Backward => 1,
-                });
-            }
+    pub fn read(mut buffer: BytesMut, key: u64, start: u64, count: usize, dir: Direction) -> Bytes {
+        buffer.put_u8(0x00);
+        buffer.put_u64_le(key);
+        buffer.put_u64_le(start);
+        buffer.put_u64_le(count as u64);
+        buffer.put_u8(match dir {
+            Direction::Forward => 0,
+            Direction::Backward => 1,
+        });
 
-            IndexingReq::Chase { position } => {
-                buffer.put_u8(0x01);
-                buffer.put_u64_le(position);
-            }
-        }
+        buffer.freeze()
+    }
 
-        buffer.split().freeze()
+    pub fn store(buffer: BytesMut, key: u64) -> StoreRequestBuilder {
+        StoreRequestBuilder::new(buffer, key)
+    }
+
+    pub fn latest_revision(mut buffer: BytesMut, key: u64) -> Bytes {
+        buffer.put_u8(0x02);
+        buffer.put_u64_le(key);
+        buffer.freeze()
     }
 }
 
@@ -213,6 +249,16 @@ pub struct Indexing<S, WAL> {
     writer: Arc<AtomicU64>,
 }
 
+impl<S, WAL> Indexing<S, WAL> {
+    pub fn new(storage: S, wal: WALRef<WAL>, writer: Arc<AtomicU64>) -> Self {
+        Self {
+            storage,
+            wal,
+            writer,
+        }
+    }
+}
+
 impl<S, WAL> RunnableRaw for Indexing<S, WAL>
 where
     S: Storage + Send + Sync + 'static,
@@ -223,42 +269,82 @@ where
     }
 
     fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
-        let chase_chk = Arc::new(AtomicU64::new(0));
         let lsm = Lsm::load(LsmSettings::default(), self.storage.clone())?;
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 
-        let chaser_proc_id = env.handle.block_on(env.client.spawn_raw(Chaser::new(
-            chase_chk.clone(),
-            self.writer.clone(),
-            lsm.clone(),
-            self.wal.clone(),
-        )))?;
-
         while let Some(item) = env.queue.recv().ok() {
             match item {
                 Item::Mail(mail) => {
-                    if let Some(IndexingReq::Chase { position }) =
-                        IndexingReq::try_from(mail.payload)
-                    {
-                        // If we already know that the chaser process covered passed that
-                        // position, we can immediately return that data was committed to the
-                        // origin of the message.
-                        if chase_chk.load(Ordering::Acquire) >= position {
-                            env.client.reply(
-                                mail.origin,
-                                mail.correlation,
-                                IndexingResp::Committed.serialize(env.buffer.split()),
-                            )?;
+                    if let Some(req) = IndexingReq::try_from(mail.payload) {
+                        match req {
+                            IndexingReq::Store { key, entries } => {
+                                let store_lsm = lsm.clone();
+                                let store_client = env.client.clone();
+                                let store_buffer = env.buffer.split();
 
-                            continue;
+                                Handle::current().spawn_blocking(move || {
+                                    if let Err(e) = store_entries(store_lsm, key, entries) {
+                                        tracing::error!("error when storing index entries: {}", e);
+
+                                        let _ = store_client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            IndexingResp::Error.serialize(store_buffer),
+                                        );
+                                    } else {
+                                        let _ = store_client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            IndexingResp::Committed.serialize(store_buffer),
+                                        );
+                                    }
+                                });
+                            }
+
+                            IndexingReq::LatestRevision { key } => {
+                                if let Some(current) = revision_cache.get(&key) {
+                                    env.buffer.put_u64_le(current);
+                                    env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        env.buffer.split().freeze(),
+                                    )?;
+                                } else {
+                                    let lsm_read = lsm.read().map_err(|e| {
+                                        eyre::eyre!(
+                                            "posoined lock when reading to the index: {}",
+                                            e
+                                        )
+                                    })?;
+
+                                    let revison = lsm_read.highest_revision(key)?;
+
+                                    if let Some(revision) = revison {
+                                        revision_cache.insert(key, revision);
+                                        env.buffer.put_u64_le(revision);
+                                    }
+
+                                    env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        env.buffer.split().freeze(),
+                                    )?;
+                                }
+                            }
+
+                            IndexingReq::Read { .. } => {
+                                tracing::error!(
+                                    "read from the index should be a streaming operation"
+                                );
+
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    IndexingResp::Error.serialize(env.buffer.split()),
+                                )?;
+                            }
                         }
-
-                        env.client.send(
-                            chaser_proc_id,
-                            Chasing::new(mail.origin, mail.correlation, position)
-                                .serialize(env.buffer.split()),
-                        )?;
                     }
                 }
 
@@ -328,6 +414,40 @@ where
     };
 
     Ok(current_revision)
+}
+
+fn store_entries<S>(lsm: Arc<RwLock<Lsm<S>>>, key: u64, entries: Bytes) -> eyre::Result<()>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    let mut lsm = lsm
+        .write()
+        .map_err(|e| eyre::eyre!("posoined lock when writing to the index: {}", e))?;
+
+    lsm.put_values(StoreEntries { key, entries })?;
+
+    Ok(())
+}
+
+struct StoreEntries {
+    key: u64,
+    entries: Bytes,
+}
+
+impl Iterator for StoreEntries {
+    type Item = (u64, u64, u64);
+
+    fn next(&mut self) -> Option<Self::Item> {
+        if !self.entries.has_remaining() {
+            return None;
+        }
+
+        Some((
+            self.key,
+            self.entries.get_u64_le(),
+            self.entries.get_u64_le(),
+        ))
+    }
 }
 
 fn stream_indexed_read<S, WAL>(
