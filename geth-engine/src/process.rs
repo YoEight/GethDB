@@ -448,6 +448,7 @@ impl Manager {
                         let manager_client = self.sender.clone();
                         let manager_buffer = self.buffer.split();
                         let name = runnable.name();
+                        let handle = Handle::current();
 
                         thread::spawn(move || {
                             let error = runnable
@@ -460,7 +461,7 @@ impl Manager {
                                         inner: manager_client.clone(),
                                     },
                                     buffer: manager_buffer,
-                                    handle: Handle::current(),
+                                    handle,
                                 })
                                 .err();
 

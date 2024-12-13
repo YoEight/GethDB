@@ -5,16 +5,15 @@ use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use std::cmp::min;
 use std::io;
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, RwLock};
-use tokio::runtime::Handle;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 use uuid::Uuid;
 
 type RevisionCache = moka::sync::Cache<u64, u64>;
+const ENTRY_SIZE: usize = 2 * std::mem::size_of::<u64>();
 
 pub fn new_revision_cache() -> RevisionCache {
     moka::sync::Cache::<u64, u64>::builder()
@@ -24,21 +23,42 @@ pub fn new_revision_cache() -> RevisionCache {
 }
 
 pub struct Streaming {
+    batch: Option<Bytes>,
     inner: UnboundedReceiver<Bytes>,
 }
 
 impl Streaming {
-    pub async fn next(&mut self) -> eyre::Result<Option<Bytes>> {
-        if let Some(bytes) = self.inner.recv().await {
-            if bytes.len() == 1 {
-                IndexingResp::try_from(bytes)?.expect(IndexingResp::Error)?;
-                eyre::bail!("error when streaming from the index process");
+    pub async fn next(&mut self) -> eyre::Result<Option<(u64, u64)>> {
+        loop {
+            if let Some(bytes) = self.batch.as_mut() {
+                if bytes.has_remaining() {
+                    return Ok(Some((bytes.get_u64_le(), bytes.get_u64_le())));
+                }
             }
 
-            return Ok(Some(bytes));
+            self.batch = None;
+            if let Some(bytes) = self.inner.recv().await {
+                if bytes.len() == 1 {
+                    IndexingResp::try_from(bytes)?.expect(IndexingResp::Error)?;
+                    eyre::bail!("error when streaming from the index process");
+                }
+
+                self.batch = Some(bytes);
+                continue;
+            }
+
+            return Ok(None);
+        }
+    }
+
+    pub async fn collect(&mut self) -> eyre::Result<Vec<(u64, u64)>> {
+        let mut entries = vec![];
+
+        while let Some(entry) = self.next().await? {
+            entries.push(entry);
         }
 
-        Ok(None)
+        Ok(entries)
     }
 }
 
@@ -80,7 +100,7 @@ impl IndexClient {
 
             IndexingResp::try_from(bytes)?.expect(IndexingResp::Streaming)?;
 
-            return Ok(Streaming { inner });
+            return Ok(Streaming { inner, batch: None });
         }
 
         eyre::bail!("index process is no longer reachable");
@@ -101,7 +121,7 @@ impl IndexClient {
         IndexingResp::try_from(resp.payload)?.expect(IndexingResp::Committed)
     }
 
-    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<u64> {
+    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<Option<u64>> {
         let req = IndexingReq::latest_revision(self.buffer.split(), key);
         let mut resp = self.inner.request(self.target, req).await?;
 
@@ -109,7 +129,11 @@ impl IndexClient {
             eyre::bail!("error when looking the latest version of key {}", key);
         }
 
-        Ok(resp.payload.get_u64_le())
+        if resp.payload.is_empty() {
+            return Ok(None);
+        }
+
+        Ok(Some(resp.payload.get_u64_le()))
     }
 }
 
@@ -243,26 +267,19 @@ impl IndexingResp {
     }
 }
 
-pub struct Indexing<S, WAL> {
+pub struct Indexing<S> {
     storage: S,
-    wal: WALRef<WAL>,
-    writer: Arc<AtomicU64>,
 }
 
-impl<S, WAL> Indexing<S, WAL> {
-    pub fn new(storage: S, wal: WALRef<WAL>, writer: Arc<AtomicU64>) -> Self {
-        Self {
-            storage,
-            wal,
-            writer,
-        }
+impl<S> Indexing<S> {
+    pub fn new(storage: S) -> Self {
+        Self { storage }
     }
 }
 
-impl<S, WAL> RunnableRaw for Indexing<S, WAL>
+impl<S> RunnableRaw for Indexing<S>
 where
     S: Storage + Send + Sync + 'static,
-    WAL: WriteAheadLog + Send + Sync + 'static,
 {
     fn name(&self) -> &'static str {
         "indexing"
@@ -279,27 +296,27 @@ where
                     if let Some(req) = IndexingReq::try_from(mail.payload) {
                         match req {
                             IndexingReq::Store { key, entries } => {
-                                let store_lsm = lsm.clone();
-                                let store_client = env.client.clone();
-                                let store_buffer = env.buffer.split();
+                                let last_revision = entries
+                                    .slice(entries.len() - 2 * std::mem::size_of::<u64>()..)
+                                    .get_u64_le();
 
-                                Handle::current().spawn_blocking(move || {
-                                    if let Err(e) = store_entries(store_lsm, key, entries) {
-                                        tracing::error!("error when storing index entries: {}", e);
+                                if let Err(e) = store_entries(&lsm, key, entries) {
+                                    tracing::error!("error when storing index entries: {}", e);
 
-                                        let _ = store_client.reply(
-                                            mail.origin,
-                                            mail.correlation,
-                                            IndexingResp::Error.serialize(store_buffer),
-                                        );
-                                    } else {
-                                        let _ = store_client.reply(
-                                            mail.origin,
-                                            mail.correlation,
-                                            IndexingResp::Committed.serialize(store_buffer),
-                                        );
-                                    }
-                                });
+                                    let _ = env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        IndexingResp::Error.serialize(env.buffer.split()),
+                                    );
+                                } else {
+                                    revision_cache.insert(key, last_revision);
+
+                                    let _ = env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        IndexingResp::Committed.serialize(env.buffer.split()),
+                                    );
+                                }
                             }
 
                             IndexingReq::LatestRevision { key } => {
@@ -356,15 +373,13 @@ where
                         dir,
                     }) = IndexingReq::try_from(stream.payload)
                     {
-                        let wal = self.wal.clone();
                         let stream_cache = revision_cache.clone();
                         let stream_lsm = lsm.clone();
                         let mut stream_buffer = env.buffer.split();
                         let _: JoinHandle<eyre::Result<()>> =
-                            tokio::task::spawn_blocking(move || {
+                            env.handle.spawn_blocking(move || {
                                 if stream_indexed_read(
                                     stream_lsm,
-                                    wal,
                                     stream_cache,
                                     key,
                                     start,
@@ -416,13 +431,13 @@ where
     Ok(current_revision)
 }
 
-fn store_entries<S>(lsm: Arc<RwLock<Lsm<S>>>, key: u64, entries: Bytes) -> eyre::Result<()>
+fn store_entries<S>(lsm: &Arc<RwLock<Lsm<S>>>, key: u64, entries: Bytes) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
     let mut lsm = lsm
         .write()
-        .map_err(|e| eyre::eyre!("posoined lock when writing to the index: {}", e))?;
+        .map_err(|e| eyre::eyre!("poisoned lock when writing to the index: {}", e))?;
 
     lsm.put_values(StoreEntries { key, entries })?;
 
@@ -450,9 +465,8 @@ impl Iterator for StoreEntries {
     }
 }
 
-fn stream_indexed_read<S, WAL>(
+fn stream_indexed_read<S>(
     lsm: Arc<RwLock<Lsm<S>>>,
-    wal: WALRef<WAL>,
     cache: RevisionCache,
     key: u64,
     start: u64,
@@ -463,11 +477,10 @@ fn stream_indexed_read<S, WAL>(
 ) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
-    WAL: WriteAheadLog + Send + Sync + 'static,
 {
     let lsm = lsm
         .read()
-        .map_err(|e| eyre::eyre!("posoined lock when reading the index: {}", e))?;
+        .map_err(|e| eyre::eyre!("poisoned lock when reading the index: {}", e))?;
 
     let current_revision = key_latest_revision(&lsm, cache, key)?;
 
@@ -485,12 +498,34 @@ where
         Direction::Backward => Box::new(lsm.scan_backward(key, start, count)),
     };
 
-    while let Some(item) = iter.next()? {
-        let record = wal.read_at(item.position)?;
+    if stream
+        .send(IndexingResp::Streaming.serialize(buffer.split()))
+        .is_err()
+    {
+        return Ok(());
+    }
 
-        if stream.send(record.payload).is_err() {
-            break;
+    let batch_size = min(count, 500);
+    let mem_requirement = batch_size * ENTRY_SIZE;
+    if buffer.remaining() < mem_requirement {
+        buffer.reserve(mem_requirement - buffer.remaining());
+    }
+
+    let mut count = 0;
+    while let Some(item) = iter.next()? {
+        if count >= batch_size {
+            if stream.send(buffer.split().freeze()).is_err() {
+                return Ok(());
+            }
         }
+
+        count += 1;
+        buffer.put_u64_le(item.revision);
+        buffer.put_u64_le(item.position);
+    }
+
+    if !buffer.is_empty() {
+        let _ = stream.send(buffer.split().freeze());
     }
 
     Ok(())
