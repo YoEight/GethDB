@@ -46,7 +46,7 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
     }
 
     client.store(2, expected.clone()).await?;
-    let revision = client.latest_revision(2).await?;
+    let revision = client.latest_revision(2).await?.revision();
 
     assert!(revision.is_some());
     assert_eq!(9, revision.unwrap());
@@ -60,7 +60,7 @@ async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
     let proc_id = manager.spawn_raw(Indexing::new(storage)).await?;
     let mut client = IndexClient::new(proc_id, manager.clone(), BytesMut::new());
-    let revision = client.latest_revision(2).await?;
+    let revision = client.latest_revision(2).await?.revision();
 
     assert!(revision.is_none());
 

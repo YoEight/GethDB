@@ -1,5 +1,6 @@
+use crate::domain::index::CurrentRevision;
 use crate::process::indexing::{IndexingReq, IndexingResp};
-use crate::process::{ManagerClient, ProcessEnv};
+use crate::process::{ManagerClient, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::Direction;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -22,6 +23,12 @@ impl IndexClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         let proc_id = env.client.wait_for("index").await?;
+
+        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+    }
+
+    pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
+        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
@@ -64,7 +71,7 @@ impl IndexClient {
         IndexingResp::try_from(resp.payload)?.expect(IndexingResp::Committed)
     }
 
-    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<Option<u64>> {
+    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
         let req = IndexingReq::latest_revision(self.buffer.split(), key);
         let mut resp = self.inner.request(self.target, req).await?;
 
@@ -73,10 +80,10 @@ impl IndexClient {
         }
 
         if resp.payload.is_empty() {
-            return Ok(None);
+            return Ok(CurrentRevision::NoStream);
         }
 
-        Ok(Some(resp.payload.get_u64_le()))
+        Ok(CurrentRevision::Revision(resp.payload.get_u64_le()))
     }
 }
 

@@ -38,6 +38,7 @@ pub mod indexing;
 pub mod storage;
 mod subscriptions;
 mod write_request_manager;
+pub mod writing;
 
 pub struct InternalClient<WAL, S: Storage> {
     storage: StorageService<WAL, S>,

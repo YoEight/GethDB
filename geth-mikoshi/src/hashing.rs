@@ -2,7 +2,7 @@ use bytes::Buf;
 use digest::Digest;
 use sha2::{digest, Sha512};
 
-pub fn mikoshi_hash(value: &str) -> u64 {
+pub fn mikoshi_hash(value: impl AsRef<[u8]>) -> u64 {
     let mut hasher = Sha512::new();
     hasher.update(value);
 
