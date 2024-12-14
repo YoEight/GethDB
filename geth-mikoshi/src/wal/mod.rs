@@ -27,10 +27,8 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append<I>(&self, entries: I) -> io::Result<LogReceipt>
-    where
-        I: IntoIterator<Item = Bytes>,
-    {
+    pub fn append<I>(&self, entries: LogEntries) -> io::Result<LogReceipt>
+where {
         let mut inner = self.inner.write().unwrap();
         inner.append(entries)
     }
@@ -55,11 +53,55 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
     }
 }
 
+pub struct LogEntries {
+    data: Bytes,
+    ident: Bytes,
+    revision: u64,
+}
+
+impl LogEntries {
+    pub fn next(&mut self) -> Option<Entry<'_>> {
+        if !self.data.has_remaining() {
+            return None;
+        }
+
+        let len = self.data.get_u32_le() as usize;
+        let record = self.data.copy_to_bytes(len);
+        let current_revision = self.revision;
+
+        self.revision += 1;
+
+        Some(Entry {
+            inner: self,
+            ident: self.ident.clone(),
+            revision: current_revision,
+            data: record,
+        })
+    }
+}
+
+pub struct Entry<'a> {
+    inner: &'a LogEntries,
+    ident: Bytes,
+    revision: u64,
+    data: Bytes,
+}
+
+impl<'a> Entry<'a> {
+    pub fn size(&self) -> usize {
+        todo!()
+    }
+
+    pub fn commit(self, buffer: &mut BytesMut, position: u64) -> Bytes {
+        todo!()
+    }
+}
+
 pub trait WriteAheadLog {
-    fn append<I>(&mut self, entries: I) -> io::Result<LogReceipt>
-    where
-        I: IntoIterator<Item = Bytes>;
+    fn append(&mut self, entries: LogEntries) -> io::Result<LogReceipt>;
+
     fn read_at(&self, position: u64) -> io::Result<LogEntry>;
+
     fn write_position(&self) -> u64;
 }
 

@@ -85,29 +85,3 @@ fn optimistic_concurrency_check(
         }),
     }
 }
-
-struct LogEntries {
-    buffer: BytesMut,
-    data: Bytes,
-    ident: Bytes,
-    revision: u64,
-}
-
-impl Iterator for LogEntries {
-    type Item = Bytes;
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.data.has_remaining() {
-            return None;
-        }
-
-        self.buffer.put_u16_le(self.ident.len() as u16);
-        self.buffer.extend_from_slice(&self.ident);
-        self.buffer.put_u64_le(self.revision);
-        self.buffer.extend_from_slice(&self.data);
-
-        self.revision += 1;
-
-        Some(self.buffer.split().freeze())
-    }
-}
