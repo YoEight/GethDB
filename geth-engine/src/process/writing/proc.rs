@@ -5,7 +5,7 @@ use crate::process::{Item, ProcessRawEnv, RunnableRaw};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::wal::WriteAheadLog;
+use geth_mikoshi::wal::{LogEntries, WriteAheadLog};
 
 pub struct Writing<WAL> {
     wal: WAL,
@@ -34,14 +34,17 @@ where
                 }
 
                 Item::Mail(mail) => {
-                    if let Some(req) = Request::try_from(mail.payload) {
-                        let key = mikoshi_hash(req.ident());
+                    if let Some(Request::Append {
+                        ident,
+                        expected,
+                        events,
+                    }) = Request::try_from(mail.payload)
+                    {
+                        let key = mikoshi_hash(&ident);
                         let current_revision =
                             env.handle.block_on(index_client.latest_revision(key))?;
 
-                        if let Some(e) =
-                            optimistic_concurrency_check(req.expected(), current_revision)
-                        {
+                        if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
                             env.client.reply(
                                 mail.origin,
                                 mail.correlation,
@@ -52,16 +55,22 @@ where
                             continue;
                         }
 
-                        match req {
-                            Request::Append { events, .. } => {}
+                        let revision = current_revision.next_revision();
+                        let mut entries = LogEntries::new(ident, revision, events);
+                        let receipt = self.wal.append(&mut entries)?;
 
-                            Request::Delete { ident, expected } => {}
-                        }
+                        env.handle
+                            .block_on(index_client.store(key, entries.complete()))?;
 
-                        continue;
+                        env.client.reply(
+                            mail.origin,
+                            mail.correlation,
+                            Response::committed(receipt.start_position, receipt.next_position)
+                                .serialize(&mut env.buffer),
+                        )?;
                     }
 
-                    tracing::error!("unhandled mail request {}", mail.correlation);
+                    tracing::warn!("unhandled mail request {}", mail.correlation);
                 }
             }
         }

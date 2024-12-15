@@ -1,6 +1,6 @@
 mod proc;
 
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use geth_common::ExpectedRevision;
 pub use proc::Writing;
 
@@ -10,30 +10,33 @@ enum Request {
         expected: ExpectedRevision,
         events: Bytes,
     },
-
-    Delete {
-        ident: Bytes,
-        expected: ExpectedRevision,
-    },
 }
 
 impl Request {
-    fn try_from(bytes: Bytes) -> Option<Self> {
-        todo!()
-    }
+    fn try_from(mut bytes: Bytes) -> Option<Self> {
+        let len = bytes.get_u16_le() as usize;
+        let ident = bytes.copy_to_bytes(len);
 
-    fn ident(&self) -> &Bytes {
-        match self {
-            Request::Append { ident, .. } => ident,
-            Request::Delete { ident, .. } => ident,
-        }
-    }
+        let expected = match bytes.get_u8() {
+            0x00 => ExpectedRevision::Any,
+            0x01 => ExpectedRevision::NoStream,
+            0x02 => ExpectedRevision::StreamExists,
+            0x03 => {
+                let revision = bytes.get_u64_le();
+                ExpectedRevision::Revision(revision)
+            }
 
-    fn expected(&self) -> ExpectedRevision {
-        match self {
-            Request::Append { expected, .. } => *expected,
-            Request::Delete { expected, .. } => *expected,
-        }
+            _ => {
+                tracing::warn!("unknown expected revision flag");
+                return None;
+            }
+        };
+
+        Some(Self::Append {
+            ident,
+            expected,
+            events: bytes,
+        })
     }
 }
 
@@ -44,6 +47,11 @@ enum Response {
     },
 
     Error,
+
+    Committed {
+        start: u64,
+        next: u64,
+    },
 }
 
 impl Response {
@@ -53,6 +61,10 @@ impl Response {
 
     fn error() -> Self {
         Self::Error
+    }
+
+    fn committed(start: u64, next: u64) -> Self {
+        Self::Committed { start, next }
     }
 
     fn serialize(self, bytes: &mut BytesMut) -> Bytes {

@@ -27,7 +27,7 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append<I>(&self, entries: LogEntries) -> io::Result<LogReceipt>
+    pub fn append(&self, entries: &mut LogEntries) -> io::Result<LogReceipt>
 where {
         let mut inner = self.inner.write().unwrap();
         inner.append(entries)
@@ -90,6 +90,10 @@ impl LogEntries {
         })
     }
 
+    pub fn complete(self) -> Vec<(u64, u64)> {
+        self.indexes
+    }
+
     fn index(&mut self, revision: u64, position: u64) {
         self.indexes.push((revision, position));
     }
@@ -127,7 +131,7 @@ impl<'a> Entry<'a> {
 }
 
 pub trait WriteAheadLog {
-    fn append(&mut self, entries: LogEntries) -> io::Result<LogReceipt>;
+    fn append(&mut self, entries: &mut LogEntries) -> io::Result<LogReceipt>;
 
     fn read_at(&self, position: u64) -> io::Result<LogEntry>;
 

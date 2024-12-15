@@ -135,7 +135,7 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append(&mut self, mut entries: LogEntries) -> io::Result<LogReceipt> {
+    fn append(&mut self, mut entries: &mut LogEntries) -> io::Result<LogReceipt> {
         let mut position = self.writer;
         let starting_position = position;
 
