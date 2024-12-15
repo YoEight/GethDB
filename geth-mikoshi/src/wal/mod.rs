@@ -56,10 +56,20 @@ where {
 pub struct LogEntries {
     data: Bytes,
     ident: Bytes,
+    indexes: Vec<(u64, u64)>,
     revision: u64,
 }
 
 impl LogEntries {
+    pub fn new(ident: Bytes, revision: u64, data: Bytes) -> Self {
+        Self {
+            data,
+            ident,
+            indexes: vec![],
+            revision,
+        }
+    }
+
     pub fn next(&mut self) -> Option<Entry<'_>> {
         if !self.data.has_remaining() {
             return None;
@@ -68,20 +78,25 @@ impl LogEntries {
         let len = self.data.get_u32_le() as usize;
         let record = self.data.copy_to_bytes(len);
         let current_revision = self.revision;
+        let ident = self.ident.clone();
 
         self.revision += 1;
 
         Some(Entry {
             inner: self,
-            ident: self.ident.clone(),
+            ident,
             revision: current_revision,
             data: record,
         })
     }
+
+    fn index(&mut self, revision: u64, position: u64) {
+        self.indexes.push((revision, position));
+    }
 }
 
 pub struct Entry<'a> {
-    inner: &'a LogEntries,
+    inner: &'a mut LogEntries,
     ident: Bytes,
     revision: u64,
     data: Bytes,
@@ -89,11 +104,25 @@ pub struct Entry<'a> {
 
 impl<'a> Entry<'a> {
     pub fn size(&self) -> usize {
-        todo!()
+        size_of::<u64>()
+            + size_of::<u64>()
+            + size_of::<u16>()
+            + self.ident.len()
+            + size_of::<u32>()
+            + self.data.len()
     }
 
-    pub fn commit(self, buffer: &mut BytesMut, position: u64) -> Bytes {
-        todo!()
+    pub fn commit(mut self, buffer: &mut BytesMut, position: u64) -> Bytes {
+        self.inner.index(self.revision, position);
+
+        buffer.put_u64_le(position);
+        buffer.put_u64_le(self.revision);
+        buffer.put_u16_le(self.ident.len() as u16);
+        buffer.extend_from_slice(&self.ident);
+        buffer.put_u32_le(self.data.len() as u32);
+        buffer.extend_from_slice(&self.data);
+
+        buffer.split().freeze()
     }
 }
 
