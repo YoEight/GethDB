@@ -56,15 +56,17 @@ where {
 pub struct LogEntries {
     data: Bytes,
     ident: Bytes,
+    index: bool,
     indexes: Vec<(u64, u64)>,
     revision: u64,
 }
 
 impl LogEntries {
-    pub fn new(ident: Bytes, revision: u64, data: Bytes) -> Self {
+    pub fn new(ident: Bytes, revision: u64, index: bool, data: Bytes) -> Self {
         Self {
             data,
             ident,
+            index,
             indexes: vec![],
             revision,
         }
@@ -95,7 +97,9 @@ impl LogEntries {
     }
 
     fn index(&mut self, revision: u64, position: u64) {
-        self.indexes.push((revision, position));
+        if self.index {
+            self.indexes.push((revision, position));
+        }
     }
 }
 

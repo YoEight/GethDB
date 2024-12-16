@@ -11,6 +11,12 @@ pub struct Writing<WAL> {
     wal: WAL,
 }
 
+impl<WAL> Writing<WAL> {
+    pub fn new(wal: WAL) -> Self {
+        Self { wal }
+    }
+}
+
 impl<WAL> RunnableRaw for Writing<WAL>
 where
     WAL: WriteAheadLog + 'static,
@@ -37,12 +43,23 @@ where
                     if let Some(Request::Append {
                         ident,
                         expected,
+                        index,
                         events,
                     }) = Request::try_from(mail.payload)
                     {
                         let key = mikoshi_hash(&ident);
                         let current_revision =
                             env.handle.block_on(index_client.latest_revision(key))?;
+
+                        if current_revision.is_deleted() {
+                            env.client.reply(
+                                mail.origin,
+                                mail.correlation,
+                                Response::Deleted.serialize(&mut env.buffer),
+                            )?;
+
+                            continue;
+                        }
 
                         if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
                             env.client.reply(
@@ -56,11 +73,13 @@ where
                         }
 
                         let revision = current_revision.next_revision();
-                        let mut entries = LogEntries::new(ident, revision, events);
+                        let mut entries = LogEntries::new(ident, revision, index, events);
                         let receipt = self.wal.append(&mut entries)?;
 
-                        env.handle
-                            .block_on(index_client.store(key, entries.complete()))?;
+                        if index {
+                            env.handle
+                                .block_on(index_client.store(key, entries.complete()))?;
+                        }
 
                         env.client.reply(
                             mail.origin,
