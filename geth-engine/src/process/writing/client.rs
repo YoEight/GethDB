@@ -1,5 +1,5 @@
 use crate::process::writing::{Request, Response};
-use crate::process::{ManagerClient, ProcessEnv};
+use crate::process::{ManagerClient, ProcId, ProcessEnv};
 use bytes::{Bytes, BytesMut};
 use geth_common::{
     AppendError, AppendStreamCompleted, ExpectedRevision, Position, WriteResult,
@@ -8,13 +8,13 @@ use geth_common::{
 use uuid::Uuid;
 
 pub struct WriterClient {
-    target: Uuid,
+    target: ProcId,
     inner: ManagerClient,
     buffer: BytesMut,
 }
 
 impl WriterClient {
-    pub fn new(target: Uuid, inner: ManagerClient, buffer: BytesMut) -> Self {
+    pub fn new(target: ProcId, inner: ManagerClient, buffer: BytesMut) -> Self {
         Self {
             target,
             inner,

@@ -87,6 +87,8 @@ where
                             Response::committed(receipt.start_position, receipt.next_position)
                                 .serialize(&mut env.buffer),
                         )?;
+
+                        continue;
                     }
 
                     tracing::warn!("unhandled mail request {}", mail.correlation);

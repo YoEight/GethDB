@@ -39,8 +39,6 @@ features = ["derive"]
 [dependencies]
 tonic = "0.10"
 prost = "0.12"
-prost-types = "0.12"
-prost-derive = "0.12"
 tracing = "0.1"
 futures = "*"
 bytes = "1"
@@ -53,7 +51,8 @@ async-trait = "0.1.71"
 serde = { version = "1", features = ["derive"] }
 
 [dev-dependencies]
-pretty_env_logger = "0.5"
+tracing-subscriber = "0.3"
+
 
 [build-dependencies]
 tonic-build = "0.10"

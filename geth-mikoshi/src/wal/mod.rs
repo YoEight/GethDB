@@ -112,23 +112,31 @@ pub struct Entry<'a> {
 
 impl<'a> Entry<'a> {
     pub fn size(&self) -> usize {
-        size_of::<u64>()
-            + size_of::<u64>()
-            + size_of::<u16>()
-            + self.ident.len()
-            + size_of::<u32>()
-            + self.data.len()
+        size_of::<u32>() // entry size
+            + size_of::<u64>() // logical position
+            + size_of::<u8>() // record type
+            + size_of::<u64>() // revision
+            + size_of::<u16>() // stream name length
+            + self.ident.len() // stream name
+            + size_of::<u32>() // payload size
+            + self.data.len() // payload
+            + size_of::<u32>() // entry size
     }
 
     pub fn commit(mut self, buffer: &mut BytesMut, position: u64) -> Bytes {
         self.inner.index(self.revision, position);
+        let size = self.size();
 
+        let actual_size = size - 2 * size_of::<u32>(); // we don't count the 32bits encoded entry size at the front and back of the log entry.
+        buffer.put_u32_le(actual_size as u32); // we don't count the 32bits encoded entry size at the front and back of the log entry.
         buffer.put_u64_le(position);
+        buffer.put_u8(0);
         buffer.put_u64_le(self.revision);
         buffer.put_u16_le(self.ident.len() as u16);
         buffer.extend_from_slice(&self.ident);
         buffer.put_u32_le(self.data.len() as u32);
         buffer.extend_from_slice(&self.data);
+        buffer.put_u32_le(actual_size as u32);
 
         buffer.split().freeze()
     }
@@ -144,35 +152,35 @@ pub trait WriteAheadLog {
 
 pub struct LogEntry {
     pub position: u64,
+    pub r#type: u8,
     pub payload: Bytes,
 }
 
 impl LogEntry {
-    pub fn size(&self) -> u32 {
-        4 + self.payload_size() + 4
+    pub fn size(&self) -> usize {
+        size_of::<u32>() // entry size
+            + size_of::<u8>() // entry type
+            + self.payload_size()
+            + size_of::<u32>() // entry size
     }
 
-    pub fn payload_size(&self) -> u32 {
-        8 // position
-            + self.payload.len() as u32
-    }
-
-    pub fn put(&self, buffer: &mut BytesMut) {
-        let size = self.payload_size();
-
-        buffer.put_u32_le(size);
-        buffer.put_u64_le(self.position);
-        buffer.put(self.payload.clone());
-        buffer.put_u32_le(size);
+    pub fn payload_size(&self) -> usize {
+        size_of::<u64>() // position
+            + self.payload.len()
     }
 
     /// Parsing is not symmetrical with serialisation because parsing the size of the record
     /// is done directly when communicating with the storage abstraction directly.
     pub fn get(mut src: Bytes) -> Self {
         let position = src.get_u64_le();
+        let r#type = src.get_u8();
         let payload = src;
 
-        Self { position, payload }
+        Self {
+            position,
+            r#type,
+            payload,
+        }
     }
 }
 

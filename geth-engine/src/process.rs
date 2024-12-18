@@ -3,7 +3,6 @@ use std::time::Instant;
 use std::{io, thread};
 
 use bytes::{Bytes, BytesMut};
-use eyre::bail;
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use tokio::runtime::Handle;
@@ -248,14 +247,14 @@ where
             .await
             .is_err()
         {
-            bail!("Main bus has shutdown!");
+            eyre::bail!("Main bus has shutdown!");
         }
 
         if let Ok(resp) = recv.await {
             return Ok(resp);
         }
 
-        bail!("Main bus has shutdown!");
+        eyre::bail!("Main bus has shutdown!");
     }
 
     async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
@@ -269,7 +268,7 @@ where
             .await
             .is_err()
         {
-            bail!("Main bus has shutdown!");
+            eyre::bail!("Main bus has shutdown!");
         }
 
         if let Ok(resp) = recv.await {
@@ -279,7 +278,7 @@ where
             ));
         }
 
-        bail!("Main bus has shutdown!");
+        eyre::bail!("Main bus has shutdown!");
     }
 
     async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
@@ -290,7 +289,7 @@ where
             .await
             .is_err()
         {
-            bail!("Main bus has shutdown!");
+            eyre::bail!("Main bus has shutdown!");
         }
 
         if let Ok(resp) = recv.await {
@@ -301,7 +300,7 @@ where
             );
         }
 
-        bail!("Main bus has shutdown!");
+        eyre::bail!("Main bus has shutdown!");
     }
 }
 
@@ -352,9 +351,11 @@ impl Mailbox {
     }
 }
 
+pub type ProcId = u64;
+
 #[derive(Clone)]
 pub struct Mail {
-    pub origin: Uuid,
+    pub origin: ProcId,
     pub correlation: Uuid,
     pub payload: Bytes,
     pub created: Instant,
@@ -364,30 +365,19 @@ impl Mail {}
 
 #[derive(Clone)]
 pub struct Process {
-    pub id: Uuid,
-    pub parent: Option<Uuid>,
+    pub id: ProcId,
+    pub parent: Option<ProcId>,
     pub name: &'static str,
     pub mailbox: Mailbox,
     pub created: Instant,
 }
 
-#[derive(Clone, Copy, PartialOrd, PartialEq, Ord, Eq, Hash)]
-struct ExchangeId {
-    dest: Uuid,
-    correlation: Uuid,
-}
-
-impl ExchangeId {
-    fn new(dest: Uuid, correlation: Uuid) -> Self {
-        Self { dest, correlation }
-    }
-}
-
 pub struct Manager {
-    processes: HashMap<Uuid, Process>,
+    proc_id_gen: ProcId,
+    processes: HashMap<ProcId, Process>,
     sender: UnboundedSender<ManagerCommand>,
-    requests: HashMap<ExchangeId, oneshot::Sender<Mail>>,
-    wait_fors: HashMap<&'static str, Vec<oneshot::Sender<Uuid>>>,
+    requests: HashMap<Uuid, oneshot::Sender<Mail>>,
+    wait_fors: HashMap<&'static str, Vec<oneshot::Sender<ProcId>>>,
     buffer: BytesMut,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
@@ -407,7 +397,8 @@ impl Manager {
                 runnable,
                 resp,
             } => {
-                let id = Uuid::new_v4();
+                let id = self.proc_id_gen;
+                self.proc_id_gen += 1;
 
                 let proc = match runnable {
                     RunnableType::Tokio(runnable) => {
@@ -430,6 +421,17 @@ impl Manager {
                                 })
                                 .await
                                 .err();
+
+                            if let Some(e) = error.as_ref() {
+                                tracing::error!(
+                                    "process '{}:{:04}' terminated with an error: {}",
+                                    name,
+                                    id,
+                                    e
+                                );
+                            } else {
+                                tracing::info!("process '{}:{:04}' terminated", name, id);
+                            }
 
                             let _ =
                                 manager_sender.send(ManagerCommand::ProcTerminated { id, error });
@@ -466,6 +468,17 @@ impl Manager {
                                 })
                                 .err();
 
+                            if let Some(e) = error.as_ref() {
+                                tracing::error!(
+                                    "process '{}:{:04}' terminated with an error: {}",
+                                    name,
+                                    id,
+                                    e
+                                );
+                            } else {
+                                tracing::info!("process '{}:{:04}' terminated", name, id);
+                            }
+
                             let _ =
                                 manager_client.send(ManagerCommand::ProcTerminated { id, error });
                         });
@@ -480,7 +493,7 @@ impl Manager {
                     }
                 };
 
-                tracing::info!("process {}:{} has started", proc.name, id);
+                tracing::info!("process {}:{:04} has started", proc.name, id);
                 let _ = resp.send(id);
                 self.processes.insert(id, proc);
             }
@@ -498,15 +511,11 @@ impl Manager {
 
             ManagerCommand::Send { dest, item, resp } => match item {
                 Item::Mail(mail) => {
-                    if let Some(resp) = self
-                        .requests
-                        .remove(&ExchangeId::new(mail.origin, mail.correlation))
-                    {
+                    if let Some(resp) = self.requests.remove(&mail.correlation) {
                         let _ = resp.send(mail);
                     } else if let Some(proc) = self.processes.get(&dest) {
                         if let Some(resp) = resp {
-                            self.requests
-                                .insert(ExchangeId::new(dest, mail.correlation), resp);
+                            self.requests.insert(mail.correlation, resp);
                         }
 
                         let _ = proc.mailbox.send(Item::Mail(mail));
@@ -603,7 +612,7 @@ impl Manager {
 }
 
 struct Stream {
-    origin: Uuid,
+    origin: ProcId,
     correlation: Uuid,
     payload: Bytes,
     sender: UnboundedSender<Bytes>,
@@ -641,29 +650,29 @@ impl RunnableType {
 
 pub enum ManagerCommand {
     Spawn {
-        parent: Option<Uuid>,
+        parent: Option<ProcId>,
         runnable: RunnableType,
-        resp: oneshot::Sender<Uuid>,
+        resp: oneshot::Sender<ProcId>,
     },
 
     Find {
         name: &'static str,
-        resp: oneshot::Sender<Option<Uuid>>,
+        resp: oneshot::Sender<Option<ProcId>>,
     },
 
     Send {
-        dest: Uuid,
+        dest: ProcId,
         item: Item,
         resp: Option<oneshot::Sender<Mail>>,
     },
 
     WaitFor {
         name: &'static str,
-        resp: oneshot::Sender<Uuid>,
+        resp: oneshot::Sender<ProcId>,
     },
 
     ProcTerminated {
-        id: Uuid,
+        id: ProcId,
         error: Option<eyre::Report>,
     },
 
@@ -682,14 +691,14 @@ impl ManagerCommand {
 }
 
 pub struct ProcessEnv {
-    id: Uuid,
+    id: ProcId,
     queue: UnboundedReceiver<Item>,
     client: ManagerClient,
     buffer: BytesMut,
 }
 
 pub struct ProcessRawEnv {
-    id: Uuid,
+    id: ProcId,
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     buffer: BytesMut,
@@ -709,13 +718,13 @@ pub trait RunnableRaw {
 
 #[derive(Clone)]
 pub struct ManagerClient {
-    id: Uuid,
-    parent: Option<Uuid>,
+    id: ProcId,
+    parent: Option<ProcId>,
     inner: UnboundedSender<ManagerCommand>,
 }
 
 impl ManagerClient {
-    pub async fn spawn<R>(&self, run: R) -> eyre::Result<Uuid>
+    pub async fn spawn<R>(&self, run: R) -> eyre::Result<ProcId>
     where
         R: Runnable + Send + Sync + 'static,
     {
@@ -738,7 +747,7 @@ impl ManagerClient {
         }
     }
 
-    pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<Uuid>
+    pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<ProcId>
     where
         R: RunnableRaw + Send + Sync + 'static,
     {
@@ -761,7 +770,7 @@ impl ManagerClient {
         }
     }
 
-    pub async fn find(&self, name: &'static str) -> eyre::Result<Option<Uuid>> {
+    pub async fn find(&self, name: &'static str) -> eyre::Result<Option<ProcId>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -777,13 +786,13 @@ impl ManagerClient {
         }
     }
 
-    pub fn send(&self, dest: Uuid, payload: Bytes) -> eyre::Result<()> {
+    pub fn send(&self, dest: ProcId, payload: Bytes) -> eyre::Result<()> {
         self.send_with_correlation(dest, Uuid::new_v4(), payload)
     }
 
     pub fn send_with_correlation(
         &self,
-        dest: Uuid,
+        dest: ProcId,
         correlation: Uuid,
         payload: Bytes,
     ) -> eyre::Result<()> {
@@ -807,7 +816,7 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn request(&self, dest: Uuid, payload: Bytes) -> eyre::Result<Mail> {
+    pub async fn request(&self, dest: ProcId, payload: Bytes) -> eyre::Result<Mail> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -815,7 +824,7 @@ impl ManagerClient {
                 dest,
                 item: Item::Mail(Mail {
                     origin: self.id,
-                    correlation: Default::default(),
+                    correlation: Uuid::new_v4(),
                     payload,
                     created: Instant::now(),
                 }),
@@ -834,7 +843,7 @@ impl ManagerClient {
 
     pub async fn request_stream(
         &self,
-        dest: Uuid,
+        dest: ProcId,
         payload: Bytes,
     ) -> eyre::Result<UnboundedReceiver<Bytes>> {
         let (sender, receiver) = unbounded_channel();
@@ -859,7 +868,7 @@ impl ManagerClient {
         Ok(receiver)
     }
 
-    pub fn reply(&self, dest: Uuid, correlation: Uuid, payload: Bytes) -> eyre::Result<()> {
+    pub fn reply(&self, dest: ProcId, correlation: Uuid, payload: Bytes) -> eyre::Result<()> {
         if self
             .inner
             .send(ManagerCommand::Send {
@@ -880,7 +889,7 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn wait_for(&self, name: &'static str) -> eyre::Result<Uuid> {
+    pub async fn wait_for(&self, name: &'static str) -> eyre::Result<ProcId> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -912,7 +921,7 @@ pub fn start_process_manager() -> ManagerClient {
     tokio::spawn(process_manager(sender.clone(), queue));
 
     ManagerClient {
-        id: Uuid::new_v4(),
+        id: 0,
         parent: None,
         inner: sender,
     }
@@ -923,6 +932,7 @@ async fn process_manager(
     queue: UnboundedReceiver<ManagerCommand>,
 ) {
     let mut manager = Manager {
+        proc_id_gen: 1,
         processes: Default::default(),
         sender,
         requests: Default::default(),

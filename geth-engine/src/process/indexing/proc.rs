@@ -36,7 +36,7 @@ where
     S: Storage + Send + Sync + 'static,
 {
     fn name(&self) -> &'static str {
-        "indexing"
+        "index"
     }
 
     fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
@@ -84,7 +84,7 @@ where
                                 } else {
                                     let lsm_read = lsm.read().map_err(|e| {
                                         eyre::eyre!(
-                                            "posoined lock when reading to the index: {}",
+                                            "poisoned lock when reading to the index: {}",
                                             e
                                         )
                                     })?;

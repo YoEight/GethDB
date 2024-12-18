@@ -90,7 +90,7 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
         buffer.put_u64_le(i);
 
         mails.push(Mail {
-            origin: Uuid::nil(),
+            origin: 0,
             correlation,
             payload: buffer.split().freeze(),
             created: Instant::now(),

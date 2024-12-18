@@ -1,9 +1,9 @@
-use bytes::{BufMut, Bytes, BytesMut};
-use serde::{Deserialize, Serialize};
-
 use crate::storage::InMemoryStorage;
 use crate::wal::chunks::ChunkBasedWAL;
 use crate::wal::{LogEntries, WriteAheadLog};
+use bytes::{Buf, BufMut, Bytes, BytesMut};
+use serde::{Deserialize, Serialize};
+use tokio::io::AsyncReadExt;
 
 #[derive(Deserialize, Serialize)]
 struct Foobar {
@@ -25,21 +25,31 @@ fn test_wal_chunk_iso() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
     let mut wal = ChunkBasedWAL::load(storage)?;
+    let stream_name = Bytes::from_static(b"salut");
+    let revision = 42;
     let data = generate_bytes();
     buffer.put_u32_le(data.len() as u32);
     buffer.extend_from_slice(&data);
     let mut entries = LogEntries::new(
-        Bytes::from_static(b"salut"),
-        0,
+        stream_name.clone(),
+        revision,
         false,
         buffer.split().freeze(),
     );
 
     wal.append(&mut entries)?;
 
-    let entry = wal.read_at(0)?;
+    let mut entry = wal.read_at(0)?;
+    let actual_revision = entry.payload.get_u64_le();
+    let str_len = entry.payload.get_u16_le() as usize;
+    let actual_stream_name = entry.payload.copy_to_bytes(str_len);
+    let payload_size = entry.payload.get_u32_le() as usize;
+    let payload = entry.payload.copy_to_bytes(payload_size);
 
-    assert_eq!(data, entry.payload);
+    assert_eq!(revision, actual_revision);
+    assert_eq!(stream_name.len(), actual_stream_name.len());
+    assert_eq!(stream_name, actual_stream_name);
+    assert_eq!(data, payload);
 
     Ok(())
 }

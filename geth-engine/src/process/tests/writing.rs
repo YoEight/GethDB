@@ -1,7 +1,7 @@
 use crate::process::indexing::{IndexClient, Indexing};
 use crate::process::start_process_manager;
 use crate::process::writing::{WriterClient, Writing};
-use bytes::{Bytes, BytesMut};
+use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
@@ -17,7 +17,12 @@ struct Foo {
 
 #[tokio::test]
 async fn test_write_read() -> eyre::Result<()> {
-    let _ = pretty_env_logger::init();
+    let _ = tracing_subscriber::fmt::fmt()
+        .with_max_level(tracing::Level::DEBUG)
+        .with_file(true)
+        .with_line_number(true)
+        .init();
+
     let mut buffer = BytesMut::new();
     let manager = start_process_manager();
     let storage = InMemoryStorage::new();
@@ -57,8 +62,18 @@ async fn test_write_read() -> eyre::Result<()> {
     while let Some((revision, position)) = stream.next().await? {
         assert_eq!(index as u64, revision);
 
-        let log = wal.read_at(position)?;
-        let foo = serde_json::from_slice::<Foo>(&log.payload)?;
+        let mut log = wal.read_at(position)?;
+        let entry_revision = log.payload.get_u64_le();
+        assert_eq!(revision, entry_revision);
+
+        let stream_name_len = log.payload.get_u16_le() as usize;
+        let stream_name_bytes = log.payload.copy_to_bytes(stream_name_len);
+        let actual_stream_name = unsafe { String::from_utf8_unchecked(stream_name_bytes.to_vec()) };
+        assert_eq!(stream_name, actual_stream_name);
+
+        let payload_len = log.payload.get_u32_le() as usize;
+        let payload = log.payload.copy_to_bytes(payload_len);
+        let foo = serde_json::from_slice::<Foo>(&payload)?;
 
         assert_eq!(foo.baz, index as u32 + 10);
 

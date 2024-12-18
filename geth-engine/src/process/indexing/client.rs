@@ -1,19 +1,19 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::{IndexingReq, IndexingResp};
-use crate::process::{ManagerClient, ProcessEnv, ProcessRawEnv};
+use crate::process::{ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::Direction;
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
 pub struct IndexClient {
-    target: Uuid,
+    target: ProcId,
     inner: ManagerClient,
     buffer: BytesMut,
 }
 
 impl IndexClient {
-    pub fn new(target: Uuid, inner: ManagerClient, buffer: BytesMut) -> Self {
+    pub fn new(target: ProcId, inner: ManagerClient, buffer: BytesMut) -> Self {
         Self {
             target,
             inner,
@@ -22,13 +22,13 @@ impl IndexClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for("indexing").await?;
+        let proc_id = env.client.wait_for("index").await?;
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for("indexing"))?;
+        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }

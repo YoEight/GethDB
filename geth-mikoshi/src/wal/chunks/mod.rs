@@ -210,7 +210,7 @@ where
             .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
             .get_u32_le() as usize;
 
-        assert_eq!(
+        debug_assert_eq!(
             record_size, post_record_size,
             "pre and post record size don't match!"
         );
