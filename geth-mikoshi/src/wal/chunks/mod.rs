@@ -8,7 +8,7 @@ use crate::storage::{FileCategory, FileId, Storage};
 use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::{LogEntry, LogReceipt, WriteAheadLog};
+use crate::wal::{LogEntries, LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;
@@ -135,23 +135,14 @@ impl<S> WriteAheadLog for ChunkBasedWAL<S>
 where
     S: Storage + 'static,
 {
-    fn append<I>(&mut self, entries: I) -> io::Result<LogReceipt>
-    where
-        I: IntoIterator<Item = Bytes>,
-    {
+    fn append(&mut self, mut entries: &mut LogEntries) -> io::Result<LogReceipt> {
         let mut position = self.writer;
         let starting_position = position;
 
-        for entry in entries {
-            self.buffer.put(entry);
-
-            let mut entry = LogEntry {
-                position,
-                payload: self.buffer.split().freeze(),
-            };
-
+        while let Some(entry) = entries.next() {
+            let entry_size = entry.size();
             let mut chunk: Chunk = self.ongoing_chunk();
-            let projected_next_logical_position = entry.size() as u64 + position;
+            let projected_next_logical_position = entry_size as u64 + position;
 
             // Chunk is full, and we need to flush previous data we accumulated. We also create a new
             // chunk for next writes.
@@ -177,12 +168,11 @@ where
                 chunk = self.new_chunk();
             }
 
-            entry.position = position;
+            let record = entry.commit(&mut self.buffer, position);
             let local_offset = chunk.raw_position(position);
-            position += entry.size() as u64;
-            entry.put(&mut self.buffer);
+            position += entry_size as u64;
             self.storage
-                .write_to(chunk.file_id(), local_offset, self.buffer.split().freeze())?;
+                .write_to(chunk.file_id(), local_offset, record)?;
 
             self.writer = position;
         }
@@ -220,7 +210,7 @@ where
             .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
             .get_u32_le() as usize;
 
-        assert_eq!(
+        debug_assert_eq!(
             record_size, post_record_size,
             "pre and post record size don't match!"
         );
