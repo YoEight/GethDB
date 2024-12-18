@@ -46,12 +46,14 @@ futures = "*"
 bytes = "1"
 eyre = "0.6"
 async-stream = "0.3"
-byteorder = "1"
 chrono = "0.4"
 serde_json = "1"
 moka = "0.11"
-flatbuffers = "23.5.26"
 async-trait = "0.1.71"
+serde = { version = "1", features = ["derive"] }
+
+[dev-dependencies]
+pretty_env_logger = "0.5"
 
 [build-dependencies]
 tonic-build = "0.10"

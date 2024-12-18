@@ -22,13 +22,13 @@ impl IndexClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for("index").await?;
+        let proc_id = env.client.wait_for("indexing").await?;
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
+        let proc_id = env.handle.block_on(env.client.wait_for("indexing"))?;
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }

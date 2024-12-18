@@ -2,6 +2,7 @@ mod client;
 mod proc;
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+pub use client::WriterClient;
 use geth_common::ExpectedRevision;
 pub use proc::Writing;
 
