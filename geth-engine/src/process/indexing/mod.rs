@@ -33,7 +33,7 @@ impl StoreRequestBuilder {
     }
 }
 
-enum IndexingReq {
+enum Request {
     Read {
         key: u64,
         start: u64,
@@ -51,7 +51,7 @@ enum IndexingReq {
     },
 }
 
-impl IndexingReq {
+impl Request {
     fn try_from(mut bytes: Bytes) -> Option<Self> {
         match bytes.get_u8() {
             0x00 => Some(Self::Read {
@@ -103,20 +103,20 @@ impl IndexingReq {
 }
 
 #[derive(PartialEq, Eq, Debug)]
-pub enum IndexingResp {
+pub enum Response {
     StreamDeleted,
     Committed,
     Streaming,
     Error,
 }
 
-impl IndexingResp {
+impl Response {
     fn serialize(self, mut buffer: BytesMut) -> Bytes {
         match self {
-            IndexingResp::StreamDeleted => buffer.put_u8(0x00),
-            IndexingResp::Committed => buffer.put_u8(0x01),
-            IndexingResp::Streaming => buffer.put_u8(0x02),
-            IndexingResp::Error => buffer.put_u8(0x03),
+            Response::StreamDeleted => buffer.put_u8(0x00),
+            Response::Committed => buffer.put_u8(0x01),
+            Response::Streaming => buffer.put_u8(0x02),
+            Response::Error => buffer.put_u8(0x03),
         }
 
         buffer.split().freeze()
@@ -124,15 +124,15 @@ impl IndexingResp {
 
     fn try_from(mut bytes: Bytes) -> eyre::Result<Self> {
         match bytes.get_u8() {
-            0x00 => Ok(IndexingResp::StreamDeleted),
-            0x01 => Ok(IndexingResp::Committed),
-            0x02 => Ok(IndexingResp::Streaming),
-            0x03 => Ok(IndexingResp::Error),
-            _ => eyre::bail!("unknown response message from from the index process"),
+            0x00 => Ok(Response::StreamDeleted),
+            0x01 => Ok(Response::Committed),
+            0x02 => Ok(Response::Streaming),
+            0x03 => Ok(Response::Error),
+            _ => eyre::bail!("protocol error when dealing with the index process"),
         }
     }
 
-    fn expect(self, expectation: IndexingResp) -> eyre::Result<()> {
+    fn expect(self, expectation: Response) -> eyre::Result<()> {
         if self != expectation {
             eyre::bail!("expected {:?} but got {:?}", expectation, self);
         }

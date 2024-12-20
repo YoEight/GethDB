@@ -1,5 +1,5 @@
 use crate::domain::index::CurrentRevision;
-use crate::process::indexing::{IndexingReq, IndexingResp, ENTRY_SIZE};
+use crate::process::indexing::{Request, Response, ENTRY_SIZE};
 use crate::process::{Item, ProcessRawEnv, RunnableRaw};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, IteratorIO};
@@ -47,9 +47,9 @@ where
         while let Some(item) = env.queue.recv().ok() {
             match item {
                 Item::Mail(mail) => {
-                    if let Some(req) = IndexingReq::try_from(mail.payload) {
+                    if let Some(req) = Request::try_from(mail.payload) {
                         match req {
-                            IndexingReq::Store { key, entries } => {
+                            Request::Store { key, entries } => {
                                 let last_revision = entries
                                     .slice(entries.len() - 2 * std::mem::size_of::<u64>()..)
                                     .get_u64_le();
@@ -60,7 +60,7 @@ where
                                     let _ = env.client.reply(
                                         mail.origin,
                                         mail.correlation,
-                                        IndexingResp::Error.serialize(env.buffer.split()),
+                                        Response::Error.serialize(env.buffer.split()),
                                     );
                                 } else {
                                     revision_cache.insert(key, last_revision);
@@ -68,12 +68,12 @@ where
                                     let _ = env.client.reply(
                                         mail.origin,
                                         mail.correlation,
-                                        IndexingResp::Committed.serialize(env.buffer.split()),
+                                        Response::Committed.serialize(env.buffer.split()),
                                     );
                                 }
                             }
 
-                            IndexingReq::LatestRevision { key } => {
+                            Request::LatestRevision { key } => {
                                 if let Some(current) = revision_cache.get(&key) {
                                     env.buffer.put_u64_le(current);
                                     env.client.reply(
@@ -104,7 +104,7 @@ where
                                 }
                             }
 
-                            IndexingReq::Read { .. } => {
+                            Request::Read { .. } => {
                                 tracing::error!(
                                     "read from the index should be a streaming operation"
                                 );
@@ -112,7 +112,7 @@ where
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    IndexingResp::Error.serialize(env.buffer.split()),
+                                    Response::Error.serialize(env.buffer.split()),
                                 )?;
                             }
                         }
@@ -120,12 +120,12 @@ where
                 }
 
                 Item::Stream(stream) => {
-                    if let Some(IndexingReq::Read {
+                    if let Some(Request::Read {
                         key,
                         start,
                         count,
                         dir,
-                    }) = IndexingReq::try_from(stream.payload)
+                    }) = Request::try_from(stream.payload)
                     {
                         let stream_cache = revision_cache.clone();
                         let stream_lsm = lsm.clone();
@@ -146,7 +146,7 @@ where
                                 {
                                     let _ = stream
                                         .sender
-                                        .send(IndexingResp::Error.serialize(stream_buffer.split()));
+                                        .send(Response::Error.serialize(stream_buffer.split()));
                                 }
 
                                 Ok(())
@@ -240,7 +240,7 @@ where
 
     if current_revision.is_deleted() {
         if stream
-            .send(IndexingResp::StreamDeleted.serialize(buffer.split()))
+            .send(Response::StreamDeleted.serialize(buffer.split()))
             .is_err()
         {
             return Ok(());
@@ -253,7 +253,7 @@ where
     };
 
     if stream
-        .send(IndexingResp::Streaming.serialize(buffer.split()))
+        .send(Response::Streaming.serialize(buffer.split()))
         .is_err()
     {
         return Ok(());

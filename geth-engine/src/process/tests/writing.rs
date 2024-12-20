@@ -58,7 +58,8 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
             usize::MAX,
             Direction::Forward,
         )
-        .await?;
+        .await?
+        .ok()?;
 
     while let Some((revision, position)) = stream.next().await? {
         assert_eq!(index as u64, revision);

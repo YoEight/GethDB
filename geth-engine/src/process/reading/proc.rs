@@ -1,6 +1,7 @@
-use crate::process::indexing::IndexClient;
+use crate::process::indexing::{IndexClient, Streaming};
 use crate::process::reading::{LogEntryExt, Request, Response};
 use crate::process::{Item, ProcessRawEnv, RunnableRaw};
+use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
@@ -40,12 +41,23 @@ where
                                 direction,
                                 count,
                             } => {
-                                let mut index_stream = env.handle.block_on(index_client.read(
+                                let index_stream = env.handle.block_on(index_client.read(
                                     mikoshi_hash(ident),
                                     start.raw(),
                                     count,
                                     direction,
                                 ))?;
+
+                                let mut index_stream = match index_stream {
+                                    ReadCompleted::Success(r) => r,
+                                    ReadCompleted::StreamDeleted => {
+                                        let _ = stream.sender.send(
+                                            Response::StreamDeleted.serialize(&mut env.buffer),
+                                        );
+
+                                        continue;
+                                    }
+                                };
 
                                 if stream
                                     .sender

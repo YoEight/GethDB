@@ -1465,3 +1465,19 @@ impl From<ProgramObtained> for operation_out::ProgramObtained {
         }
     }
 }
+
+#[derive(Clone)]
+pub enum ReadCompleted<A> {
+    Success(A),
+    StreamDeleted,
+}
+
+impl<A> ReadCompleted<A> {
+    pub fn ok(self) -> eyre::Result<A> {
+        if let ReadCompleted::Success(result) = self {
+            return Ok(result);
+        }
+
+        eyre::bail!("stream was deleted when trying to read from it")
+    }
+}

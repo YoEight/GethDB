@@ -1,8 +1,8 @@
 use crate::domain::index::CurrentRevision;
-use crate::process::indexing::{IndexingReq, IndexingResp};
+use crate::process::indexing::{Request, Response};
 use crate::process::{ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
-use geth_common::Direction;
+use geth_common::{Direction, ReadCompleted};
 use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
@@ -39,8 +39,8 @@ impl IndexClient {
         start: u64,
         count: usize,
         dir: Direction,
-    ) -> eyre::Result<Streaming> {
-        let payload = IndexingReq::read(self.buffer.split(), key, start, count, dir);
+    ) -> eyre::Result<ReadCompleted<Streaming>> {
+        let payload = Request::read(self.buffer.split(), key, start, count, dir);
         let mut inner = self.inner.request_stream(self.target, payload).await?;
 
         if let Some(bytes) = inner.recv().await {
@@ -48,9 +48,19 @@ impl IndexClient {
                 eyre::bail!("unexpected message from the index process");
             }
 
-            IndexingResp::try_from(bytes)?.expect(IndexingResp::Streaming)?;
+            match Response::try_from(bytes)? {
+                Response::Error => {
+                    eyre::bail!("internal error when running a read request to the index process")
+                }
 
-            return Ok(Streaming { inner, batch: None });
+                Response::StreamDeleted => return Ok(ReadCompleted::StreamDeleted),
+
+                Response::Streaming => {
+                    return Ok(ReadCompleted::Success(Streaming { inner, batch: None }))
+                }
+
+                _ => eyre::bail!("unexpected message when reading from the index process"),
+            }
         }
 
         eyre::bail!("index process is no longer reachable");
@@ -60,7 +70,7 @@ impl IndexClient {
     where
         I: IntoIterator<Item = (u64, u64)>,
     {
-        let mut req = IndexingReq::store(self.buffer.split(), key);
+        let mut req = Request::store(self.buffer.split(), key);
 
         for (revision, position) in entries {
             req.put_entry(revision, position);
@@ -68,11 +78,11 @@ impl IndexClient {
 
         let resp = self.inner.request(self.target, req.build()).await?;
 
-        IndexingResp::try_from(resp.payload)?.expect(IndexingResp::Committed)
+        Response::try_from(resp.payload)?.expect(Response::Committed)
     }
 
     pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
-        let req = IndexingReq::latest_revision(self.buffer.split(), key);
+        let req = Request::latest_revision(self.buffer.split(), key);
         let mut resp = self.inner.request(self.target, req).await?;
 
         if resp.payload.len() == 1 {
@@ -104,7 +114,7 @@ impl Streaming {
             self.batch = None;
             if let Some(bytes) = self.inner.recv().await {
                 if bytes.len() == 1 {
-                    IndexingResp::try_from(bytes)?.expect(IndexingResp::Error)?;
+                    Response::try_from(bytes)?.expect(Response::Error)?;
                     eyre::bail!("error when streaming from the index process");
                 }
 

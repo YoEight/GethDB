@@ -24,6 +24,7 @@ async fn test_store_read() -> eyre::Result<()> {
     let entries = client
         .read(2, 0, usize::MAX, Direction::Forward)
         .await?
+        .ok()?
         .collect()
         .await?;
 
