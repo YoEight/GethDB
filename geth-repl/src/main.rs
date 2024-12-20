@@ -22,7 +22,7 @@ use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings,
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
 use geth_mikoshi::wal::chunks::ChunkBasedWAL;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::wal::{LogReceipt, WALRef, WriteAheadLog};
 
 use crate::cli::{
     Cli, Mikoshi, MikoshiCommands, Offline, OfflineCommands, Online, OnlineCommands,
@@ -481,7 +481,7 @@ where
         proposes.into_iter(),
     );
 
-    let receipt = wal.append(events)?;
+    let receipt: LogReceipt = todo!(); //= wal.append(events)?;
     let position = receipt.start_position;
     let result = WriteResult {
         next_expected_version: ExpectedRevision::Revision(revision + len),

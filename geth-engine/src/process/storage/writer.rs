@@ -11,7 +11,7 @@ use geth_common::{
 };
 use geth_domain::AppendProposes;
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::wal::{LogReceipt, WALRef, WriteAheadLog};
 
 use crate::domain::index::{CurrentRevision, IndexRef};
 use crate::messages::{AppendStream, DeleteStream};
@@ -74,7 +74,8 @@ where
             params.events.into_iter(),
         );
 
-        let receipt = self.wal.append(events)?;
+        let receipt: LogReceipt = todo!();
+        // let receipt = self.wal.append(events)?;
         let _ = self.sub_client.event_written(Record {
             id: Uuid::new_v4(),
             r#type: names::types::EVENTS_WRITTEN.to_string(),
@@ -125,7 +126,7 @@ where
         };
 
         event.encode(&mut self.buffer).unwrap();
-        let receipt = self.wal.append(vec![self.buffer.split().freeze()])?;
+        let receipt: LogReceipt = todo!(); // = self.wal.append(vec![self.buffer.split().freeze()])?;
 
         self.index
             .inner
