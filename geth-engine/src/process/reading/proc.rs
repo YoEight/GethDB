@@ -1,5 +1,5 @@
 use crate::process::indexing::IndexClient;
-use crate::process::reading::{LogEntryExt, Request};
+use crate::process::reading::{LogEntryExt, Request, Response};
 use crate::process::{Item, ProcessRawEnv, RunnableRaw};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
@@ -47,6 +47,14 @@ where
                                     direction,
                                 ))?;
 
+                                if stream
+                                    .sender
+                                    .send(Response::Streaming.serialize(&mut env.buffer))
+                                    .is_err()
+                                {
+                                    continue;
+                                }
+
                                 let mut count = 0usize;
                                 while let Some((_, position)) =
                                     env.handle.block_on(index_stream.next())?
@@ -58,6 +66,7 @@ where
                                         continue;
                                     }
 
+                                    count = 0;
                                     if stream.sender.send(env.buffer.split().freeze()).is_err() {
                                         break;
                                     }

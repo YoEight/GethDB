@@ -268,6 +268,7 @@ where
     let mut count = 0;
     while let Some(item) = iter.next()? {
         if count >= batch_size {
+            count = 0;
             if stream.send(buffer.split().freeze()).is_err() {
                 return Ok(());
             }

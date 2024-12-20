@@ -85,12 +85,14 @@ pub enum Response {
 }
 
 impl Response {
-    fn serialize(self, buffer: &mut BytesMut) {
+    fn serialize(self, buffer: &mut BytesMut) -> Bytes {
         match self {
             Response::Error => buffer.put_u8(0x00),
             Response::StreamDeleted => buffer.put_u8(0x01),
             Response::Streaming => buffer.put_u8(0x02),
         }
+
+        buffer.split().freeze()
     }
 
     fn try_from(mut bytes: Bytes) -> Option<Self> {
@@ -146,7 +148,7 @@ impl LogEntryExt for LogEntry {
     fn deserialize(bytes: &mut Bytes) -> Self {
         let position = bytes.get_u64_le();
         let r#type = bytes.get_u8();
-        let len = bytes.get_u16_le() as usize;
+        let len = bytes.get_u32_le() as usize;
         Self {
             position,
             r#type,
