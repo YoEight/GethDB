@@ -5,27 +5,31 @@ use crate::process::{Item, ProcessRawEnv, RunnableRaw};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::wal::{LogEntries, WriteAheadLog};
+use geth_mikoshi::storage::{FileId, Storage};
+use geth_mikoshi::wal::chunks::ChunkContainer;
+use geth_mikoshi::wal::{LogEntries, LogWriter, WriteAheadLog};
+use std::io;
 
-pub struct Writing<WAL> {
-    wal: WAL,
+pub struct Writing<S> {
+    container: ChunkContainer<S>,
 }
 
-impl<WAL> Writing<WAL> {
-    pub fn new(wal: WAL) -> Self {
-        Self { wal }
+impl<S> Writing<S> {
+    pub fn new(container: ChunkContainer<S>) -> Self {
+        Self { container }
     }
 }
 
-impl<WAL> RunnableRaw for Writing<WAL>
+impl<S> RunnableRaw for Writing<S>
 where
-    WAL: WriteAheadLog + 'static,
+    S: Storage + 'static,
 {
     fn name(&self) -> &'static str {
         "writer"
     }
 
     fn run(mut self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+        let mut log_writer = LogWriter::load(self.container, env.buffer.split())?;
         let mut index_client = IndexClient::resolve_raw(&mut env)?;
 
         while let Some(item) = env.queue.recv().ok() {
@@ -74,7 +78,7 @@ where
 
                         let revision = current_revision.next_revision();
                         let mut entries = LogEntries::new(ident, revision, index, events);
-                        let receipt = self.wal.append(&mut entries)?;
+                        let receipt = log_writer.append(&mut entries)?;
 
                         if index {
                             env.handle

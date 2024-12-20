@@ -1,6 +1,7 @@
 use eyre::Report;
 use uuid::Uuid;
 
+use crate::process::reading;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use geth_mikoshi::MikoshiStream;
 
@@ -16,7 +17,17 @@ pub struct ReadStream {
 pub enum ReadStreamCompleted {
     StreamDeleted,
     Unexpected(Report),
-    Success(MikoshiStream),
+    Success(reading::Streaming),
+}
+
+impl ReadStreamCompleted {
+    pub fn success(self) -> eyre::Result<reading::Streaming> {
+        if let ReadStreamCompleted::Success(stream) = self {
+            return Ok(stream);
+        }
+
+        eyre::bail!("read stream failed")
+    }
 }
 
 #[derive(Debug)]

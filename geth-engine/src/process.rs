@@ -34,6 +34,7 @@ use crate::process::write_request_manager::WriteRequestManagerClient;
 mod tests;
 
 pub mod indexing;
+pub mod reading;
 pub mod storage;
 mod subscriptions;
 mod write_request_manager;
@@ -108,23 +109,24 @@ where
             .await;
 
         let stream_id = stream_id.to_string();
-        // FIXME: should return first class error.
-        Box::pin(async_stream::try_stream! {
-            match outcome {
-                ReadStreamCompleted::StreamDeleted => {
-                    let () = Err(eyre::eyre!("stream '{}' deleted", stream_id))?;
-
-                } ,
-                ReadStreamCompleted::Success(mut stream) => {
-                    while let Some(record) = stream.next().await? {
-                        yield record;
-                    }
-                }
-                ReadStreamCompleted::Unexpected(e) => {
-                    let () = Err(e)?;
-                }
-            }
-        })
+        // // FIXME: should return first class error.
+        // Box::pin(async_stream::try_stream! {
+        //     match outcome {
+        //         ReadStreamCompleted::StreamDeleted => {
+        //             let () = Err(eyre::eyre!("stream '{}' deleted", stream_id))?;
+        //
+        //         } ,
+        //         ReadStreamCompleted::Success(mut stream) => {
+        //             while let Some(record) = stream.next().await? {
+        //                 yield record;
+        //             }
+        //         }
+        //         ReadStreamCompleted::Unexpected(e) => {
+        //             let () = Err(e)?;
+        //         }
+        //     }
+        // })
+        todo!()
     }
 
     async fn subscribe_to_stream(

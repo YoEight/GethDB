@@ -7,6 +7,11 @@ use crate::wal::entries::EntryIter;
 
 pub mod chunks;
 pub mod entries;
+mod log_reader;
+mod log_writer;
+
+pub use log_reader::LogReader;
+pub use log_writer::LogWriter;
 
 pub struct WALRef<A> {
     inner: Arc<RwLock<A>>,
@@ -27,13 +32,13 @@ impl<WAL: WriteAheadLog> WALRef<WAL> {
         }
     }
 
-    pub fn append(&self, entries: &mut LogEntries) -> io::Result<LogReceipt>
+    pub fn append(&self, entries: &mut LogEntries) -> eyre::Result<LogReceipt>
 where {
         let mut inner = self.inner.write().unwrap();
         inner.append(entries)
     }
 
-    pub fn read_at(&self, position: u64) -> io::Result<LogEntry> {
+    pub fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
         let inner = self.inner.read().unwrap();
         inner.read_at(position)
     }
@@ -143,9 +148,9 @@ impl<'a> Entry<'a> {
 }
 
 pub trait WriteAheadLog {
-    fn append(&mut self, entries: &mut LogEntries) -> io::Result<LogReceipt>;
+    fn append(&mut self, entries: &mut LogEntries) -> eyre::Result<LogReceipt>;
 
-    fn read_at(&self, position: u64) -> io::Result<LogEntry>;
+    fn read_at(&self, position: u64) -> eyre::Result<LogEntry>;
 
     fn write_position(&self) -> u64;
 }

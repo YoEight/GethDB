@@ -4,7 +4,7 @@ use crate::process::writing::{WriterClient, Writing};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
 use geth_mikoshi::wal::WriteAheadLog;
 use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
@@ -16,7 +16,7 @@ struct Foo {
 }
 
 #[tokio::test]
-async fn test_write_read() -> eyre::Result<()> {
+async fn test_writer_proc_simple() -> eyre::Result<()> {
     let _ = tracing_subscriber::fmt::fmt()
         .with_max_level(tracing::Level::DEBUG)
         .with_file(true)
@@ -28,11 +28,12 @@ async fn test_write_read() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
     let proc_id = manager.spawn_raw(Indexing::new(storage.clone())).await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone(), buffer.split());
-    let wal = ChunkBasedWAL::load(storage.clone())?;
-    let writer_id = manager.spawn_raw(Writing::new(wal)).await?;
+    let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
+    let wal = ChunkBasedWAL::new(container.clone())?;
+    let writer_id = manager.spawn_raw(Writing::new(container.clone())).await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer);
     let mut expected = vec![];
-    let wal = ChunkBasedWAL::load(storage)?;
+    let wal = ChunkBasedWAL::new(container)?;
 
     for i in 0..10 {
         expected.push(Bytes::from(serde_json::to_vec(&Foo { baz: i + 10 })?));

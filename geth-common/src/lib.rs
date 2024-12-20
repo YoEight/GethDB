@@ -1,7 +1,6 @@
-use std::fmt::Display;
-
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
+use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -903,7 +902,15 @@ impl AppendStreamCompleted {
             return Ok(e);
         }
 
-        eyre::bail!("append was successful")
+        eyre::bail!("append succeeded")
+    }
+
+    pub fn success(self) -> eyre::Result<WriteResult> {
+        if let Self::Success(r) = self {
+            return Ok(r);
+        }
+
+        eyre::bail!("append failed")
     }
 }
 

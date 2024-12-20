@@ -8,7 +8,7 @@ use uuid::Uuid;
 use geth_common::{Direction, IteratorIO, Position, Record};
 use geth_domain::binary::models::Event;
 use geth_domain::RecordedEvent;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
+use geth_mikoshi::wal::{LogEntry, WALRef, WriteAheadLog};
 use geth_mikoshi::{storage::Storage, MikoshiStream};
 
 use crate::domain::index::IndexRef;
@@ -83,10 +83,10 @@ where
 
     let (read_stream, read_queue) = tokio::sync::mpsc::unbounded_channel();
     let stream = MikoshiStream::new(read_queue);
-    let _ = send_result.send(ReadStreamCompleted::Success(stream));
+    let _ = send_result.send(ReadStreamCompleted::Success(todo!()));
 
     while let Some(entry) = iter.next()? {
-        let record = wal.read_at(entry.position)?;
+        let record: LogEntry = todo!(); //wal.read_at(entry.position)?;
 
         let event = if let Ok(event) = geth_domain::parse_event(record.payload.as_ref()) {
             if let Event::RecordedEvent(event) = event.event.unwrap() {
@@ -126,7 +126,7 @@ where
 {
     let (read_stream, read_queue) = tokio::sync::mpsc::unbounded_channel();
     let stream = MikoshiStream::new(read_queue);
-    let _ = send_result.send(ReadStreamCompleted::Success(stream));
+    let _ = send_result.send(ReadStreamCompleted::Success(todo!()));
 
     let mut count = 0usize;
     let mut entries = wal.entries(params.starting.raw());
