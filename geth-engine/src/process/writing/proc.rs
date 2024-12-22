@@ -31,6 +31,7 @@ where
     fn run(mut self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
         let mut log_writer = LogWriter::load(self.container, env.buffer.split())?;
         let mut index_client = IndexClient::resolve_raw(&mut env)?;
+        let mut entries = LogEntries::new(env.buffer.split());
 
         while let Some(item) = env.queue.recv().ok() {
             match item {
@@ -47,8 +48,8 @@ where
                     if let Some(Request::Append {
                         ident,
                         expected,
-                        index,
                         events,
+                        ..
                     }) = Request::try_from(mail.payload)
                     {
                         let key = mikoshi_hash(&ident);
@@ -77,13 +78,11 @@ where
                         }
 
                         let revision = current_revision.next_revision();
-                        let mut entries = LogEntries::new(ident, revision, index, events);
+                        entries.begin(ident, revision, events);
                         let receipt = log_writer.append(&mut entries)?;
+                        let index_entries = entries.complete();
 
-                        if index {
-                            env.handle
-                                .block_on(index_client.store(key, entries.complete()))?;
-                        }
+                        env.handle.block_on(index_client.store_raw(index_entries))?;
 
                         env.client.reply(
                             mail.origin,
@@ -91,6 +90,10 @@ where
                             Response::committed(receipt.start_position, receipt.next_position)
                                 .serialize(&mut env.buffer),
                         )?;
+
+                        for events in entries.committed_events() {
+                            // TODO - push to pubsub process.
+                        }
 
                         continue;
                     }

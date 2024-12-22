@@ -81,6 +81,13 @@ impl IndexClient {
         Response::try_from(resp.payload)?.expect(Response::Committed)
     }
 
+    /// You send pre-serialized index request so you know what you are doing. Most likely we need
+    /// another way to construct index request if you use that function.
+    pub async fn store_raw(&mut self, payload: Bytes) -> eyre::Result<()> {
+        let resp = self.inner.request(self.target, payload).await?;
+        Response::try_from(resp.payload)?.expect(Response::Committed)
+    }
+
     pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
         let req = Request::latest_revision(self.buffer.split(), key);
         let mut resp = self.inner.request(self.target, req).await?;

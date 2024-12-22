@@ -36,6 +36,7 @@ mod tests;
 pub mod indexing;
 pub mod reading;
 pub mod storage;
+pub mod subscription;
 mod subscriptions;
 mod write_request_manager;
 pub mod writing;

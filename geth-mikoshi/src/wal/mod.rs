@@ -10,6 +10,7 @@ pub mod entries;
 mod log_reader;
 mod log_writer;
 
+use crate::hashing::mikoshi_hash;
 pub use log_reader::LogReader;
 pub use log_writer::LogWriter;
 
@@ -59,21 +60,21 @@ where {
 }
 
 pub struct LogEntries {
+    indexes: BytesMut,
+    committed: Vec<Bytes>,
     data: Bytes,
     ident: Bytes,
-    index: bool,
-    indexes: Vec<(u64, u64)>,
     revision: u64,
 }
 
 impl LogEntries {
-    pub fn new(ident: Bytes, revision: u64, index: bool, data: Bytes) -> Self {
+    pub fn new(buffer: BytesMut) -> Self {
         Self {
-            data,
-            ident,
-            index,
-            indexes: vec![],
-            revision,
+            indexes: buffer,
+            committed: Vec::with_capacity(32),
+            data: Bytes::new(),
+            ident: Bytes::new(),
+            revision: 0,
         }
     }
 
@@ -97,14 +98,29 @@ impl LogEntries {
         })
     }
 
-    pub fn complete(self) -> Vec<(u64, u64)> {
-        self.indexes
+    pub fn begin(&mut self, ident: Bytes, revision: u64, data: Bytes) {
+        let key = mikoshi_hash(&ident);
+
+        self.revision = revision;
+        self.ident = ident;
+        self.data = data;
+        self.committed.clear();
+
+        self.indexes.put_u8(0x01);
+        self.indexes.put_u64_le(key);
+    }
+
+    pub fn complete(&mut self) -> Bytes {
+        self.indexes.split().freeze()
     }
 
     fn index(&mut self, revision: u64, position: u64) {
-        if self.index {
-            self.indexes.push((revision, position));
-        }
+        self.indexes.put_u64_le(revision);
+        self.indexes.put_u64_le(position);
+    }
+
+    pub fn committed_events(&mut self) -> impl Iterator<Item = Bytes> + use<'_> {
+        self.committed.drain(..)
     }
 }
 
@@ -143,7 +159,11 @@ impl<'a> Entry<'a> {
         buffer.extend_from_slice(&self.data);
         buffer.put_u32_le(actual_size as u32);
 
-        buffer.split().freeze()
+        let event = buffer.split().freeze();
+
+        self.inner.committed.push(event.clone());
+
+        event
     }
 }
 
