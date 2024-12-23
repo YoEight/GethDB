@@ -1,5 +1,6 @@
 use crate::process::indexing::{IndexClient, Indexing};
 use crate::process::start_process_manager;
+use crate::process::subscription::PubSub;
 use crate::process::writing::{WriterClient, Writing};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
@@ -27,6 +28,7 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager();
     let storage = InMemoryStorage::new();
     let proc_id = manager.spawn_raw(Indexing::new(storage.clone())).await?;
+    manager.spawn(PubSub).await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone(), buffer.split());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
     let wal = ChunkBasedWAL::new(container.clone())?;

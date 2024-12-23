@@ -23,7 +23,9 @@ impl WriterClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
+        tracing::debug!("waiting for process for the writer process to be available...");
         let proc_id = env.client.wait_for("writer").await?;
+        tracing::debug!("writer process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }

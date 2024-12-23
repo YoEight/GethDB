@@ -19,12 +19,15 @@ impl SubscriptionClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
+        tracing::debug!("waiting for the pubsub process to be available...");
         let proc_id = env.client.wait_for("subscription").await?;
+        tracing::debug!("pubsub process available on {}", proc_id);
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
-
+        tracing::debug!("waiting for the pubsub process to be available...");
+        let proc_id = env.handle.block_on(env.client.wait_for("subscription"))?;
+        tracing::debug!("pubsub process available on {}", proc_id);
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 

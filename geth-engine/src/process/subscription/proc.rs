@@ -77,21 +77,21 @@ impl Runnable for PubSub {
                         match req {
                             Request::Push { mut events } => {
                                 while events.has_remaining() {
-                                    let mut temp = events.clone();
-                                    let size = temp.get_u32_le() as usize;
-                                    temp.advance(size_of::<u64>()); // position;
-
+                                    let size = events.get_u32_le() as usize;
                                     // There is no need to deal with events that doesn't hold
-                                    // data.
-                                    if temp.get_u8() != 0 {
-                                        events.advance(size_of::<u32>() + size + size_of::<u32>());
+                                    // data. We read right after the u64 encoded position to get
+                                    // the record type.
+                                    if events[size_of::<u64>()] != 0 {
+                                        events.advance(size + size_of::<u32>());
                                         continue;
                                     }
 
-                                    let str_len = events.get_u16_le() as usize;
-                                    let ident = events.copy_to_bytes(str_len);
+                                    // we discard record's position, type and revision bytes.
+                                    let mut sub_entry =
+                                        events.slice(size_of::<u64>() + 1 + size_of::<u64>()..);
 
-                                    events.advance(size_of::<u32>());
+                                    let str_len = sub_entry.get_u16_le() as usize;
+                                    let ident = sub_entry.copy_to_bytes(str_len);
                                     let event = events.copy_to_bytes(size);
 
                                     debug_assert_eq!(

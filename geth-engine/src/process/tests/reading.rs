@@ -1,6 +1,7 @@
 use crate::process::indexing::Indexing;
 use crate::process::reading::{ReaderClient, Reading};
 use crate::process::start_process_manager;
+use crate::process::subscription::PubSub;
 use crate::process::writing::{WriterClient, Writing};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ExpectedRevision, Revision};
@@ -27,6 +28,7 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager();
     let storage = InMemoryStorage::new();
     manager.spawn_raw(Indexing::new(storage.clone())).await?;
+    manager.spawn(PubSub).await?;
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
     let writer_id = manager.spawn_raw(Writing::new(container.clone())).await?;
     let reader_id = manager.spawn_raw(Reading::new(container.clone())).await?;

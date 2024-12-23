@@ -51,7 +51,10 @@ impl ReaderClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
+        tracing::debug!("waiting for the reader process to be available...");
         let proc_id = env.client.wait_for("reader").await?;
+        tracing::debug!("reader process available on {}", proc_id);
+
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 

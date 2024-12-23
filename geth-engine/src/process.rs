@@ -498,7 +498,15 @@ impl Manager {
 
                 tracing::info!("process {}:{:04} has started", proc.name, id);
                 let _ = resp.send(id);
+                let name = proc.name;
                 self.processes.insert(id, proc);
+
+                // We report processes that was waiting for that process to start.
+                if let Some(waiting) = self.wait_fors.remove(name) {
+                    for w in waiting {
+                        let _ = w.send(id);
+                    }
+                }
             }
 
             ManagerCommand::Find { name, resp } => {

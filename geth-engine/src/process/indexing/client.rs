@@ -21,13 +21,17 @@ impl IndexClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
+        tracing::debug!("waiting for the index process to be available...");
         let proc_id = env.client.wait_for("index").await?;
+        tracing::debug!("index process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
 
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
+        tracing::debug!("waiting the index process to be available...");
         let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
+        tracing::debug!("index process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
