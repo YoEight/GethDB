@@ -1,8 +1,7 @@
-use crate::messages::ReadStreamCompleted;
-use crate::process::reading::{Request, Response, Streaming};
-use crate::process::{ManagerClient, ProcId, ProcessEnv};
+use crate::process::reading::Streaming;
+use crate::process::subscription::{PushBuilder, Request, Response};
+use crate::process::{reading, ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::BytesMut;
-use geth_common::{Direction, Revision};
 
 pub struct SubscriptionClient {
     target: ProcId,
@@ -23,44 +22,43 @@ impl SubscriptionClient {
         let proc_id = env.client.wait_for("subscription").await?;
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
+    pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
+        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
 
-    pub async fn read(
-        &mut self,
-        stream_name: &str,
-        start: Revision<u64>,
-    ) -> eyre::Result<ReadStreamCompleted> {
-        //     let mut mailbox = self
-        //         .inner
-        //         .request_stream(
-        //             self.target,
-        //             Request::read(&mut self.buffer, stream_name, start, direction, count),
-        //         )
-        //         .await?;
-        //
-        //     if let Some(resp) = mailbox.recv().await {
-        //         if let Some(resp) = Response::try_from(resp) {
-        //             match resp {
-        //                 Response::Error => {
-        //                     eyre::bail!("internal error");
-        //                 }
-        //
-        //                 Response::StreamDeleted => {
-        //                     return Ok(ReadStreamCompleted::StreamDeleted);
-        //                 }
-        //
-        //                 Response::Streaming => {
-        //                     return Ok(ReadStreamCompleted::Success(Streaming {
-        //                         inner: mailbox,
-        //                         batch: None,
-        //                     }));
-        //                 }
-        //             }
-        //         }
-        //
-        //         eyre::bail!("protocol error when communicating with the reader process");
-        //     }
-        //
-        //     eyre::bail!("reader process is no longer running")
-        todo!()
+        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+    }
+
+    pub fn push(&mut self, builder: PushBuilder<'_>) -> eyre::Result<()> {
+        self.inner.send(self.target, builder.build())?;
+
+        Ok(())
+    }
+
+    pub async fn subscribe(&mut self, stream_name: &str) -> eyre::Result<reading::Streaming> {
+        let mut mailbox = self
+            .inner
+            .request_stream(
+                self.target,
+                Request::subscribe(&mut self.buffer, stream_name),
+            )
+            .await?;
+
+        if let Some(resp) = mailbox.recv().await {
+            if let Some(resp) = Response::try_from(resp) {
+                match resp {
+                    Response::Error => {
+                        eyre::bail!("internal error");
+                    }
+
+                    Response::Confirmed => {
+                        return Ok(Streaming::from(mailbox));
+                    }
+                }
+            }
+
+            eyre::bail!("protocol error when communicating with the pubsub process");
+        }
+
+        eyre::bail!("pubsub process is no longer running")
     }
 }

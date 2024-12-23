@@ -1,4 +1,4 @@
-use crate::process::subscription::Request;
+use crate::process::subscription::{Request, Response};
 use crate::process::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
 use bytes::{Buf, Bytes};
 use geth_common::ReadCompleted;
@@ -43,11 +43,17 @@ impl Runnable for PubSub {
         let mut reg = Register::default();
         while let Some(item) = env.queue.recv().await {
             match item {
-                Item::Stream(stream) => {
+                Item::Stream(mut stream) => {
                     if let Some(req) = Request::try_from(stream.payload) {
                         match req {
                             Request::Subscribe { ident } => {
-                                reg.register(ident, stream.sender);
+                                if stream
+                                    .sender
+                                    .send(Response::Confirmed.serialize(&mut env.buffer))
+                                    .is_ok()
+                                {
+                                    reg.register(ident, stream.sender);
+                                }
                             }
                             _ => {
                                 tracing::warn!(
@@ -56,6 +62,7 @@ impl Runnable for PubSub {
                                 );
                             }
                         }
+
                         continue;
                     }
 
@@ -96,8 +103,6 @@ impl Runnable for PubSub {
                                     reg.publish(&ident, event);
                                 }
                             }
-
-                            Request::Unsubscribe { ident } => {}
 
                             _ => {
                                 tracing::warn!(

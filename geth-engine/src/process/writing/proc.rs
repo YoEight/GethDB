@@ -1,7 +1,8 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::IndexClient;
+use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::{Request, Response};
-use crate::process::{Item, ProcessRawEnv, RunnableRaw};
+use crate::process::{subscription, Item, ProcessRawEnv, RunnableRaw};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -9,6 +10,7 @@ use geth_mikoshi::storage::{FileId, Storage};
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::{LogEntries, LogWriter, WriteAheadLog};
 use std::io;
+use uuid::Uuid;
 
 pub struct Writing<S> {
     container: ChunkContainer<S>,
@@ -31,6 +33,7 @@ where
     fn run(mut self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
         let mut log_writer = LogWriter::load(self.container, env.buffer.split())?;
         let mut index_client = IndexClient::resolve_raw(&mut env)?;
+        let mut sub_client = SubscriptionClient::resolve_raw(&mut env)?;
         let mut entries = LogEntries::new(env.buffer.split());
 
         while let Some(item) = env.queue.recv().ok() {
@@ -91,9 +94,12 @@ where
                                 .serialize(&mut env.buffer),
                         )?;
 
-                        for events in entries.committed_events() {
-                            // TODO - push to pubsub process.
+                        let mut builder = subscription::Request::push(&mut env.buffer);
+                        for event in entries.committed_events() {
+                            builder.push_entry(event);
                         }
+
+                        sub_client.push(builder)?;
 
                         continue;
                     }

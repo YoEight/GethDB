@@ -12,6 +12,10 @@ pub struct Streaming {
 }
 
 impl Streaming {
+    pub fn from(inner: UnboundedReceiver<Bytes>) -> Self {
+        Self { inner, batch: None }
+    }
+
     pub async fn next(&mut self) -> Option<LogEntry> {
         loop {
             if let Some(batch) = self.batch.as_mut() {

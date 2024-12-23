@@ -4,7 +4,6 @@ use crate::process::{ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ReadCompleted};
 use tokio::sync::mpsc::UnboundedReceiver;
-use uuid::Uuid;
 
 pub struct IndexClient {
     target: ProcId,
