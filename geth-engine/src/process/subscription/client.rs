@@ -1,7 +1,30 @@
-use crate::process::reading::Streaming;
 use crate::process::subscription::{PushBuilder, Request, Response};
 use crate::process::{reading, ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
-use bytes::BytesMut;
+use bytes::{Buf, Bytes, BytesMut};
+use geth_mikoshi::wal::LogEntry;
+use tokio::sync::mpsc::UnboundedReceiver;
+
+pub struct Streaming {
+    inner: UnboundedReceiver<Bytes>,
+}
+
+impl Streaming {
+    pub fn from(inner: UnboundedReceiver<Bytes>) -> Self {
+        Self { inner }
+    }
+
+    pub async fn next(&mut self) -> Option<LogEntry> {
+        if let Some(mut bytes) = self.inner.recv().await {
+            return Some(LogEntry {
+                position: bytes.get_u64_le(),
+                r#type: bytes.get_u8(),
+                payload: bytes,
+            });
+        }
+
+        None
+    }
+}
 
 pub struct SubscriptionClient {
     target: ProcId,
@@ -37,7 +60,7 @@ impl SubscriptionClient {
         Ok(())
     }
 
-    pub async fn subscribe(&mut self, stream_name: &str) -> eyre::Result<reading::Streaming> {
+    pub async fn subscribe(&mut self, stream_name: &str) -> eyre::Result<Streaming> {
         let mut mailbox = self
             .inner
             .request_stream(

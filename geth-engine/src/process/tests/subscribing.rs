@@ -64,6 +64,10 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
         assert_eq!(foo.baz, count as u32 + 10);
 
         count += 1;
+
+        if count >= 10 {
+            break;
+        }
     }
 
     assert_eq!(expected.len(), count as usize);
