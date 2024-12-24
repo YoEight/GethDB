@@ -31,7 +31,7 @@ where
             return Ok(None);
         }
 
-        let entry = self.wal.read_at(self.log_position)?;
+        let entry: LogEntry = todo!(); //= self.wal.read_at(self.log_position)?;
         self.log_position += entry.size() as u64;
 
         Ok(Some(entry))

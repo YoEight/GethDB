@@ -1,7 +1,6 @@
-use std::fmt::Display;
-
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
+use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
 
@@ -903,7 +902,15 @@ impl AppendStreamCompleted {
             return Ok(e);
         }
 
-        eyre::bail!("append was successful")
+        eyre::bail!("append succeeded")
+    }
+
+    pub fn success(self) -> eyre::Result<WriteResult> {
+        if let Self::Success(r) = self {
+            return Ok(r);
+        }
+
+        eyre::bail!("append failed")
     }
 }
 
@@ -1456,5 +1463,21 @@ impl From<ProgramObtained> for operation_out::ProgramObtained {
                 )),
             },
         }
+    }
+}
+
+#[derive(Clone)]
+pub enum ReadCompleted<A> {
+    Success(A),
+    StreamDeleted,
+}
+
+impl<A> ReadCompleted<A> {
+    pub fn ok(self) -> eyre::Result<A> {
+        if let ReadCompleted::Success(result) = self {
+            return Ok(result);
+        }
+
+        eyre::bail!("stream was deleted when trying to read from it")
     }
 }
