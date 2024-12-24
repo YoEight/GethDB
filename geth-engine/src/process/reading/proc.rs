@@ -1,33 +1,22 @@
 use crate::process::indexing::{IndexClient, Streaming};
 use crate::process::reading::{LogEntryExt, Request, Response};
-use crate::process::{Item, ProcessRawEnv, RunnableRaw};
+use crate::process::{Item, ProcessRawEnv, RunnableRaw, Runtime};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
+use tracing::warn;
 
-pub struct Reading<S> {
-    container: ChunkContainer<S>,
-}
+pub struct Reading;
 
-impl<S> Reading<S> {
-    pub fn new(container: ChunkContainer<S>) -> Self {
-        Self { container }
-    }
-}
-
-impl<S> RunnableRaw for Reading<S>
+impl<S> RunnableRaw<S> for Reading
 where
     S: Storage,
 {
-    fn name(&self) -> &'static str {
-        "reader"
-    }
-
-    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+    fn run(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()> {
         let batch_size = 500usize;
-        let reader = LogReader::new(self.container);
+        let reader = LogReader::new(runtime.container().clone());
         let mut index_client = IndexClient::resolve_raw(&mut env)?;
 
         while let Some(item) = env.queue.recv().ok() {

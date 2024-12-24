@@ -1,6 +1,6 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::{Request, Response, ENTRY_SIZE};
-use crate::process::{Item, ProcessRawEnv, RunnableRaw};
+use crate::process::{Item, ProcessRawEnv, RunnableRaw, Runtime};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
@@ -21,26 +21,18 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
-pub struct Indexing<S> {
-    storage: S,
-}
+pub struct Indexing;
 
-impl<S> Indexing<S> {
-    pub fn new(storage: S) -> Self {
-        Self { storage }
-    }
-}
-
-impl<S> RunnableRaw for Indexing<S>
+impl<S> RunnableRaw<S> for Indexing
 where
     S: Storage + Send + Sync + 'static,
 {
-    fn name(&self) -> &'static str {
-        "index"
-    }
+    fn run(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+        let lsm = Lsm::load(
+            LsmSettings::default(),
+            runtime.container().storage().clone(),
+        )?;
 
-    fn run(self: Box<Self>, mut env: ProcessRawEnv) -> eyre::Result<()> {
-        let lsm = Lsm::load(LsmSettings::default(), self.storage.clone())?;
         let lsm = Arc::new(RwLock::new(lsm));
         let revision_cache = new_revision_cache();
 

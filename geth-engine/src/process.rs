@@ -1,22 +1,14 @@
-use std::collections::HashMap;
-use std::time::Instant;
-use std::{io, thread};
-
 use bytes::{Bytes, BytesMut};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use std::collections::HashMap;
+use std::sync::Arc;
+use std::time::Instant;
+use std::{io, thread};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
 use uuid::Uuid;
-
-use geth_common::{
-    AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
-    Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
-};
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
@@ -26,9 +18,18 @@ use crate::messages::{
     AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
     SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
+use crate::process::indexing::Indexing;
 use crate::process::storage::StorageService;
 pub use crate::process::subscriptions::SubscriptionsClient;
 use crate::process::write_request_manager::WriteRequestManagerClient;
+use geth_common::{
+    AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
+    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
+    Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
+};
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::chunks::ChunkContainer;
+use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 #[cfg(test)]
 mod tests;
@@ -375,7 +376,8 @@ pub struct Process {
     pub created: Instant,
 }
 
-pub struct Manager {
+pub struct Manager<S> {
+    catalog: Catalog<S>,
     proc_id_gen: ProcId,
     processes: HashMap<ProcId, Process>,
     sender: UnboundedSender<ManagerCommand>,
@@ -388,7 +390,89 @@ pub struct Manager {
     processes_shutting_down: usize,
 }
 
-impl Manager {
+enum Activator<S> {
+    Managed(Arc<dyn Fn() -> Box<dyn Runnable<S> + Send + Sync + 'static> + Send + Sync + 'static>),
+    Raw(Arc<dyn Fn() -> Box<dyn RunnableRaw<S> + Send + Sync + 'static> + Send + Sync + 'static>),
+}
+
+impl<S> Activator<S> {
+    // fn spawn(&self) {
+    //     match self {
+    //         Activator::Managed(builder) => {
+    //             let toto = builder();
+    //             let name = toto.name();
+    //             let toto = builder();
+    //         }
+    //
+    //         Activator::Raw(_) => {}
+    //     }
+    // }
+}
+
+enum Topology {
+    Singleton(Option<ProcId>),
+    // Multiple(Vec<ProcId>),
+}
+
+struct Catalog<S> {
+    inner: HashMap<&'static str, CatalogItem<S>>,
+}
+
+impl<S> Catalog<S> {
+    pub fn builder() -> CatalogBuilder<S> {
+        CatalogBuilder {
+            inner: HashMap::new(),
+        }
+    }
+}
+
+pub struct CatalogBuilder<S> {
+    inner: HashMap<&'static str, CatalogItem<S>>,
+}
+
+impl<S> CatalogBuilder<S>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    pub fn register<R, F>(&mut self, name: &'static str, builder: F)
+    where
+        R: Runnable<S> + Send + Sync + 'static,
+        F: Fn() -> R + Send + Sync + 'static,
+    {
+        self.inner.insert(
+            name,
+            CatalogItem {
+                activator: Activator::Managed(Arc::new(move || Box::new(builder()))),
+                topology: Topology::Singleton(None),
+            },
+        );
+    }
+
+    pub fn register_raw<R, F>(&mut self, name: &'static str, builder: F)
+    where
+        R: RunnableRaw<S> + Send + Sync + 'static,
+        F: Fn() -> R + Send + Sync + 'static,
+    {
+        self.inner.insert(
+            name,
+            CatalogItem {
+                activator: Activator::Raw(Arc::new(move || Box::new(builder()))),
+                topology: Topology::Singleton(None),
+            },
+        );
+    }
+
+    pub fn build(self) -> Catalog<S> {
+        Catalog { inner: self.inner }
+    }
+}
+
+struct CatalogItem<S> {
+    activator: Activator<S>,
+    topology: Topology,
+}
+
+impl<S> Manager<S> {
     fn handle(&mut self, cmd: ManagerCommand) {
         if self.closing && !cmd.is_shutdown_related() {
             return;
@@ -397,105 +481,106 @@ impl Manager {
         match cmd {
             ManagerCommand::Spawn {
                 parent,
-                runnable,
+                // runnable,
                 resp,
             } => {
                 let id = self.proc_id_gen;
                 self.proc_id_gen += 1;
 
-                let proc = match runnable {
-                    RunnableType::Tokio(runnable) => {
-                        let (proc_sender, proc_queue) = unbounded_channel();
-                        let name = runnable.name();
-                        let manager_sender = self.sender.clone();
-                        let buffer = self.buffer.split();
+                // let proc = match runnable {
+                //     RunnableType::Tokio(runnable) => {
+                //         let (proc_sender, proc_queue) = unbounded_channel();
+                //         let name = runnable.name();
+                //         let manager_sender = self.sender.clone();
+                //         let buffer = self.buffer.split();
+                //
+                //         tokio::spawn(async move {
+                //             let error = runnable
+                //                 .run(ProcessEnv {
+                //                     id,
+                //                     queue: proc_queue,
+                //                     client: ManagerClient {
+                //                         id,
+                //                         parent,
+                //                         inner: manager_sender.clone(),
+                //                     },
+                //                     buffer,
+                //                 })
+                //                 .await
+                //                 .err();
+                //
+                //             if let Some(e) = error.as_ref() {
+                //                 tracing::error!(
+                //                     "process '{}:{:04}' terminated with an error: {}",
+                //                     name,
+                //                     id,
+                //                     e
+                //                 );
+                //             } else {
+                //                 tracing::info!("process '{}:{:04}' terminated", name, id);
+                //             }
+                //
+                //             let _ =
+                //                 manager_sender.send(ManagerCommand::ProcTerminated { id, error });
+                //         });
+                //
+                //         Process {
+                //             id,
+                //             parent: None,
+                //             mailbox: Mailbox::Tokio(proc_sender),
+                //             name,
+                //             created: Instant::now(),
+                //         }
+                //     }
+                //
+                //     RunnableType::Raw(runnable) => {
+                //         let (proc_sender, proc_queue) = std::sync::mpsc::channel();
+                //         let manager_client = self.sender.clone();
+                //         let manager_buffer = self.buffer.split();
+                //         let name = runnable.name();
+                //         let handle = Handle::current();
+                //
+                //         thread::spawn(move || {
+                //             let error = runnable
+                //                 .run(ProcessRawEnv {
+                //                     id,
+                //                     queue: proc_queue,
+                //                     client: ManagerClient {
+                //                         id,
+                //                         parent,
+                //                         inner: manager_client.clone(),
+                //                     },
+                //                     buffer: manager_buffer,
+                //                     handle,
+                //                 })
+                //                 .err();
+                //
+                //             if let Some(e) = error.as_ref() {
+                //                 tracing::error!(
+                //                     "process '{}:{:04}' terminated with an error: {}",
+                //                     name,
+                //                     id,
+                //                     e
+                //                 );
+                //             } else {
+                //                 tracing::info!("process '{}:{:04}' terminated", name, id);
+                //             }
+                //
+                //             let _ =
+                //                 manager_client.send(ManagerCommand::ProcTerminated { id, error });
+                //         });
+                //
+                //         Process {
+                //             id,
+                //             parent: None,
+                //             // mailbox: Mailbox::Raw(proc_sender),
+                //             name,
+                //             created: Instant::now(),
+                //         }
+                //     }
+                // };
 
-                        tokio::spawn(async move {
-                            let error = runnable
-                                .run(ProcessEnv {
-                                    id,
-                                    queue: proc_queue,
-                                    client: ManagerClient {
-                                        id,
-                                        parent,
-                                        inner: manager_sender.clone(),
-                                    },
-                                    buffer,
-                                })
-                                .await
-                                .err();
-
-                            if let Some(e) = error.as_ref() {
-                                tracing::error!(
-                                    "process '{}:{:04}' terminated with an error: {}",
-                                    name,
-                                    id,
-                                    e
-                                );
-                            } else {
-                                tracing::info!("process '{}:{:04}' terminated", name, id);
-                            }
-
-                            let _ =
-                                manager_sender.send(ManagerCommand::ProcTerminated { id, error });
-                        });
-
-                        Process {
-                            id,
-                            parent: None,
-                            mailbox: Mailbox::Tokio(proc_sender),
-                            name,
-                            created: Instant::now(),
-                        }
-                    }
-
-                    RunnableType::Raw(runnable) => {
-                        let (proc_sender, proc_queue) = std::sync::mpsc::channel();
-                        let manager_client = self.sender.clone();
-                        let manager_buffer = self.buffer.split();
-                        let name = runnable.name();
-                        let handle = Handle::current();
-
-                        thread::spawn(move || {
-                            let error = runnable
-                                .run(ProcessRawEnv {
-                                    id,
-                                    queue: proc_queue,
-                                    client: ManagerClient {
-                                        id,
-                                        parent,
-                                        inner: manager_client.clone(),
-                                    },
-                                    buffer: manager_buffer,
-                                    handle,
-                                })
-                                .err();
-
-                            if let Some(e) = error.as_ref() {
-                                tracing::error!(
-                                    "process '{}:{:04}' terminated with an error: {}",
-                                    name,
-                                    id,
-                                    e
-                                );
-                            } else {
-                                tracing::info!("process '{}:{:04}' terminated", name, id);
-                            }
-
-                            let _ =
-                                manager_client.send(ManagerCommand::ProcTerminated { id, error });
-                        });
-
-                        Process {
-                            id,
-                            parent: None,
-                            mailbox: Mailbox::Raw(proc_sender),
-                            name,
-                            created: Instant::now(),
-                        }
-                    }
-                };
-
+                let proc: Process = todo!();
                 tracing::info!("process {}:{:04} has started", proc.name, id);
                 let _ = resp.send(id);
                 let name = proc.name;
@@ -645,24 +730,24 @@ impl Item {
     }
 }
 
-enum RunnableType {
-    Tokio(Box<dyn Runnable + Send + Sync + 'static>),
-    Raw(Box<dyn RunnableRaw + Send + Sync + 'static>),
-}
+// enum RunnableType {
+//     Tokio(Box<dyn Runnable + Send + Sync + 'static>),
+//     Raw(Box<dyn RunnableRaw + Send + Sync + 'static>),
+// }
 
-impl RunnableType {
-    fn name(&self) -> &'static str {
-        match self {
-            RunnableType::Tokio(x) => x.name(),
-            RunnableType::Raw(x) => x.name(),
-        }
-    }
-}
+// impl RunnableType {
+//     fn name(&self) -> &'static str {
+//         match self {
+//             RunnableType::Tokio(x) => x.name(),
+//             RunnableType::Raw(x) => x.name(),
+//         }
+//     }
+// }
 
 pub enum ManagerCommand {
     Spawn {
         parent: Option<ProcId>,
-        runnable: RunnableType,
+        // runnable: RunnableType,
         resp: oneshot::Sender<ProcId>,
     },
 
@@ -717,14 +802,12 @@ pub struct ProcessRawEnv {
 }
 
 #[async_trait::async_trait]
-pub trait Runnable {
-    fn name(&self) -> &'static str;
-    async fn run(self: Box<Self>, env: ProcessEnv) -> eyre::Result<()>;
+pub trait Runnable<S> {
+    async fn run(self: Box<Self>, runtime: Runtime<S>, env: ProcessEnv) -> eyre::Result<()>;
 }
 
-pub trait RunnableRaw {
-    fn name(&self) -> &'static str;
-    fn run(self: Box<Self>, env: ProcessRawEnv) -> eyre::Result<()>;
+pub trait RunnableRaw<S> {
+    fn run(self: Box<Self>, runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>;
 }
 
 #[derive(Clone)]
@@ -735,51 +818,51 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn spawn<R>(&self, run: R) -> eyre::Result<ProcId>
-    where
-        R: Runnable + Send + Sync + 'static,
-    {
-        let (resp, receiver) = oneshot::channel();
-        if self
-            .inner
-            .send(ManagerCommand::Spawn {
-                parent: self.parent,
-                runnable: RunnableType::Tokio(Box::new(run)),
-                resp,
-            })
-            .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
-
-        match receiver.await {
-            Ok(id) => Ok(id),
-            Err(_) => eyre::bail!("process manager has shutdown"),
-        }
-    }
-
-    pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<ProcId>
-    where
-        R: RunnableRaw + Send + Sync + 'static,
-    {
-        let (resp, receiver) = oneshot::channel();
-        if self
-            .inner
-            .send(ManagerCommand::Spawn {
-                parent: self.parent,
-                runnable: RunnableType::Raw(Box::new(run)),
-                resp,
-            })
-            .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
-
-        match receiver.await {
-            Ok(id) => Ok(id),
-            Err(_) => eyre::bail!("process manager has shutdown"),
-        }
-    }
+    // pub async fn spawn<R>(&self, run: R) -> eyre::Result<ProcId>
+    // where
+    //     R: Runnable + Send + Sync + 'static,
+    // {
+    //     let (resp, receiver) = oneshot::channel();
+    //     if self
+    //         .inner
+    //         .send(ManagerCommand::Spawn {
+    //             parent: self.parent,
+    //             runnable: RunnableType::Tokio(Box::new(run)),
+    //             resp,
+    //         })
+    //         .is_err()
+    //     {
+    //         eyre::bail!("process manager has shutdown");
+    //     }
+    //
+    //     match receiver.await {
+    //         Ok(id) => Ok(id),
+    //         Err(_) => eyre::bail!("process manager has shutdown"),
+    //     }
+    // }
+    //
+    // pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<ProcId>
+    // where
+    //     R: RunnableRaw + Send + Sync + 'static,
+    // {
+    //     let (resp, receiver) = oneshot::channel();
+    //     if self
+    //         .inner
+    //         .send(ManagerCommand::Spawn {
+    //             parent: self.parent,
+    //             runnable: RunnableType::Raw(Box::new(run)),
+    //             resp,
+    //         })
+    //         .is_err()
+    //     {
+    //         eyre::bail!("process manager has shutdown");
+    //     }
+    //
+    //     match receiver.await {
+    //         Ok(id) => Ok(id),
+    //         Err(_) => eyre::bail!("process manager has shutdown"),
+    //     }
+    // }
 
     pub async fn find(&self, name: &'static str) -> eyre::Result<Option<ProcId>> {
         let (resp, receiver) = oneshot::channel();
@@ -927,9 +1010,23 @@ impl ManagerClient {
     }
 }
 
-pub fn start_process_manager() -> ManagerClient {
+pub fn start_process_manager<S>() -> ManagerClient
+where
+    S: Storage + Send + Sync + 'static,
+{
+    let mut builder = Catalog::<S>::builder();
+
+    builder.register_raw("index", || Indexing);
+
+    start_process_manager_with_catalog(builder)
+}
+
+pub fn start_process_manager_with_catalog<S>(builder: CatalogBuilder<S>) -> ManagerClient
+where
+    S: Storage + Send + Sync + 'static,
+{
     let (sender, queue) = unbounded_channel();
-    tokio::spawn(process_manager(sender.clone(), queue));
+    tokio::spawn(process_manager(builder.build(), sender.clone(), queue));
 
     ManagerClient {
         id: 0,
@@ -938,11 +1035,25 @@ pub fn start_process_manager() -> ManagerClient {
     }
 }
 
-async fn process_manager(
+pub struct Nothing;
+
+pub struct Runtime<S> {
+    container: ChunkContainer<S>,
+}
+
+impl<S> Runtime<S> {
+    pub fn container(&self) -> &ChunkContainer<S> {
+        &self.container
+    }
+}
+
+async fn process_manager<S>(
+    catalog: Catalog<S>,
     sender: UnboundedSender<ManagerCommand>,
     queue: UnboundedReceiver<ManagerCommand>,
 ) {
     let mut manager = Manager {
+        catalog,
         proc_id_gen: 1,
         processes: Default::default(),
         sender,

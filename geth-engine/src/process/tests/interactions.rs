@@ -1,4 +1,4 @@
-use crate::process::{start_process_manager, Item, Mail, ProcessEnv, Runnable};
+use crate::process::{start_process_manager, Item, Mail, Nothing, ProcessEnv, Runnable, Runtime};
 use bytes::{Buf, BufMut, BytesMut};
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
@@ -7,12 +7,8 @@ use uuid::Uuid;
 struct EchoProc;
 
 #[async_trait::async_trait]
-impl Runnable for EchoProc {
-    fn name(&self) -> &'static str {
-        "echo"
-    }
-
-    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
+impl<S> Runnable<S> for EchoProc {
+    async fn run(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()> {
         while let Some(item) = env.queue.recv().await {
             if let Item::Mail(mail) = item {
                 env.client
@@ -31,12 +27,8 @@ struct Sink {
 }
 
 #[async_trait::async_trait]
-impl Runnable for Sink {
-    fn name(&self) -> &'static str {
-        "sink"
-    }
-
-    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
+impl<S> Runnable<S> for Sink {
+    async fn run(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()> {
         let proc_id = env.client.wait_for(self.target).await?;
 
         for mail in self.mails {
@@ -57,12 +49,8 @@ impl Runnable for Sink {
 struct StreamerProc;
 
 #[async_trait::async_trait]
-impl Runnable for StreamerProc {
-    fn name(&self) -> &'static str {
-        "streamer"
-    }
-
-    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
+impl<S> Runnable<S> for StreamerProc {
+    async fn run(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()> {
         while let Some(item) = env.queue.recv().await {
             if let Item::Stream(mut stream) = item {
                 while stream.payload.has_remaining() {

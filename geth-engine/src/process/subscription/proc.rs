@@ -1,5 +1,5 @@
 use crate::process::subscription::{Request, Response};
-use crate::process::{Item, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw};
+use crate::process::{Item, Nothing, ProcessEnv, ProcessRawEnv, Runnable, RunnableRaw, Runtime};
 use bytes::{Buf, Bytes};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -34,12 +34,8 @@ impl Register {
 pub struct PubSub;
 
 #[async_trait::async_trait]
-impl Runnable for PubSub {
-    fn name(&self) -> &'static str {
-        "subscription"
-    }
-
-    async fn run(self: Box<Self>, mut env: ProcessEnv) -> eyre::Result<()> {
+impl<S> Runnable<S> for PubSub {
+    async fn run(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()> {
         let mut reg = Register::default();
         while let Some(item) = env.queue.recv().await {
             match item {
