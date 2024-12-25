@@ -23,11 +23,11 @@ fn new_revision_cache() -> RevisionCache {
 
 pub struct Indexing;
 
-impl<S> RunnableRaw<S> for Indexing
-where
-    S: Storage + Send + Sync + 'static,
-{
-    fn run(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+impl RunnableRaw for Indexing {
+    fn run<S>(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+    where
+        S: Storage + Send + Sync + 'static,
+    {
         let lsm = Lsm::load(
             LsmSettings::default(),
             runtime.container().storage().clone(),

@@ -25,13 +25,11 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
         .init();
 
     let mut buffer = BytesMut::new();
-    let manager = start_process_manager();
     let storage = InMemoryStorage::new();
-    manager.spawn_raw(Indexing::new(storage.clone())).await?;
-    manager.spawn(PubSub).await?;
+    let manager = start_process_manager(storage.clone());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
-    let writer_id = manager.spawn_raw(Writing::new(container.clone())).await?;
-    let reader_id = manager.spawn_raw(Reading::new(container.clone())).await?;
+    let writer_id = manager.wait_for("writer").await?;
+    let reader_id = manager.wait_for("reader").await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
     let mut reader_client = ReaderClient::new(reader_id, manager.clone(), buffer);
     let mut expected = vec![];

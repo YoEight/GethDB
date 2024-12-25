@@ -19,9 +19,12 @@ use crate::messages::{
     SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
 use crate::process::indexing::Indexing;
+use crate::process::reading::Reading;
 use crate::process::storage::StorageService;
+use crate::process::subscription::PubSub;
 pub use crate::process::subscriptions::SubscriptionsClient;
 use crate::process::write_request_manager::WriteRequestManagerClient;
+use crate::process::writing::Writing;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
     GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
@@ -377,7 +380,8 @@ pub struct Process {
 }
 
 pub struct Manager<S> {
-    catalog: Catalog<S>,
+    runtime: Runtime<S>,
+    catalog: Catalog,
     proc_id_gen: ProcId,
     processes: HashMap<ProcId, Process>,
     sender: UnboundedSender<ManagerCommand>,
@@ -390,12 +394,17 @@ pub struct Manager<S> {
     processes_shutting_down: usize,
 }
 
-enum Activator<S> {
-    Managed(Arc<dyn Fn() -> Box<dyn Runnable<S> + Send + Sync + 'static> + Send + Sync + 'static>),
-    Raw(Arc<dyn Fn() -> Box<dyn RunnableRaw<S> + Send + Sync + 'static> + Send + Sync + 'static>),
+pub enum Proc {
+    Writing,
+    Reading,
+    Indexing,
+    PubSub,
+    Echo,
+    Sink,
+    Streamer,
 }
 
-impl<S> Activator<S> {
+impl Proc {
     // fn spawn(&self) {
     //     match self {
     //         Activator::Managed(builder) => {
@@ -414,68 +423,66 @@ enum Topology {
     // Multiple(Vec<ProcId>),
 }
 
-struct Catalog<S> {
-    inner: HashMap<&'static str, CatalogItem<S>>,
+struct Catalog {
+    inner: HashMap<&'static str, CatalogItem>,
 }
 
-impl<S> Catalog<S> {
-    pub fn builder() -> CatalogBuilder<S> {
+impl Catalog {
+    pub fn builder() -> CatalogBuilder {
         CatalogBuilder {
             inner: HashMap::new(),
         }
     }
 }
 
-pub struct CatalogBuilder<S> {
-    inner: HashMap<&'static str, CatalogItem<S>>,
+pub struct CatalogBuilder {
+    inner: HashMap<&'static str, CatalogItem>,
 }
 
-impl<S> CatalogBuilder<S>
-where
-    S: Storage + Send + Sync + 'static,
-{
-    pub fn register<R, F>(&mut self, name: &'static str, builder: F)
+impl CatalogBuilder {
+    pub fn register<R>(&mut self, name: &'static str, runnable: R)
     where
-        R: Runnable<S> + Send + Sync + 'static,
-        F: Fn() -> R + Send + Sync + 'static,
+        R: Runnable + Send + Sync + 'static,
     {
         self.inner.insert(
             name,
             CatalogItem {
-                activator: Activator::Managed(Arc::new(move || Box::new(builder()))),
+                activator: Proc::Managed(Arc::new(Box::new(runnable))),
                 topology: Topology::Singleton(None),
             },
         );
     }
 
-    pub fn register_raw<R, F>(&mut self, name: &'static str, builder: F)
+    pub fn register_raw<R>(&mut self, name: &'static str, runnable: R)
     where
-        R: RunnableRaw<S> + Send + Sync + 'static,
-        F: Fn() -> R + Send + Sync + 'static,
+        R: RunnableRaw + Send + Sync + 'static,
     {
         self.inner.insert(
             name,
             CatalogItem {
-                activator: Activator::Raw(Arc::new(move || Box::new(builder()))),
+                activator: Proc::Raw(Arc::new(Box::new(runnable))),
                 topology: Topology::Singleton(None),
             },
         );
     }
 
-    pub fn build(self) -> Catalog<S> {
+    pub fn build(self) -> Catalog {
         Catalog { inner: self.inner }
     }
 }
 
-struct CatalogItem<S> {
-    activator: Activator<S>,
+struct CatalogItem {
+    activator: Proc,
     topology: Topology,
 }
 
-impl<S> Manager<S> {
-    fn handle(&mut self, cmd: ManagerCommand) {
+impl<S> Manager<S>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    fn handle(&mut self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.closing && !cmd.is_shutdown_related() {
-            return;
+            return Ok(());
         }
 
         match cmd {
@@ -598,7 +605,7 @@ impl<S> Manager<S> {
                 for proc in self.processes.values() {
                     if proc.name == name {
                         let _ = resp.send(Some(proc.id));
-                        return;
+                        return Ok(());
                     }
                 }
 
@@ -626,19 +633,71 @@ impl<S> Manager<S> {
             },
 
             ManagerCommand::WaitFor { name, resp } => {
-                for proc in self.processes.values() {
-                    if proc.name != name {
-                        continue;
-                    }
-
-                    let _ = resp.send(proc.id);
-                    return;
-                }
-
-                if let Some(backlog) = self.wait_fors.get_mut(name) {
-                    backlog.push(resp);
+                let item = if let Some(item) = self.catalog.inner.get_mut(name) {
+                    item
                 } else {
-                    self.wait_fors.insert(name, vec![resp]);
+                    eyre::bail!("process '{}' unknown", name);
+                };
+
+                match &mut item.topology {
+                    Topology::Singleton(prev) => {
+                        if let Some(id) = prev.as_ref() {
+                            let _ = resp.send(*id);
+                            return Ok(());
+                        } else {
+                            let id = self.proc_id_gen;
+                            self.proc_id_gen += 1;
+                            *prev = Some(id);
+
+                            match &item.activator {
+                                Proc::Managed(builder) => {
+                                    let runnable = builder.clone();
+                                    let runtime = self.runtime.clone();
+                                    let (proc_sender, proc_queue) = unbounded_channel();
+                                    let manager_sender = self.sender.clone();
+                                    let buffer = self.buffer.split();
+                                    tokio::spawn(async move {
+                                        let error = runnable
+                                            .run(
+                                                runtime,
+                                                ProcessEnv {
+                                                    id,
+                                                    queue: proc_queue,
+                                                    client: ManagerClient {
+                                                        id,
+                                                        parent: None,
+                                                        inner: manager_sender.clone(),
+                                                    },
+                                                    buffer,
+                                                },
+                                            )
+                                            .await
+                                            .err();
+
+                                        if let Some(e) = error.as_ref() {
+                                            tracing::error!(
+                                                "process '{}:{:04}' terminated with an error: {}",
+                                                name,
+                                                id,
+                                                e
+                                            );
+                                        } else {
+                                            tracing::info!(
+                                                "process '{}:{:04}' terminated",
+                                                name,
+                                                id
+                                            );
+                                        }
+
+                                        let _ = manager_sender
+                                            .send(ManagerCommand::ProcTerminated { id, error });
+                                    });
+                                }
+
+                                Proc::Raw(runnable) => {}
+                            }
+                        }
+                    }
                 }
             }
 
@@ -695,7 +754,7 @@ impl<S> Manager<S> {
                     if self.processes_shutting_down == 0 {
                         let _ = resp.send(());
                         self.queue.close();
-                        return;
+                        return Ok(());
                     }
 
                     self.processes.clear();
@@ -704,6 +763,8 @@ impl<S> Manager<S> {
                 self.close_resp.push(resp);
             }
         }
+
+        Ok(())
     }
 }
 
@@ -802,12 +863,16 @@ pub struct ProcessRawEnv {
 }
 
 #[async_trait::async_trait]
-pub trait Runnable<S> {
-    async fn run(self: Box<Self>, runtime: Runtime<S>, env: ProcessEnv) -> eyre::Result<()>;
+pub trait Runnable {
+    async fn run<S>(self: Box<Self>, runtime: Runtime<S>, env: ProcessEnv) -> eyre::Result<()>
+    where
+        S: Storage + Send + Sync + 'static;
 }
 
-pub trait RunnableRaw<S> {
-    fn run(self: Box<Self>, runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>;
+pub trait RunnableRaw {
+    fn run<S>(self: Box<Self>, runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
+    where
+        S: Storage + Send + Sync + 'static;
 }
 
 #[derive(Clone)]
@@ -1010,33 +1075,48 @@ impl ManagerClient {
     }
 }
 
-pub fn start_process_manager<S>() -> ManagerClient
+pub fn start_process_manager<S>(storage: S) -> ManagerClient
 where
     S: Storage + Send + Sync + 'static,
 {
-    let mut builder = Catalog::<S>::builder();
+    let mut builder = Catalog::builder();
 
-    builder.register_raw("index", || Indexing);
+    builder.register_raw("index", Indexing);
+    builder.register_raw("writer", Writing);
+    builder.register_raw("reader", Reading);
+    builder.register("pubsub", PubSub);
 
-    start_process_manager_with_catalog(builder)
+    start_process_manager_with_catalog(storage, builder).unwrap()
 }
 
-pub fn start_process_manager_with_catalog<S>(builder: CatalogBuilder<S>) -> ManagerClient
+pub fn start_process_manager_with_catalog<S>(
+    storage: S,
+    builder: CatalogBuilder,
+) -> io::Result<ManagerClient>
 where
     S: Storage + Send + Sync + 'static,
 {
     let (sender, queue) = unbounded_channel();
-    tokio::spawn(process_manager(builder.build(), sender.clone(), queue));
+    let mut buffer = BytesMut::new();
+    let container = ChunkContainer::load(storage, &mut buffer)?;
+    tokio::spawn(process_manager(
+        builder.build(),
+        container,
+        buffer,
+        sender.clone(),
+        queue,
+    ));
 
-    ManagerClient {
+    Ok(ManagerClient {
         id: 0,
         parent: None,
         inner: sender,
-    }
+    })
 }
 
 pub struct Nothing;
 
+#[derive(Clone)]
 pub struct Runtime<S> {
     container: ChunkContainer<S>,
 }
@@ -1048,18 +1128,23 @@ impl<S> Runtime<S> {
 }
 
 async fn process_manager<S>(
-    catalog: Catalog<S>,
+    catalog: Catalog,
+    container: ChunkContainer<S>,
+    buffer: BytesMut,
     sender: UnboundedSender<ManagerCommand>,
     queue: UnboundedReceiver<ManagerCommand>,
-) {
+) where
+    S: Storage + Send + Sync + 'static,
+{
     let mut manager = Manager {
+        runtime: Runtime { container },
         catalog,
         proc_id_gen: 1,
         processes: Default::default(),
         sender,
         requests: Default::default(),
         wait_fors: Default::default(),
-        buffer: BytesMut::new(),
+        buffer,
         closing: false,
         close_resp: vec![],
         queue,
@@ -1067,6 +1152,9 @@ async fn process_manager<S>(
     };
 
     while let Some(cmd) = manager.queue.recv().await {
-        manager.handle(cmd);
+        if let Err(e) = manager.handle(cmd) {
+            tracing::error!("unexpected: {}", e);
+            break;
+        }
     }
 }

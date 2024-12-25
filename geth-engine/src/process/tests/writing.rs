@@ -6,7 +6,7 @@ use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
-use geth_mikoshi::wal::WriteAheadLog;
+use geth_mikoshi::wal::{LogReader, WriteAheadLog};
 use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -25,17 +25,15 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
         .init();
 
     let mut buffer = BytesMut::new();
-    let manager = start_process_manager();
     let storage = InMemoryStorage::new();
-    let proc_id = manager.spawn_raw(Indexing::new(storage.clone())).await?;
-    manager.spawn(PubSub).await?;
+    let manager = start_process_manager(storage.clone());
+    let proc_id = manager.wait_for("index").await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone(), buffer.split());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
-    let wal = ChunkBasedWAL::new(container.clone())?;
-    let writer_id = manager.spawn_raw(Writing::new(container.clone())).await?;
+    let writer_id = manager.wait_for("writer").await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer);
     let mut expected = vec![];
-    let wal = ChunkBasedWAL::new(container)?;
+    let wal = LogReader::new(container);
 
     for i in 0..10 {
         expected.push(Bytes::from(serde_json::to_vec(&Foo { baz: i + 10 })?));

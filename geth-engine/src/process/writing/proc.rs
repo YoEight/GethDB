@@ -14,11 +14,11 @@ use uuid::Uuid;
 
 pub struct Writing;
 
-impl<S> RunnableRaw<S> for Writing
-where
-    S: Storage + 'static,
-{
-    fn run(mut self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+impl RunnableRaw for Writing {
+    fn run<S>(mut self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+    where
+        S: Storage + 'static,
+    {
         let mut log_writer = LogWriter::load(runtime.container().clone(), env.buffer.split())?;
         let mut index_client = IndexClient::resolve_raw(&mut env)?;
         let mut sub_client = SubscriptionClient::resolve_raw(&mut env)?;

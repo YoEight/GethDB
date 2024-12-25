@@ -10,11 +10,11 @@ use tracing::warn;
 
 pub struct Reading;
 
-impl<S> RunnableRaw<S> for Reading
-where
-    S: Storage,
-{
-    fn run(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()> {
+impl RunnableRaw for Reading {
+    fn run<S>(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+    where
+        S: Storage + Send + Sync + 'static,
+    {
         let batch_size = 500usize;
         let reader = LogReader::new(runtime.container().clone());
         let mut index_client = IndexClient::resolve_raw(&mut env)?;

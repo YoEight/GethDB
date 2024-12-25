@@ -24,13 +24,11 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
         .init();
 
     let mut buffer = BytesMut::new();
-    let manager = start_process_manager();
     let storage = InMemoryStorage::new();
-    manager.spawn_raw(Indexing::new(storage.clone())).await?;
+    let manager = start_process_manager(storage.clone());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
-    let writer_id = manager.spawn_raw(Writing::new(container.clone())).await?;
-    manager.spawn_raw(Reading::new(container.clone())).await?;
-    let pubsub_id = manager.spawn(PubSub).await?;
+    let writer_id = manager.wait_for("writer").await?;
+    let pubsub_id = manager.wait_for("pubsub").await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
     let mut sub_client = SubscriptionClient::new(pubsub_id, manager.clone(), buffer);
     let mut expected = vec![];

@@ -34,8 +34,11 @@ impl Register {
 pub struct PubSub;
 
 #[async_trait::async_trait]
-impl<S> Runnable<S> for PubSub {
-    async fn run(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()> {
+impl Runnable for PubSub {
+    async fn run<S>(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()>
+    where
+        S: Send + Sync + 'static,
+    {
         let mut reg = Register::default();
         while let Some(item) = env.queue.recv().await {
             match item {
