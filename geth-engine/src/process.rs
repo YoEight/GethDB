@@ -385,7 +385,6 @@ pub struct Manager<S> {
     proc_id_gen: ProcId,
     sender: UnboundedSender<ManagerCommand>,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
-    wait_fors: HashMap<&'static str, Vec<oneshot::Sender<ProcId>>>,
     buffer: BytesMut,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
@@ -443,6 +442,7 @@ impl Catalog {
 
         eyre::bail!("process {:?} is not registered", proc);
     }
+
     fn report(&mut self, running: RunningProc) -> eyre::Result<()> {
         let proc = running.proc;
         if let Some(item) = self.inner.get_mut(&running.proc) {
@@ -450,7 +450,7 @@ impl Catalog {
                 Topology::Singleton(prev) => {
                     if let Some(prev) = prev.as_ref() {
                         eyre::bail!(
-                            "a {} process is already running on {:04}",
+                            "a {:?} process is already running on {:04}",
                             running.proc,
                             prev
                         );
@@ -461,9 +461,36 @@ impl Catalog {
             }
 
             self.monitor.insert(running.id, running);
+            return Ok(());
         }
 
         eyre::bail!("process {:?} is not registered in the catalog", proc);
+    }
+
+    fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
+        if let Some(running) = self.monitor.remove(&proc_id) {
+            if let Some(item) = self.inner.get_mut(&running.proc) {
+                match &mut item.topology {
+                    Topology::Singleton(prev) => {
+                        *prev = None;
+                    }
+                }
+            }
+
+            return Some(running);
+        }
+
+        None
+    }
+
+    fn running_proc_len(&self) -> usize {
+        self.monitor.len()
+    }
+
+    fn clear_running_processes(&mut self) {
+        for proc_id in self.monitor.keys().copied().collect::<Vec<_>>() {
+            self.terminate(proc_id);
+        }
     }
 }
 
@@ -480,7 +507,7 @@ pub struct CatalogBuilder {
 }
 
 impl CatalogBuilder {
-    pub fn register(&mut self, proc: Proc) {
+    pub fn register(mut self, proc: Proc) -> Self {
         self.inner.insert(
             proc,
             CatalogItem {
@@ -488,6 +515,8 @@ impl CatalogBuilder {
                 topology: Topology::Singleton(None),
             },
         );
+
+        self
     }
 
     pub fn build(self) -> Catalog {
@@ -541,7 +570,7 @@ where
                 }
 
                 Item::Stream(stream) => {
-                    if let Some(proc) = self.processes.get_mut(&dest) {
+                    if let Some(proc) = self.catalog.monitor.get(&dest) {
                         let _ = proc.mailbox.send(Item::Stream(stream));
                     }
                 }
@@ -593,35 +622,23 @@ where
                         Proc::Sink => spawn(sender, buffer, id, proc, sink::run),
                     };
 
+                    let proc_id = running_proc.id;
                     self.catalog.report(running_proc)?;
+                    let _ = resp.send(proc_id);
                 }
             }
 
-            ManagerCommand::ProcTerminated { id, proc, error } => {
-                if let Some(proc) = self.processes.remove(&id) {
+            ManagerCommand::ProcTerminated { id, error } => {
+                if let Some(running) = self.catalog.terminate(id) {
                     if let Some(e) = error {
-                        tracing::error!("process {}:{} terminated with error {}", proc.name, id, e);
+                        tracing::error!(
+                            "process {:?}:{} terminated with error {}",
+                            running.proc,
+                            id,
+                            e
+                        );
                     } else {
-                        tracing::info!("process {}:{} terminated", proc.name, id);
-                    }
-
-                    tracing::debug!(
-                        "proceeding to terminate all child-processes related to {}:{}",
-                        proc.name,
-                        id
-                    );
-
-                    let mut ids = vec![];
-                    for (child_id, child) in &self.processes {
-                        if child.parent == Some(id) {
-                            ids.push(*child_id);
-                        }
-                    }
-
-                    for id in ids {
-                        if let Some(child) = self.processes.remove(&id) {
-                            tracing::info!("terminated child-process {}:{}", child.name, id);
-                        }
+                        tracing::info!("process {:?}:{} terminated", running.proc, id);
                     }
                 }
 
@@ -645,7 +662,7 @@ where
             ManagerCommand::Shutdown { resp } => {
                 if !self.closing {
                     self.closing = true;
-                    self.processes_shutting_down = self.processes.len();
+                    self.processes_shutting_down = self.catalog.running_proc_len();
 
                     if self.processes_shutting_down == 0 {
                         let _ = resp.send(());
@@ -653,7 +670,7 @@ where
                         return Ok(());
                     }
 
-                    self.processes.clear();
+                    self.catalog.clear_running_processes();
                 }
 
                 self.close_resp.push(resp);
@@ -711,7 +728,6 @@ pub enum ManagerCommand {
 
     ProcTerminated {
         id: ProcId,
-        proc: Proc,
         error: Option<eyre::Report>,
     },
 
@@ -901,19 +917,19 @@ pub fn start_process_manager<S>(storage: S) -> ManagerClient
 where
     S: Storage + Send + Sync + 'static,
 {
-    let mut builder = Catalog::builder();
+    let catalog = Catalog::builder()
+        .register(Proc::Indexing)
+        .register(Proc::Writing)
+        .register(Proc::Reading)
+        .register(Proc::PubSub)
+        .build();
 
-    builder.register(Proc::Indexing);
-    builder.register(Proc::Writing);
-    builder.register(Proc::Reading);
-    builder.register(Proc::PubSub);
-
-    start_process_manager_with_catalog(storage, builder).unwrap()
+    start_process_manager_with_catalog(storage, catalog).unwrap()
 }
 
 pub fn start_process_manager_with_catalog<S>(
     storage: S,
-    builder: CatalogBuilder,
+    catalog: Catalog,
 ) -> io::Result<ManagerClient>
 where
     S: Storage + Send + Sync + 'static,
@@ -922,7 +938,7 @@ where
     let mut buffer = BytesMut::new();
     let container = ChunkContainer::load(storage, &mut buffer)?;
     tokio::spawn(process_manager(
-        builder.build(),
+        catalog,
         container,
         buffer,
         sender.clone(),
@@ -961,7 +977,6 @@ async fn process_manager<S>(
         proc_id_gen: 1,
         sender,
         requests: Default::default(),
-        wait_fors: Default::default(),
         buffer,
         closing: false,
         close_resp: vec![],
@@ -1005,18 +1020,10 @@ where
     thread::spawn(move || {
         if let Err(e) = runnable(runtime, env) {
             tracing::error!("process {:?} terminated with error: {}", proc, e);
-            let _ = sender.send(ManagerCommand::ProcTerminated {
-                id,
-                proc,
-                error: Some(e),
-            });
+            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: Some(e) });
         } else {
             tracing::info!("process {:?} terminated", proc);
-            let _ = sender.send(ManagerCommand::ProcTerminated {
-                id,
-                proc,
-                error: None,
-            });
+            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: None });
         }
     });
 
@@ -1052,18 +1059,10 @@ where
     tokio::spawn(async move {
         if let Err(e) = runnable(env).await {
             tracing::error!("process {:?} terminated with error: {}", proc, e);
-            let _ = sender.send(ManagerCommand::ProcTerminated {
-                id,
-                proc,
-                error: Some(e),
-            });
+            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: Some(e) });
         } else {
             tracing::info!("process {:?} terminated", proc);
-            let _ = sender.send(ManagerCommand::ProcTerminated {
-                id,
-                proc,
-                error: None,
-            });
+            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: None });
         }
     });
 
