@@ -8,7 +8,7 @@ mod proc;
 
 pub use client::ReaderClient;
 pub use client::Streaming;
-pub use proc::Reading;
+pub use proc::run;
 
 pub enum Request {
     Read {

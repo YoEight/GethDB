@@ -1,13 +1,12 @@
 mod client;
 mod proc;
 
-use super::RunnableRaw;
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, IteratorIO};
 use geth_mikoshi::storage::Storage;
 
 pub use client::{IndexClient, Streaming};
-pub use proc::Indexing;
+pub use proc::run;
 
 const ENTRY_SIZE: usize = 2 * std::mem::size_of::<u64>();
 

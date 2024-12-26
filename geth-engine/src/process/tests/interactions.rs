@@ -1,85 +1,17 @@
 use crate::process::{
     start_process_manager, start_process_manager_with_catalog, Catalog, CatalogBuilder, Item, Mail,
-    Nothing, ProcessEnv, Runnable, Runtime,
+    Proc,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use futures::task::SpawnExt;
 use geth_mikoshi::InMemoryStorage;
 use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-struct EchoProc;
-
-#[async_trait::async_trait]
-impl Runnable for EchoProc {
-    async fn run<S>(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()>
-    where
-        S: Send + Sync + 'static,
-    {
-        while let Some(item) = env.queue.recv().await {
-            if let Item::Mail(mail) = item {
-                env.client
-                    .reply(mail.origin, mail.correlation, mail.payload)?;
-            }
-        }
-
-        Ok(())
-    }
-}
-
 struct Sink {
     target: &'static str,
     sender: UnboundedSender<Mail>,
     mails: Vec<Mail>,
-}
-
-#[async_trait::async_trait]
-impl Runnable for Sink {
-    async fn run<S>(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()>
-    where
-        S: Send + Sync + 'static,
-    {
-        let proc_id = env.client.wait_for(self.target).await?;
-
-        for mail in self.mails {
-            env.client
-                .send_with_correlation(proc_id, mail.correlation, mail.payload)?;
-        }
-
-        while let Some(item) = env.queue.recv().await {
-            if let Item::Mail(mail) = item {
-                let _ = self.sender.send(mail);
-            }
-        }
-
-        Ok(())
-    }
-}
-
-struct StreamerProc;
-
-#[async_trait::async_trait]
-impl Runnable for StreamerProc {
-    async fn run<S>(self: Box<Self>, _: Runtime<S>, mut env: ProcessEnv) -> eyre::Result<()>
-    where
-        S: Send + Sync + 'static,
-    {
-        while let Some(item) = env.queue.recv().await {
-            if let Item::Stream(mut stream) = item {
-                while stream.payload.has_remaining() {
-                    let value = stream.payload.get_u64_le();
-                    env.buffer.put_u64_le(value);
-
-                    if stream.sender.send(env.buffer.split().freeze()).is_err() {
-                        break;
-                    }
-                }
-            }
-        }
-
-        Ok(())
-    }
 }
 
 #[tokio::test]
@@ -102,7 +34,7 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let (sender, mut receiver) = tokio::sync::mpsc::unbounded_channel::<Mail>();
     let mut builder = Catalog::builder();
     let manager = start_process_manager_with_catalog(InMemoryStorage::new(), builder)?;
-    let echo_proc_id = manager.wait_for("echo").await?;
+    let echo_proc_id = manager.wait_for(Proc::Echo).await?;
 
     // manager
     //     .spawn(Sink {
@@ -130,8 +62,8 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_find_proc() -> eyre::Result<()> {
     let manager = start_process_manager(InMemoryStorage::new());
-    let proc_id = manager.wait_for("echo").await?;
-    let find_proc_id = manager.find("echo").await?;
+    let proc_id = manager.wait_for(Proc::Echo).await?;
+    let find_proc_id = manager.find(Proc::Echo).await?;
 
     assert!(find_proc_id.is_some());
     assert_eq!(proc_id, find_proc_id.unwrap());
@@ -143,7 +75,7 @@ async fn test_find_proc() -> eyre::Result<()> {
 async fn test_simple_request() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager(InMemoryStorage::new());
-    let proc_id = manager.wait_for("echo").await?;
+    let proc_id = manager.wait_for(Proc::Echo).await?;
 
     let random_uuid = Uuid::new_v4();
     buffer.put_u128_le(random_uuid.to_u128_le());
@@ -156,38 +88,10 @@ async fn test_simple_request() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_simple_streaming() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
-    let manager = start_process_manager(InMemoryStorage::new());
-    let proc_id = manager.wait_for("streamer").await?;
-    let mut input = vec![];
-
-    for i in 0..10 {
-        buffer.put_u64_le(i);
-        input.push(i);
-    }
-
-    let mut resp = manager
-        .request_stream(proc_id, buffer.split().freeze())
-        .await?;
-
-    let mut output = vec![];
-
-    while let Some(mut msg) = resp.recv().await {
-        output.push(msg.get_u64_le());
-    }
-
-    assert_eq!(input.len(), output.len());
-    assert_eq!(input, output);
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_shutdown_reported_properly() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let manager = start_process_manager(InMemoryStorage::new());
-    let proc_id = manager.wait_for("echo").await?;
+    let proc_id = manager.wait_for(Proc::Echo).await?;
 
     let random_uuid = Uuid::new_v4();
     buffer.put_u128_le(random_uuid.to_u128_le());
@@ -198,7 +102,7 @@ async fn test_shutdown_reported_properly() -> eyre::Result<()> {
 
     manager.shutdown().await?;
 
-    assert!(manager.wait_for("echo").await.is_err());
+    assert!(manager.wait_for(Proc::Echo).await.is_err());
 
     Ok(())
 }

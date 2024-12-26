@@ -2,17 +2,14 @@ use bytes::BytesMut;
 use geth_common::Direction;
 use geth_mikoshi::InMemoryStorage;
 
-use crate::process::{
-    indexing::{IndexClient, Indexing},
-    start_process_manager,
-};
+use crate::process::{indexing::IndexClient, start_process_manager, Proc};
 
 #[tokio::test]
 async fn test_store_read() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage);
-    let proc_id = manager.wait_for("index").await?;
+    let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone(), buffer.split());
     let mut expected = vec![];
 
@@ -38,7 +35,7 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage);
-    let proc_id = manager.wait_for("index").await?;
+    let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone(), buffer.split());
     let mut expected = vec![];
 
@@ -59,7 +56,7 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
 async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage);
-    let proc_id = manager.wait_for("index").await?;
+    let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone(), BytesMut::new());
     let revision = client.latest_revision(2).await?.revision();
 

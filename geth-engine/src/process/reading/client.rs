@@ -1,6 +1,6 @@
 use crate::messages::ReadStreamCompleted;
 use crate::process::reading::{LogEntryExt, Request, Response};
-use crate::process::{ManagerClient, ProcId, ProcessEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
 use bytes::{Bytes, BytesMut};
 use geth_common::{Direction, Revision};
 use geth_mikoshi::wal::LogEntry;
@@ -52,7 +52,7 @@ impl ReaderClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the reader process to be available...");
-        let proc_id = env.client.wait_for("reader").await?;
+        let proc_id = env.client.wait_for(Proc::Reading).await?;
         tracing::debug!("reader process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))

@@ -1,8 +1,6 @@
-use crate::process::indexing::Indexing;
-use crate::process::reading::{ReaderClient, Reading};
-use crate::process::start_process_manager;
-use crate::process::subscription::PubSub;
-use crate::process::writing::{WriterClient, Writing};
+use crate::process::reading::ReaderClient;
+use crate::process::writing::WriterClient;
+use crate::process::{start_process_manager, Proc};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ExpectedRevision, Revision};
 use geth_mikoshi::wal::chunks::ChunkContainer;
@@ -28,8 +26,8 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage.clone());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
-    let writer_id = manager.wait_for("writer").await?;
-    let reader_id = manager.wait_for("reader").await?;
+    let writer_id = manager.wait_for(Proc::Writing).await?;
+    let reader_id = manager.wait_for(Proc::Reading).await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
     let mut reader_client = ReaderClient::new(reader_id, manager.clone(), buffer);
     let mut expected = vec![];

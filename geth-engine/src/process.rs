@@ -2,9 +2,11 @@ use bytes::{Bytes, BytesMut};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use std::collections::HashMap;
+use std::future::Future;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{io, thread};
+use strum_macros::EnumString;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::oneshot;
@@ -18,13 +20,9 @@ use crate::messages::{
     AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
     SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
-use crate::process::indexing::Indexing;
-use crate::process::reading::Reading;
 use crate::process::storage::StorageService;
-use crate::process::subscription::PubSub;
 pub use crate::process::subscriptions::SubscriptionsClient;
 use crate::process::write_request_manager::WriteRequestManagerClient;
-use crate::process::writing::Writing;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
     GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
@@ -37,8 +35,10 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 #[cfg(test)]
 mod tests;
 
+mod echo;
 pub mod indexing;
 pub mod reading;
+mod sink;
 pub mod storage;
 pub mod subscription;
 mod subscriptions;
@@ -383,7 +383,6 @@ pub struct Manager<S> {
     runtime: Runtime<S>,
     catalog: Catalog,
     proc_id_gen: ProcId,
-    processes: HashMap<ProcId, Process>,
     sender: UnboundedSender<ManagerCommand>,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     wait_fors: HashMap<&'static str, Vec<oneshot::Sender<ProcId>>>,
@@ -394,6 +393,7 @@ pub struct Manager<S> {
     processes_shutting_down: usize,
 }
 
+#[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub enum Proc {
     Writing,
     Reading,
@@ -401,7 +401,6 @@ pub enum Proc {
     PubSub,
     Echo,
     Sink,
-    Streamer,
 }
 
 impl Proc {
@@ -423,8 +422,49 @@ enum Topology {
     // Multiple(Vec<ProcId>),
 }
 
+struct RunningProc {
+    id: ProcId,
+    proc: Proc,
+    mailbox: Mailbox,
+}
+
 struct Catalog {
-    inner: HashMap<&'static str, CatalogItem>,
+    inner: HashMap<Proc, CatalogItem>,
+    monitor: HashMap<ProcId, RunningProc>,
+}
+
+impl Catalog {
+    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProcId>> {
+        if let Some(item) = self.inner.get(proc) {
+            return match &item.topology {
+                Topology::Singleton(prev) => Ok(prev.clone()),
+            };
+        }
+
+        eyre::bail!("process {:?} is not registered", proc);
+    }
+    fn report(&mut self, running: RunningProc) -> eyre::Result<()> {
+        let proc = running.proc;
+        if let Some(item) = self.inner.get_mut(&running.proc) {
+            match &mut item.topology {
+                Topology::Singleton(prev) => {
+                    if let Some(prev) = prev.as_ref() {
+                        eyre::bail!(
+                            "a {} process is already running on {:04}",
+                            running.proc,
+                            prev
+                        );
+                    }
+
+                    *prev = Some(running.id);
+                }
+            }
+
+            self.monitor.insert(running.id, running);
+        }
+
+        eyre::bail!("process {:?} is not registered in the catalog", proc);
+    }
 }
 
 impl Catalog {
@@ -436,43 +476,30 @@ impl Catalog {
 }
 
 pub struct CatalogBuilder {
-    inner: HashMap<&'static str, CatalogItem>,
+    inner: HashMap<Proc, CatalogItem>,
 }
 
 impl CatalogBuilder {
-    pub fn register<R>(&mut self, name: &'static str, runnable: R)
-    where
-        R: Runnable + Send + Sync + 'static,
-    {
+    pub fn register(&mut self, proc: Proc) {
         self.inner.insert(
-            name,
+            proc,
             CatalogItem {
-                activator: Proc::Managed(Arc::new(Box::new(runnable))),
-                topology: Topology::Singleton(None),
-            },
-        );
-    }
-
-    pub fn register_raw<R>(&mut self, name: &'static str, runnable: R)
-    where
-        R: RunnableRaw + Send + Sync + 'static,
-    {
-        self.inner.insert(
-            name,
-            CatalogItem {
-                activator: Proc::Raw(Arc::new(Box::new(runnable))),
+                proc,
                 topology: Topology::Singleton(None),
             },
         );
     }
 
     pub fn build(self) -> Catalog {
-        Catalog { inner: self.inner }
+        Catalog {
+            inner: self.inner,
+            monitor: Default::default(),
+        }
     }
 }
 
 struct CatalogItem {
-    activator: Proc,
+    proc: Proc,
     topology: Topology,
 }
 
@@ -480,143 +507,31 @@ impl<S> Manager<S>
 where
     S: Storage + Send + Sync + 'static,
 {
+    fn gen_proc_id(&mut self) -> ProcId {
+        let id = self.proc_id_gen;
+        self.proc_id_gen += 1;
+        id
+    }
+
     fn handle(&mut self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.closing && !cmd.is_shutdown_related() {
             return Ok(());
         }
 
         match cmd {
-            ManagerCommand::Spawn {
-                parent,
-                // runnable,
-                resp,
-            } => {
-                let id = self.proc_id_gen;
-                self.proc_id_gen += 1;
-
-                // let proc = match runnable {
-                //     RunnableType::Tokio(runnable) => {
-                //         let (proc_sender, proc_queue) = unbounded_channel();
-                //         let name = runnable.name();
-                //         let manager_sender = self.sender.clone();
-                //         let buffer = self.buffer.split();
-                //
-                //         tokio::spawn(async move {
-                //             let error = runnable
-                //                 .run(ProcessEnv {
-                //                     id,
-                //                     queue: proc_queue,
-                //                     client: ManagerClient {
-                //                         id,
-                //                         parent,
-                //                         inner: manager_sender.clone(),
-                //                     },
-                //                     buffer,
-                //                 })
-                //                 .await
-                //                 .err();
-                //
-                //             if let Some(e) = error.as_ref() {
-                //                 tracing::error!(
-                //                     "process '{}:{:04}' terminated with an error: {}",
-                //                     name,
-                //                     id,
-                //                     e
-                //                 );
-                //             } else {
-                //                 tracing::info!("process '{}:{:04}' terminated", name, id);
-                //             }
-                //
-                //             let _ =
-                //                 manager_sender.send(ManagerCommand::ProcTerminated { id, error });
-                //         });
-                //
-                //         Process {
-                //             id,
-                //             parent: None,
-                //             mailbox: Mailbox::Tokio(proc_sender),
-                //             name,
-                //             created: Instant::now(),
-                //         }
-                //     }
-                //
-                //     RunnableType::Raw(runnable) => {
-                //         let (proc_sender, proc_queue) = std::sync::mpsc::channel();
-                //         let manager_client = self.sender.clone();
-                //         let manager_buffer = self.buffer.split();
-                //         let name = runnable.name();
-                //         let handle = Handle::current();
-                //
-                //         thread::spawn(move || {
-                //             let error = runnable
-                //                 .run(ProcessRawEnv {
-                //                     id,
-                //                     queue: proc_queue,
-                //                     client: ManagerClient {
-                //                         id,
-                //                         parent,
-                //                         inner: manager_client.clone(),
-                //                     },
-                //                     buffer: manager_buffer,
-                //                     handle,
-                //                 })
-                //                 .err();
-                //
-                //             if let Some(e) = error.as_ref() {
-                //                 tracing::error!(
-                //                     "process '{}:{:04}' terminated with an error: {}",
-                //                     name,
-                //                     id,
-                //                     e
-                //                 );
-                //             } else {
-                //                 tracing::info!("process '{}:{:04}' terminated", name, id);
-                //             }
-                //
-                //             let _ =
-                //                 manager_client.send(ManagerCommand::ProcTerminated { id, error });
-                //         });
-                //
-                //         Process {
-                //             id,
-                //             parent: None,
-                //             // mailbox: Mailbox::Raw(proc_sender),
-                //             name,
-                //             created: Instant::now(),
-                //         }
-                //     }
-                // };
-
-                let proc: Process = todo!();
-                tracing::info!("process {}:{:04} has started", proc.name, id);
-                let _ = resp.send(id);
-                let name = proc.name;
-                self.processes.insert(id, proc);
-
-                // We report processes that was waiting for that process to start.
-                if let Some(waiting) = self.wait_fors.remove(name) {
-                    for w in waiting {
-                        let _ = w.send(id);
-                    }
-                }
+            ManagerCommand::Spawn { parent, resp } => {
+                // TODO - might change that command to start.
             }
 
-            ManagerCommand::Find { name, resp } => {
-                for proc in self.processes.values() {
-                    if proc.name == name {
-                        let _ = resp.send(Some(proc.id));
-                        return Ok(());
-                    }
-                }
-
-                let _ = resp.send(None);
+            ManagerCommand::Find { proc, resp } => {
+                let _ = resp.send(self.catalog.lookup(&proc)?);
             }
 
             ManagerCommand::Send { dest, item, resp } => match item {
                 Item::Mail(mail) => {
                     if let Some(resp) = self.requests.remove(&mail.correlation) {
                         let _ = resp.send(mail);
-                    } else if let Some(proc) = self.processes.get(&dest) {
+                    } else if let Some(proc) = self.catalog.monitor.get(&dest) {
                         if let Some(resp) = resp {
                             self.requests.insert(mail.correlation, resp);
                         }
@@ -632,76 +547,57 @@ where
                 }
             },
 
-            ManagerCommand::WaitFor { name, resp } => {
-                let item = if let Some(item) = self.catalog.inner.get_mut(name) {
-                    item
+            ManagerCommand::WaitFor { proc, resp } => {
+                if let Some(proc_id) = self.catalog.lookup(&proc)? {
+                    let _ = resp.send(proc_id);
                 } else {
-                    eyre::bail!("process '{}' unknown", name);
-                };
+                    let id = self.gen_proc_id();
+                    let runtime = self.runtime.clone();
+                    let sender = self.sender.clone();
+                    let buffer = self.buffer.split();
 
-                match &mut item.topology {
-                    Topology::Singleton(prev) => {
-                        if let Some(id) = prev.as_ref() {
-                            let _ = resp.send(*id);
-                            return Ok(());
-                        } else {
-                            let id = self.proc_id_gen;
-                            self.proc_id_gen += 1;
-                            *prev = Some(id);
+                    let running_proc = match proc {
+                        Proc::Writing => spawn_raw(
+                            sender,
+                            runtime,
+                            buffer,
+                            Handle::current(),
+                            id,
+                            proc,
+                            writing::run,
+                        ),
 
-                            match &item.activator {
-                                Proc::Managed(builder) => {
-                                    let runnable = builder.clone();
-                                    let runtime = self.runtime.clone();
-                                    let (proc_sender, proc_queue) = unbounded_channel();
-                                    let manager_sender = self.sender.clone();
-                                    let buffer = self.buffer.split();
-                                    tokio::spawn(async move {
-                                        let error = runnable
-                                            .run(
-                                                runtime,
-                                                ProcessEnv {
-                                                    id,
-                                                    queue: proc_queue,
-                                                    client: ManagerClient {
-                                                        id,
-                                                        parent: None,
-                                                        inner: manager_sender.clone(),
-                                                    },
-                                                    buffer,
-                                                },
-                                            )
-                                            .await
-                                            .err();
+                        Proc::Reading => spawn_raw(
+                            sender,
+                            runtime,
+                            buffer,
+                            Handle::current(),
+                            id,
+                            proc,
+                            reading::run,
+                        ),
 
-                                        if let Some(e) = error.as_ref() {
-                                            tracing::error!(
-                                                "process '{}:{:04}' terminated with an error: {}",
-                                                name,
-                                                id,
-                                                e
-                                            );
-                                        } else {
-                                            tracing::info!(
-                                                "process '{}:{:04}' terminated",
-                                                name,
-                                                id
-                                            );
-                                        }
+                        Proc::Indexing => spawn_raw(
+                            sender,
+                            runtime,
+                            buffer,
+                            Handle::current(),
+                            id,
+                            proc,
+                            indexing::run,
+                        ),
 
-                                        let _ = manager_sender
-                                            .send(ManagerCommand::ProcTerminated { id, error });
-                                    });
-                                }
+                        Proc::PubSub => spawn(sender, buffer, id, proc, subscription::run),
 
-                                Proc::Raw(runnable) => {}
-                            }
-                        }
-                    }
+                        Proc::Echo => spawn(sender, buffer, id, proc, echo::run),
+                        Proc::Sink => spawn(sender, buffer, id, proc, sink::run),
+                    };
+
+                    self.catalog.report(running_proc)?;
                 }
             }
 
-            ManagerCommand::ProcTerminated { id, error } => {
+            ManagerCommand::ProcTerminated { id, proc, error } => {
                 if let Some(proc) = self.processes.remove(&id) {
                     if let Some(e) = error {
                         tracing::error!("process {}:{} terminated with error {}", proc.name, id, e);
@@ -791,29 +687,14 @@ impl Item {
     }
 }
 
-// enum RunnableType {
-//     Tokio(Box<dyn Runnable + Send + Sync + 'static>),
-//     Raw(Box<dyn RunnableRaw + Send + Sync + 'static>),
-// }
-
-// impl RunnableType {
-//     fn name(&self) -> &'static str {
-//         match self {
-//             RunnableType::Tokio(x) => x.name(),
-//             RunnableType::Raw(x) => x.name(),
-//         }
-//     }
-// }
-
 pub enum ManagerCommand {
     Spawn {
         parent: Option<ProcId>,
-        // runnable: RunnableType,
         resp: oneshot::Sender<ProcId>,
     },
 
     Find {
-        name: &'static str,
+        proc: Proc,
         resp: oneshot::Sender<Option<ProcId>>,
     },
 
@@ -824,12 +705,13 @@ pub enum ManagerCommand {
     },
 
     WaitFor {
-        name: &'static str,
+        proc: Proc,
         resp: oneshot::Sender<ProcId>,
     },
 
     ProcTerminated {
         id: ProcId,
+        proc: Proc,
         error: Option<eyre::Report>,
     },
 
@@ -862,78 +744,18 @@ pub struct ProcessRawEnv {
     handle: Handle,
 }
 
-#[async_trait::async_trait]
-pub trait Runnable {
-    async fn run<S>(self: Box<Self>, runtime: Runtime<S>, env: ProcessEnv) -> eyre::Result<()>
-    where
-        S: Storage + Send + Sync + 'static;
-}
-
-pub trait RunnableRaw {
-    fn run<S>(self: Box<Self>, runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
-    where
-        S: Storage + Send + Sync + 'static;
-}
-
 #[derive(Clone)]
 pub struct ManagerClient {
     id: ProcId,
-    parent: Option<ProcId>,
     inner: UnboundedSender<ManagerCommand>,
 }
 
 impl ManagerClient {
-    // pub async fn spawn<R>(&self, run: R) -> eyre::Result<ProcId>
-    // where
-    //     R: Runnable + Send + Sync + 'static,
-    // {
-    //     let (resp, receiver) = oneshot::channel();
-    //     if self
-    //         .inner
-    //         .send(ManagerCommand::Spawn {
-    //             parent: self.parent,
-    //             runnable: RunnableType::Tokio(Box::new(run)),
-    //             resp,
-    //         })
-    //         .is_err()
-    //     {
-    //         eyre::bail!("process manager has shutdown");
-    //     }
-    //
-    //     match receiver.await {
-    //         Ok(id) => Ok(id),
-    //         Err(_) => eyre::bail!("process manager has shutdown"),
-    //     }
-    // }
-    //
-    // pub async fn spawn_raw<R>(&self, run: R) -> eyre::Result<ProcId>
-    // where
-    //     R: RunnableRaw + Send + Sync + 'static,
-    // {
-    //     let (resp, receiver) = oneshot::channel();
-    //     if self
-    //         .inner
-    //         .send(ManagerCommand::Spawn {
-    //             parent: self.parent,
-    //             runnable: RunnableType::Raw(Box::new(run)),
-    //             resp,
-    //         })
-    //         .is_err()
-    //     {
-    //         eyre::bail!("process manager has shutdown");
-    //     }
-    //
-    //     match receiver.await {
-    //         Ok(id) => Ok(id),
-    //         Err(_) => eyre::bail!("process manager has shutdown"),
-    //     }
-    // }
-
-    pub async fn find(&self, name: &'static str) -> eyre::Result<Option<ProcId>> {
+    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProcId>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::Find { name, resp })
+            .send(ManagerCommand::Find { proc, resp })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
@@ -1048,11 +870,11 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn wait_for(&self, name: &'static str) -> eyre::Result<ProcId> {
+    pub async fn wait_for(&self, proc: Proc) -> eyre::Result<ProcId> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::WaitFor { name, resp })
+            .send(ManagerCommand::WaitFor { proc, resp })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
@@ -1081,10 +903,10 @@ where
 {
     let mut builder = Catalog::builder();
 
-    builder.register_raw("index", Indexing);
-    builder.register_raw("writer", Writing);
-    builder.register_raw("reader", Reading);
-    builder.register("pubsub", PubSub);
+    builder.register(Proc::Indexing);
+    builder.register(Proc::Writing);
+    builder.register(Proc::Reading);
+    builder.register(Proc::PubSub);
 
     start_process_manager_with_catalog(storage, builder).unwrap()
 }
@@ -1109,12 +931,9 @@ where
 
     Ok(ManagerClient {
         id: 0,
-        parent: None,
         inner: sender,
     })
 }
-
-pub struct Nothing;
 
 #[derive(Clone)]
 pub struct Runtime<S> {
@@ -1140,7 +959,6 @@ async fn process_manager<S>(
         runtime: Runtime { container },
         catalog,
         proc_id_gen: 1,
-        processes: Default::default(),
         sender,
         requests: Default::default(),
         wait_fors: Default::default(),
@@ -1156,5 +974,102 @@ async fn process_manager<S>(
             tracing::error!("unexpected: {}", e);
             break;
         }
+    }
+}
+
+fn spawn_raw<S, F>(
+    sender: UnboundedSender<ManagerCommand>,
+    runtime: Runtime<S>,
+    buffer: BytesMut,
+    handle: Handle,
+    id: ProcId,
+    proc: Proc,
+    runnable: F,
+) -> RunningProc
+where
+    S: Storage + Send + Sync + 'static,
+    F: FnOnce(Runtime<S>, ProcessRawEnv) -> eyre::Result<()> + Send + Sync + 'static,
+{
+    let (proc_sender, proc_queue) = std::sync::mpsc::channel();
+    let env = ProcessRawEnv {
+        id,
+        queue: proc_queue,
+        client: ManagerClient {
+            id,
+            inner: sender.clone(),
+        },
+        buffer,
+        handle,
+    };
+
+    thread::spawn(move || {
+        if let Err(e) = runnable(runtime, env) {
+            tracing::error!("process {:?} terminated with error: {}", proc, e);
+            let _ = sender.send(ManagerCommand::ProcTerminated {
+                id,
+                proc,
+                error: Some(e),
+            });
+        } else {
+            tracing::info!("process {:?} terminated", proc);
+            let _ = sender.send(ManagerCommand::ProcTerminated {
+                id,
+                proc,
+                error: None,
+            });
+        }
+    });
+
+    RunningProc {
+        id,
+        proc,
+        mailbox: Mailbox::Raw(proc_sender),
+    }
+}
+
+fn spawn<F, Fut>(
+    sender: UnboundedSender<ManagerCommand>,
+    buffer: BytesMut,
+    id: ProcId,
+    proc: Proc,
+    runnable: F,
+) -> RunningProc
+where
+    F: FnOnce(ProcessEnv) -> Fut + Send + Sync + 'static,
+    Fut: Future<Output = eyre::Result<()>> + Send + 'static,
+{
+    let (proc_sender, proc_queue) = unbounded_channel();
+    let env = ProcessEnv {
+        id,
+        queue: proc_queue,
+        client: ManagerClient {
+            id,
+            inner: sender.clone(),
+        },
+        buffer,
+    };
+
+    tokio::spawn(async move {
+        if let Err(e) = runnable(env).await {
+            tracing::error!("process {:?} terminated with error: {}", proc, e);
+            let _ = sender.send(ManagerCommand::ProcTerminated {
+                id,
+                proc,
+                error: Some(e),
+            });
+        } else {
+            tracing::info!("process {:?} terminated", proc);
+            let _ = sender.send(ManagerCommand::ProcTerminated {
+                id,
+                proc,
+                error: None,
+            });
+        }
+    });
+
+    RunningProc {
+        id,
+        proc,
+        mailbox: Mailbox::Tokio(proc_sender),
     }
 }

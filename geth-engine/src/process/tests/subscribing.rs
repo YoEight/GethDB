@@ -1,10 +1,8 @@
-use crate::process::indexing::Indexing;
-use crate::process::reading::{ReaderClient, Reading};
-use crate::process::start_process_manager;
-use crate::process::subscription::{PubSub, SubscriptionClient};
-use crate::process::writing::{WriterClient, Writing};
+use crate::process::subscription::SubscriptionClient;
+use crate::process::writing::WriterClient;
+use crate::process::{start_process_manager, Proc};
 use bytes::{Buf, Bytes, BytesMut};
-use geth_common::{Direction, ExpectedRevision, Revision};
+use geth_common::ExpectedRevision;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
@@ -27,8 +25,8 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage.clone());
     let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
-    let writer_id = manager.wait_for("writer").await?;
-    let pubsub_id = manager.wait_for("pubsub").await?;
+    let writer_id = manager.wait_for(Proc::Writing).await?;
+    let pubsub_id = manager.wait_for(Proc::PubSub).await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
     let mut sub_client = SubscriptionClient::new(pubsub_id, manager.clone(), buffer);
     let mut expected = vec![];

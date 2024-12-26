@@ -1,5 +1,5 @@
 use crate::process::subscription::{PushBuilder, Request, Response};
-use crate::process::{reading, ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
+use crate::process::{reading, ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -43,13 +43,13 @@ impl SubscriptionClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the pubsub process to be available...");
-        let proc_id = env.client.wait_for("subscription").await?;
+        let proc_id = env.client.wait_for(Proc::PubSub).await?;
         tracing::debug!("pubsub process available on {}", proc_id);
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the pubsub process to be available...");
-        let proc_id = env.handle.block_on(env.client.wait_for("subscription"))?;
+        let proc_id = env.handle.block_on(env.client.wait_for(Proc::PubSub))?;
         tracing::debug!("pubsub process available on {}", proc_id);
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
     }

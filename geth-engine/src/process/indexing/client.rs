@@ -1,6 +1,6 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::{Request, Response};
-use crate::process::{ManagerClient, ProcId, ProcessEnv, ProcessRawEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ReadCompleted};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -22,7 +22,7 @@ impl IndexClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the index process to be available...");
-        let proc_id = env.client.wait_for("index").await?;
+        let proc_id = env.client.wait_for(Proc::Indexing).await?;
         tracing::debug!("index process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
@@ -30,7 +30,7 @@ impl IndexClient {
 
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting the index process to be available...");
-        let proc_id = env.handle.block_on(env.client.wait_for("index"))?;
+        let proc_id = env.handle.block_on(env.client.wait_for(Proc::Indexing))?;
         tracing::debug!("index process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))

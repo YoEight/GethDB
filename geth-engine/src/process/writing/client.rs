@@ -1,5 +1,5 @@
 use crate::process::writing::{Request, Response};
-use crate::process::{ManagerClient, ProcId, ProcessEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
 use bytes::{Bytes, BytesMut};
 use geth_common::{
     AppendError, AppendStreamCompleted, ExpectedRevision, Position, WriteResult,
@@ -24,7 +24,7 @@ impl WriterClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for process for the writer process to be available...");
-        let proc_id = env.client.wait_for("writer").await?;
+        let proc_id = env.client.wait_for(Proc::Writing).await?;
         tracing::debug!("writer process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))

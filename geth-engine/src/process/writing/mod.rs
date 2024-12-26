@@ -5,7 +5,7 @@ use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::ExpectedRevision;
 
 pub use client::WriterClient;
-pub use proc::Writing;
+pub use proc::run;
 
 enum Request {
     Append {

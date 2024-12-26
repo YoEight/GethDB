@@ -1,6 +1,6 @@
 use crate::process::indexing::{IndexClient, Streaming};
 use crate::process::reading::{LogEntryExt, Request, Response};
-use crate::process::{Item, ProcessRawEnv, RunnableRaw, Runtime};
+use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
@@ -8,91 +8,87 @@ use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
 use tracing::warn;
 
-pub struct Reading;
+pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    let batch_size = 500usize;
+    let reader = LogReader::new(runtime.container().clone());
+    let mut index_client = IndexClient::resolve_raw(&mut env)?;
 
-impl RunnableRaw for Reading {
-    fn run<S>(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
-    where
-        S: Storage + Send + Sync + 'static,
-    {
-        let batch_size = 500usize;
-        let reader = LogReader::new(runtime.container().clone());
-        let mut index_client = IndexClient::resolve_raw(&mut env)?;
-
-        while let Some(item) = env.queue.recv().ok() {
-            match item {
-                Item::Stream(stream) => {
-                    if let Some(req) = Request::try_from(stream.payload) {
-                        match req {
-                            Request::Read {
-                                ident,
-                                start,
-                                direction,
+    while let Some(item) = env.queue.recv().ok() {
+        match item {
+            Item::Stream(stream) => {
+                if let Some(req) = Request::try_from(stream.payload) {
+                    match req {
+                        Request::Read {
+                            ident,
+                            start,
+                            direction,
+                            count,
+                        } => {
+                            let index_stream = env.handle.block_on(index_client.read(
+                                mikoshi_hash(ident),
+                                start.raw(),
                                 count,
-                            } => {
-                                let index_stream = env.handle.block_on(index_client.read(
-                                    mikoshi_hash(ident),
-                                    start.raw(),
-                                    count,
-                                    direction,
-                                ))?;
+                                direction,
+                            ))?;
 
-                                let mut index_stream = match index_stream {
-                                    ReadCompleted::Success(r) => r,
-                                    ReadCompleted::StreamDeleted => {
-                                        let _ = stream.sender.send(
-                                            Response::StreamDeleted.serialize(&mut env.buffer),
-                                        );
+                            let mut index_stream = match index_stream {
+                                ReadCompleted::Success(r) => r,
+                                ReadCompleted::StreamDeleted => {
+                                    let _ = stream
+                                        .sender
+                                        .send(Response::StreamDeleted.serialize(&mut env.buffer));
 
-                                        continue;
-                                    }
-                                };
+                                    continue;
+                                }
+                            };
 
-                                if stream
-                                    .sender
-                                    .send(Response::Streaming.serialize(&mut env.buffer))
-                                    .is_err()
-                                {
+                            if stream
+                                .sender
+                                .send(Response::Streaming.serialize(&mut env.buffer))
+                                .is_err()
+                            {
+                                continue;
+                            }
+
+                            let mut count = 0usize;
+                            while let Some((_, position)) =
+                                env.handle.block_on(index_stream.next())?
+                            {
+                                reader.read_at(position)?.serialize(&mut env.buffer);
+                                count += 1;
+
+                                if count < batch_size {
                                     continue;
                                 }
 
-                                let mut count = 0usize;
-                                while let Some((_, position)) =
-                                    env.handle.block_on(index_stream.next())?
-                                {
-                                    reader.read_at(position)?.serialize(&mut env.buffer);
-                                    count += 1;
-
-                                    if count < batch_size {
-                                        continue;
-                                    }
-
-                                    count = 0;
-                                    if stream.sender.send(env.buffer.split().freeze()).is_err() {
-                                        break;
-                                    }
-                                }
-
-                                if !env.buffer.is_empty() {
-                                    let _ = stream.sender.send(env.buffer.split().freeze());
+                                count = 0;
+                                if stream.sender.send(env.buffer.split().freeze()).is_err() {
+                                    break;
                                 }
                             }
+
+                            if !env.buffer.is_empty() {
+                                let _ = stream.sender.send(env.buffer.split().freeze());
+                            }
                         }
-                        continue;
                     }
-
-                    tracing::warn!(
-                        "malformed reader request from stream request {}",
-                        stream.correlation
-                    );
+                    continue;
                 }
 
-                Item::Mail(mail) => {
-                    tracing::warn!("mail {} ignored", mail.correlation);
-                }
+                tracing::warn!(
+                    "malformed reader request from stream request {}",
+                    stream.correlation
+                );
+            }
+
+            Item::Mail(mail) => {
+                tracing::warn!("mail {} ignored", mail.correlation);
             }
         }
-
-        Ok(())
     }
+
+    Ok(())
 }

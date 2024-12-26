@@ -1,6 +1,6 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::{Request, Response, ENTRY_SIZE};
-use crate::process::{Item, ProcessRawEnv, RunnableRaw, Runtime};
+use crate::process::{Item, ProcessRawEnv, Runtime};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
@@ -21,135 +21,125 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
-pub struct Indexing;
+pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    let lsm = Lsm::load(
+        LsmSettings::default(),
+        runtime.container().storage().clone(),
+    )?;
 
-impl RunnableRaw for Indexing {
-    fn run<S>(self: Box<Self>, runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
-    where
-        S: Storage + Send + Sync + 'static,
-    {
-        let lsm = Lsm::load(
-            LsmSettings::default(),
-            runtime.container().storage().clone(),
-        )?;
+    let lsm = Arc::new(RwLock::new(lsm));
+    let revision_cache = new_revision_cache();
 
-        let lsm = Arc::new(RwLock::new(lsm));
-        let revision_cache = new_revision_cache();
+    while let Some(item) = env.queue.recv().ok() {
+        match item {
+            Item::Mail(mail) => {
+                if let Some(req) = Request::try_from(mail.payload) {
+                    match req {
+                        Request::Store { key, entries } => {
+                            let last_revision = entries
+                                .slice(entries.len() - 2 * std::mem::size_of::<u64>()..)
+                                .get_u64_le();
 
-        while let Some(item) = env.queue.recv().ok() {
-            match item {
-                Item::Mail(mail) => {
-                    if let Some(req) = Request::try_from(mail.payload) {
-                        match req {
-                            Request::Store { key, entries } => {
-                                let last_revision = entries
-                                    .slice(entries.len() - 2 * std::mem::size_of::<u64>()..)
-                                    .get_u64_le();
+                            if let Err(e) = store_entries(&lsm, key, entries) {
+                                tracing::error!("error when storing index entries: {}", e);
 
-                                if let Err(e) = store_entries(&lsm, key, entries) {
-                                    tracing::error!("error when storing index entries: {}", e);
-
-                                    let _ = env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        Response::Error.serialize(env.buffer.split()),
-                                    );
-                                } else {
-                                    revision_cache.insert(key, last_revision);
-
-                                    let _ = env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        Response::Committed.serialize(env.buffer.split()),
-                                    );
-                                }
-                            }
-
-                            Request::LatestRevision { key } => {
-                                if let Some(current) = revision_cache.get(&key) {
-                                    env.buffer.put_u64_le(current);
-                                    env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        env.buffer.split().freeze(),
-                                    )?;
-                                } else {
-                                    let lsm_read = lsm.read().map_err(|e| {
-                                        eyre::eyre!(
-                                            "poisoned lock when reading to the index: {}",
-                                            e
-                                        )
-                                    })?;
-
-                                    let revison = lsm_read.highest_revision(key)?;
-
-                                    if let Some(revision) = revison {
-                                        revision_cache.insert(key, revision);
-                                        env.buffer.put_u64_le(revision);
-                                    }
-
-                                    env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        env.buffer.split().freeze(),
-                                    )?;
-                                }
-                            }
-
-                            Request::Read { .. } => {
-                                tracing::error!(
-                                    "read from the index should be a streaming operation"
+                                let _ = env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    Response::Error.serialize(env.buffer.split()),
                                 );
+                            } else {
+                                revision_cache.insert(key, last_revision);
+
+                                let _ = env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    Response::Committed.serialize(env.buffer.split()),
+                                );
+                            }
+                        }
+
+                        Request::LatestRevision { key } => {
+                            if let Some(current) = revision_cache.get(&key) {
+                                env.buffer.put_u64_le(current);
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    env.buffer.split().freeze(),
+                                )?;
+                            } else {
+                                let lsm_read = lsm.read().map_err(|e| {
+                                    eyre::eyre!("poisoned lock when reading to the index: {}", e)
+                                })?;
+
+                                let revison = lsm_read.highest_revision(key)?;
+
+                                if let Some(revision) = revison {
+                                    revision_cache.insert(key, revision);
+                                    env.buffer.put_u64_le(revision);
+                                }
 
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    Response::Error.serialize(env.buffer.split()),
+                                    env.buffer.split().freeze(),
                                 )?;
                             }
                         }
+
+                        Request::Read { .. } => {
+                            tracing::error!("read from the index should be a streaming operation");
+
+                            env.client.reply(
+                                mail.origin,
+                                mail.correlation,
+                                Response::Error.serialize(env.buffer.split()),
+                            )?;
+                        }
                     }
                 }
+            }
 
-                Item::Stream(stream) => {
-                    if let Some(Request::Read {
-                        key,
-                        start,
-                        count,
-                        dir,
-                    }) = Request::try_from(stream.payload)
-                    {
-                        let stream_cache = revision_cache.clone();
-                        let stream_lsm = lsm.clone();
-                        let mut stream_buffer = env.buffer.split();
-                        let _: JoinHandle<eyre::Result<()>> =
-                            env.handle.spawn_blocking(move || {
-                                if stream_indexed_read(
-                                    stream_lsm,
-                                    stream_cache,
-                                    key,
-                                    start,
-                                    count as usize,
-                                    dir,
-                                    stream_buffer.split(),
-                                    &stream.sender,
-                                )
-                                .is_err()
-                                {
-                                    let _ = stream
-                                        .sender
-                                        .send(Response::Error.serialize(stream_buffer.split()));
-                                }
+            Item::Stream(stream) => {
+                if let Some(Request::Read {
+                    key,
+                    start,
+                    count,
+                    dir,
+                }) = Request::try_from(stream.payload)
+                {
+                    let stream_cache = revision_cache.clone();
+                    let stream_lsm = lsm.clone();
+                    let mut stream_buffer = env.buffer.split();
+                    let _: JoinHandle<eyre::Result<()>> = env.handle.spawn_blocking(move || {
+                        if stream_indexed_read(
+                            stream_lsm,
+                            stream_cache,
+                            key,
+                            start,
+                            count as usize,
+                            dir,
+                            stream_buffer.split(),
+                            &stream.sender,
+                        )
+                        .is_err()
+                        {
+                            let _ = stream
+                                .sender
+                                .send(Response::Error.serialize(stream_buffer.split()));
+                        }
 
-                                Ok(())
-                            });
-                    }
+                        Ok(())
+                    });
                 }
-            };
-        }
-
-        Ok(())
+            }
+        };
     }
+
+    Ok(())
 }
 
 fn key_latest_revision<S>(

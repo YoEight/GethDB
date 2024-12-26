@@ -5,7 +5,7 @@ mod client;
 mod proc;
 
 pub use client::SubscriptionClient;
-pub use proc::PubSub;
+pub use proc::run;
 
 pub enum Request {
     Subscribe { ident: Bytes },
