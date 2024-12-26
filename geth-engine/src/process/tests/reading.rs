@@ -16,12 +16,6 @@ struct Foo {
 
 #[tokio::test]
 async fn test_reader_proc_simple() -> eyre::Result<()> {
-    let _ = tracing_subscriber::fmt::fmt()
-        .with_max_level(tracing::Level::DEBUG)
-        .with_file(true)
-        .with_line_number(true)
-        .init();
-
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage.clone());
