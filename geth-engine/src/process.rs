@@ -36,6 +36,7 @@ use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 mod tests;
 
 mod echo;
+pub mod grpc;
 pub mod indexing;
 pub mod reading;
 mod sink;
@@ -398,6 +399,7 @@ pub enum Proc {
     Reading,
     Indexing,
     PubSub,
+    Grpc,
     Echo,
     Sink,
 }
@@ -617,7 +619,7 @@ where
                         ),
 
                         Proc::PubSub => spawn(sender, buffer, id, proc, subscription::run),
-
+                        Proc::Grpc => spawn(sender, buffer, id, proc, grpc::run),
                         Proc::Echo => spawn(sender, buffer, id, proc, echo::run),
                         Proc::Sink => spawn(sender, buffer, id, proc, sink::run),
                     };

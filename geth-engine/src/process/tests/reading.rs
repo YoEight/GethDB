@@ -19,7 +19,6 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
     let manager = start_process_manager(storage.clone());
-    let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let reader_id = manager.wait_for(Proc::Reading).await?;
     let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
