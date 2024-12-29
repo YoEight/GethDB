@@ -588,13 +588,13 @@ where
                     let id = self.gen_proc_id();
                     let runtime = self.runtime.clone();
                     let sender = self.sender.clone();
-                    let buffer = self.buffer.split();
+                    let pool = self.pool.clone();
 
                     let running_proc = match proc {
                         Proc::Writing => spawn_raw(
                             sender,
                             runtime,
-                            buffer,
+                            pool,
                             Handle::current(),
                             id,
                             proc,
@@ -604,7 +604,7 @@ where
                         Proc::Reading => spawn_raw(
                             sender,
                             runtime,
-                            buffer,
+                            pool,
                             Handle::current(),
                             id,
                             proc,
@@ -614,17 +614,17 @@ where
                         Proc::Indexing => spawn_raw(
                             sender,
                             runtime,
-                            buffer,
+                            pool,
                             Handle::current(),
                             id,
                             proc,
                             indexing::run,
                         ),
 
-                        Proc::PubSub => spawn(sender, buffer, id, proc, subscription::run),
-                        Proc::Grpc => spawn(sender, buffer, id, proc, grpc::run),
-                        Proc::Echo => spawn(sender, buffer, id, proc, echo::run),
-                        Proc::Sink => spawn(sender, buffer, id, proc, sink::run),
+                        Proc::PubSub => spawn(sender, pool, id, proc, subscription::run),
+                        Proc::Grpc => spawn(sender, pool, id, proc, grpc::run),
+                        Proc::Echo => spawn(sender, pool, id, proc, echo::run),
+                        Proc::Sink => spawn(sender, pool, id, proc, sink::run),
                     };
 
                     let proc_id = running_proc.id;

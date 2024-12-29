@@ -21,7 +21,7 @@ use geth_domain::binary::models::Event;
 use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings, RecordedEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
-use geth_mikoshi::wal::chunks::ChunkBasedWAL;
+use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
 use geth_mikoshi::wal::{LogReceipt, WALRef, WriteAheadLog};
 
 use crate::cli::{
@@ -91,7 +91,7 @@ async fn main() -> eyre::Result<()> {
                             Ok(i) => i,
                         };
 
-                        let wal = match ChunkBasedWAL::load(storage.clone()) {
+                        let wal = match ChunkContainer::load(storage) {
                             Err(e) => {
                                 println!(
                                     "ERR: Error when loading chunk manager in {:?}: {}",
@@ -100,7 +100,7 @@ async fn main() -> eyre::Result<()> {
                                 continue;
                             }
 
-                            Ok(m) => WALRef::new(m),
+                            Ok(container) => WALRef::new(ChunkBasedWAL::new(container)?),
                         };
 
                         if let Err(e) = index.rebuild(&wal) {

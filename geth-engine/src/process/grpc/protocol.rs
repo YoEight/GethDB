@@ -1,5 +1,6 @@
 use bytes::BytesMut;
 use futures::{pin_mut, Stream, StreamExt};
+use serde::de;
 use std::sync::Arc;
 use tokio::select;
 use tokio::sync::mpsc;
@@ -34,6 +35,7 @@ impl<C> ProtocolImpl<C> {
     }
 }
 
+#[derive(Clone)]
 struct Internal {
     writer: WriterClient,
     reader: ReaderClient,
@@ -41,15 +43,14 @@ struct Internal {
 }
 
 async fn resolve_internal(mgr: ManagerClient) -> eyre::Result<Internal> {
-    let mut buffer = BytesMut::new();
     let writer_id = mgr.wait_for(Proc::Writing).await?;
     let reader_id = mgr.wait_for(Proc::Reading).await?;
     let sub_id = mgr.wait_for(Proc::PubSub).await?;
 
     Ok(Internal {
-        writer: WriterClient::new(writer_id, mgr.clone(), buffer.split()),
-        reader: ReaderClient::new(reader_id, mgr.clone(), buffer.split()),
-        sub: SubscriptionClient::new(sub_id, mgr, buffer),
+        writer: WriterClient::new(writer_id, mgr.clone()),
+        reader: ReaderClient::new(reader_id, mgr.clone()),
+        sub: SubscriptionClient::new(sub_id, mgr),
     })
 }
 
