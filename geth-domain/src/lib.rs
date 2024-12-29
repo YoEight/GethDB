@@ -56,7 +56,3 @@ pub fn parse_event(payload: &[u8]) -> eyre::Result<Events> {
     let evt = Events::decode(payload)?;
     Ok(evt)
 }
-
-pub fn parse_event_io(payload: &[u8]) -> io::Result<Events> {
-    parse_event(payload).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
-}

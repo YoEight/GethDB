@@ -76,7 +76,7 @@ where
 
         tokio::spawn(multiplex(
             self.client.clone(),
-            self.env.client.clone(),
+            internal,
             tx,
             request.into_inner(),
         ));
@@ -162,7 +162,7 @@ async fn multiplex<C>(
                     Msg::User(operation) => {
                         run_operation(
                             client.clone(),
-                            &mut internal,
+                            internal.clone(),
                             local_storage.clone(),
                             tx.clone(),
                             operation,
@@ -183,7 +183,7 @@ async fn multiplex<C>(
 
 fn run_operation<C>(
     client: Arc<C>,
-    internal: &mut Internal,
+    internal: Internal,
     local_storage: LocalStorage,
     tx: UnboundedSender<eyre::Result<OperationOut>>,
     input: OperationIn,
@@ -191,7 +191,7 @@ fn run_operation<C>(
     C: Client + Send + Sync + 'static,
 {
     tokio::spawn(async move {
-        let stream = execute_operation(client, mgr, local_storage, input).await;
+        let stream = execute_operation(client, internal, local_storage, input).await;
 
         pin_mut!(stream);
         while let Some(out) = stream.next().await {
@@ -204,7 +204,7 @@ fn run_operation<C>(
 
 async fn execute_operation<C>(
     client: Arc<C>,
-    mgr: ManagerClient,
+    internal: Internal,
     local_storage: LocalStorage,
     input: OperationIn,
 ) -> impl Stream<Item = eyre::Result<OperationOut>>

@@ -18,7 +18,7 @@ use geth_common::{
     Record, Revision, SubscriptionEvent, WriteResult,
 };
 use geth_domain::binary::models::Event;
-use geth_domain::{parse_event, parse_event_io, AppendProposes, Lsm, LsmSettings, RecordedEvent};
+use geth_domain::{parse_event, AppendProposes, Lsm, LsmSettings, RecordedEvent};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::{FileSystemStorage, Storage};
 use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
@@ -490,7 +490,8 @@ where
     };
 
     let records = wal.entries(position).map_io(|entry| {
-        let event = parse_event_io(&entry.payload)?;
+        let event = parse_event(&entry.payload)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
         if let Event::RecordedEvent(event) = event.event.unwrap() {
             Ok((
@@ -512,7 +513,7 @@ fn storage_read_stream<WAL, S>(
     index: &mut Lsm<S>,
     wal: &WALRef<WAL>,
     args: ReadStream,
-) -> io::Result<VecDeque<Record>>
+) -> eyre::Result<VecDeque<Record>>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
@@ -530,7 +531,7 @@ fn storage_read_stream_with_index<WAL, S>(
     index: &mut Lsm<S>,
     manager: &WALRef<WAL>,
     args: ReadStream,
-) -> io::Result<VecDeque<Record>>
+) -> eyre::Result<VecDeque<Record>>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
     S: Storage + Send + Sync + 'static,
@@ -542,7 +543,7 @@ where
     while let Some(entry) = entries.next()? {
         let record = manager.read_at(entry.position)?;
         match parse_event(&record.payload) {
-            Err(e) => return Err(io::Error::new(io::ErrorKind::InvalidData, e)),
+            Err(e) => eyre::bail!("failed to parse an event: {}", e),
             Ok(event) => {
                 if let Event::RecordedEvent(event) = event.event.unwrap() {
                     let event = RecordedEvent::from(event);
@@ -565,7 +566,7 @@ where
 fn storage_read_stream_without_index<WAL>(
     wal: &WALRef<WAL>,
     args: ReadStream,
-) -> io::Result<VecDeque<Record>>
+) -> eyre::Result<VecDeque<Record>>
 where
     WAL: WriteAheadLog + Send + Sync + 'static,
 {
@@ -573,7 +574,7 @@ where
     let mut iter = wal.entries(0);
 
     while let Some(entry) = iter.next()? {
-        let event = parse_event_io(&entry.payload)?;
+        let event = parse_event(&entry.payload)?;
 
         if let Event::RecordedEvent(event) = event.event.unwrap() {
             let event = RecordedEvent::from(event);

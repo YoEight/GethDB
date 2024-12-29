@@ -15,7 +15,7 @@ use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::parse_event_io;
+use crate::parse_event;
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
@@ -97,9 +97,10 @@ where
         Ok(lsm)
     }
 
-    pub fn rebuild<WAL: WriteAheadLog>(&mut self, wal: &WALRef<WAL>) -> io::Result<()> {
+    pub fn rebuild<WAL: WriteAheadLog>(&mut self, wal: &WALRef<WAL>) -> eyre::Result<()> {
         let records = wal.entries(self.logical_position).map_io(|entry| {
-            let event = parse_event_io(&entry.payload)?;
+            let event = parse_event(&entry.payload)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
             match event.event.unwrap() {
                 Event::RecordedEvent(event) => Ok((

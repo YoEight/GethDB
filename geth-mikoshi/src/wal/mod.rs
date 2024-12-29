@@ -144,7 +144,7 @@ impl<'a> Entry<'a> {
             + size_of::<u32>() // entry size
     }
 
-    pub fn commit(mut self, buffer: &mut BytesMut, position: u64) -> Bytes {
+    pub fn commit(self, buffer: &mut BytesMut, position: u64) -> Bytes {
         self.inner.index(self.revision, position);
         let size = self.size();
 
