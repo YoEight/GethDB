@@ -3,8 +3,6 @@ use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ExpectedRevision, Revision};
-use geth_mikoshi::wal::chunks::ChunkContainer;
-use geth_mikoshi::wal::WriteAheadLog;
 use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -18,11 +16,11 @@ struct Foo {
 async fn test_reader_proc_simple() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage.clone());
+    let manager = start_process_manager(storage.clone()).await?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let reader_id = manager.wait_for(Proc::Reading).await?;
-    let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
-    let mut reader_client = ReaderClient::new(reader_id, manager.clone(), buffer);
+    let mut writer_client = WriterClient::new(writer_id, manager.clone());
+    let mut reader_client = ReaderClient::new(reader_id, manager.clone());
     let mut expected = vec![];
 
     for i in 0..10 {

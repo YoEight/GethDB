@@ -1,5 +1,5 @@
 use crate::storage::InMemoryStorage;
-use crate::wal::chunks::ChunkBasedWAL;
+use crate::wal::chunks::{ChunkBasedWAL, ChunkContainer};
 use crate::wal::{LogEntries, WriteAheadLog};
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use serde::{Deserialize, Serialize};
@@ -24,19 +24,16 @@ fn generate_bytes() -> Bytes {
 fn test_wal_chunk_iso() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
-    let mut wal = ChunkBasedWAL::load(storage)?;
+    let container = ChunkContainer::load(storage.clone())?;
+    let mut wal = ChunkBasedWAL::new(container)?;
     let stream_name = Bytes::from_static(b"salut");
     let revision = 42;
     let data = generate_bytes();
     buffer.put_u32_le(data.len() as u32);
     buffer.extend_from_slice(&data);
-    let mut entries = LogEntries::new(
-        stream_name.clone(),
-        revision,
-        false,
-        buffer.split().freeze(),
-    );
+    let mut entries = LogEntries::new(buffer);
 
+    entries.begin(stream_name.clone(), revision, data.clone());
     wal.append(&mut entries)?;
 
     let mut entry = wal.read_at(0)?;

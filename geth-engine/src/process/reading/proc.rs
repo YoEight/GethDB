@@ -1,12 +1,10 @@
-use crate::process::indexing::{IndexClient, Streaming};
+use crate::process::indexing::IndexClient;
 use crate::process::reading::{LogEntryExt, Request, Response};
 use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
-use tracing::warn;
 
 pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
 where
@@ -27,6 +25,8 @@ where
                             direction,
                             count,
                         } => {
+                            // FIXME - it might worth calling that part in the same future that we use to complete our call to the reader process.
+                            let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                             let index_stream = env.handle.block_on(index_client.read(
                                 mikoshi_hash(ident),
                                 start.raw(),
@@ -39,7 +39,7 @@ where
                                 ReadCompleted::StreamDeleted => {
                                     let _ = stream
                                         .sender
-                                        .send(Response::StreamDeleted.serialize(&mut env.buffer));
+                                        .send(Response::StreamDeleted.serialize(&mut buffer));
 
                                     continue;
                                 }
@@ -47,7 +47,7 @@ where
 
                             if stream
                                 .sender
-                                .send(Response::Streaming.serialize(&mut env.buffer))
+                                .send(Response::Streaming.serialize(&mut buffer))
                                 .is_err()
                             {
                                 continue;
@@ -57,7 +57,7 @@ where
                             while let Some((_, position)) =
                                 env.handle.block_on(index_stream.next())?
                             {
-                                reader.read_at(position)?.serialize(&mut env.buffer);
+                                reader.read_at(position)?.serialize(&mut buffer);
                                 count += 1;
 
                                 if count < batch_size {
@@ -65,13 +65,13 @@ where
                                 }
 
                                 count = 0;
-                                if stream.sender.send(env.buffer.split().freeze()).is_err() {
+                                if stream.sender.send(buffer.split().freeze()).is_err() {
                                     break;
                                 }
                             }
 
-                            if !env.buffer.is_empty() {
-                                let _ = stream.sender.send(env.buffer.split().freeze());
+                            if !buffer.is_empty() {
+                                let _ = stream.sender.send(buffer.split().freeze());
                             }
                         }
                     }

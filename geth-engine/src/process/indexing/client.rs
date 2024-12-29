@@ -5,19 +5,15 @@ use bytes::{Buf, Bytes, BytesMut};
 use geth_common::{Direction, ReadCompleted};
 use tokio::sync::mpsc::UnboundedReceiver;
 
+#[derive(Clone)]
 pub struct IndexClient {
     target: ProcId,
     inner: ManagerClient,
-    buffer: BytesMut,
 }
 
 impl IndexClient {
-    pub fn new(target: ProcId, inner: ManagerClient, buffer: BytesMut) -> Self {
-        Self {
-            target,
-            inner,
-            buffer,
-        }
+    pub fn new(target: ProcId, inner: ManagerClient) -> Self {
+        Self { target, inner }
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
@@ -25,7 +21,7 @@ impl IndexClient {
         let proc_id = env.client.wait_for(Proc::Indexing).await?;
         tracing::debug!("index process available on {}", proc_id);
 
-        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
@@ -33,7 +29,7 @@ impl IndexClient {
         let proc_id = env.handle.block_on(env.client.wait_for(Proc::Indexing))?;
         tracing::debug!("index process available on {}", proc_id);
 
-        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub async fn read(
@@ -43,7 +39,8 @@ impl IndexClient {
         count: usize,
         dir: Direction,
     ) -> eyre::Result<ReadCompleted<Streaming>> {
-        let payload = Request::read(self.buffer.split(), key, start, count, dir);
+        let mut buffer = self.inner.pool.get().await.unwrap();
+        let payload = Request::read(buffer.split(), key, start, count, dir);
         let mut inner = self.inner.request_stream(self.target, payload).await?;
 
         if let Some(bytes) = inner.recv().await {
@@ -73,7 +70,8 @@ impl IndexClient {
     where
         I: IntoIterator<Item = (u64, u64)>,
     {
-        let mut req = Request::store(self.buffer.split(), key);
+        let mut buffer = self.inner.pool.get().await.unwrap();
+        let mut req = Request::store(buffer.split(), key);
 
         for (revision, position) in entries {
             req.put_entry(revision, position);
@@ -92,7 +90,8 @@ impl IndexClient {
     }
 
     pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
-        let req = Request::latest_revision(self.buffer.split(), key);
+        let mut buffer = self.inner.pool.get().await.unwrap();
+        let req = Request::latest_revision(buffer.split(), key);
         let mut resp = self.inner.request(self.target, req).await?;
 
         if resp.payload.len() == 1 {

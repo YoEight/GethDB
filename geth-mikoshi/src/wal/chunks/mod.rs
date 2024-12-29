@@ -39,10 +39,11 @@ pub struct ChunkContainer<S> {
 }
 
 impl<S> ChunkContainer<S> {
-    pub fn load(storage: S, buffer: &mut BytesMut) -> io::Result<ChunkContainer<S>>
+    pub fn load(storage: S) -> io::Result<ChunkContainer<S>>
     where
         S: Storage,
     {
+        let mut buffer = BytesMut::new();
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
         for info in storage.list(Chunks)? {
@@ -77,8 +78,8 @@ impl<S> ChunkContainer<S> {
         if chunks.is_empty() {
             let chunk = Chunk::new(0);
 
-            chunk.header.put(buffer);
-            storage.write_to(chunk.file_id(), 0, buffer.split().freeze())?;
+            chunk.header.put(&mut buffer);
+            storage.write_to(chunk.file_id(), 0, buffer.freeze())?;
 
             chunks.push(chunk);
         }

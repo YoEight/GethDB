@@ -1,25 +1,20 @@
 use crate::process::writing::{Request, Response};
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use geth_common::{
     AppendError, AppendStreamCompleted, ExpectedRevision, Position, WriteResult,
     WrongExpectedRevisionError,
 };
-use uuid::Uuid;
 
+#[derive(Clone)]
 pub struct WriterClient {
     target: ProcId,
     inner: ManagerClient,
-    buffer: BytesMut,
 }
 
 impl WriterClient {
-    pub fn new(target: ProcId, inner: ManagerClient, buffer: BytesMut) -> Self {
-        Self {
-            target,
-            inner,
-            buffer,
-        }
+    pub fn new(target: ProcId, inner: ManagerClient) -> Self {
+        Self { target, inner }
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
@@ -27,11 +22,11 @@ impl WriterClient {
         let proc_id = env.client.wait_for(Proc::Writing).await?;
         tracing::debug!("writer process available on {}", proc_id);
 
-        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub async fn append<I>(
-        &mut self,
+        &self,
         stream: &str,
         expected: ExpectedRevision,
         index: bool,
@@ -40,13 +35,14 @@ impl WriterClient {
     where
         I: IntoIterator<Item = Bytes>,
     {
-        let mut builder = Request::append_builder(&mut self.buffer, stream, expected, index);
+        let mut buffer = self.inner.pool.get().await.unwrap();
+        let mut builder = Request::append_builder(&mut buffer, stream, expected, index);
 
         for payload in entries {
             builder.push(&payload);
         }
 
-        let mut resp = self.inner.request(self.target, builder.build()).await?;
+        let resp = self.inner.request(self.target, builder.build()).await?;
         if let Some(resp) = Response::try_from(resp.payload) {
             match resp {
                 Response::Error => {
@@ -60,7 +56,7 @@ impl WriterClient {
                         WrongExpectedRevisionError { expected, current },
                     )),
                 ),
-                Response::Committed { start, next } => {
+                Response::Committed { start, next: _next } => {
                     Ok(AppendStreamCompleted::Success(WriteResult {
                         next_expected_version: ExpectedRevision::NoStream,
                         position: Position(start),

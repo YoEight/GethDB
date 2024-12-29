@@ -1,10 +1,6 @@
 use crate::process::subscription::{Request, Response};
-use crate::process::{Item, ProcessEnv, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessEnv};
 use bytes::{Buf, Bytes};
-use geth_common::ReadCompleted;
-use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::chunks::ChunkContainer;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -35,13 +31,14 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     let mut reg = Register::default();
     while let Some(item) = env.queue.recv().await {
         match item {
-            Item::Stream(mut stream) => {
+            Item::Stream(stream) => {
                 if let Some(req) = Request::try_from(stream.payload) {
                     match req {
                         Request::Subscribe { ident } => {
+                            let mut buffer = env.client.pool.get().await.unwrap();
                             if stream
                                 .sender
-                                .send(Response::Confirmed.serialize(&mut env.buffer))
+                                .send(Response::Confirmed.serialize(&mut buffer))
                                 .is_ok()
                             {
                                 reg.register(ident, stream.sender);

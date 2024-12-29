@@ -10,7 +10,7 @@ use geth_mikoshi::wal::WALRef;
 
 use crate::domain::index::Index;
 pub use crate::options::Options;
-use crate::process::{grpc, InternalClient, Processes};
+use crate::process::{InternalClient, Processes};
 
 mod bus;
 mod domain;
@@ -21,11 +21,10 @@ mod process;
 mod services;
 
 pub async fn run(options: Options) -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
     let storage = FileSystemStorage::new(PathBuf::from(&options.db))?;
     let lsm = Lsm::load(LsmSettings::default(), storage.clone())?;
     let index = Index::new(lsm).guarded();
-    let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
+    let container = ChunkContainer::load(storage.clone())?;
     let wal = WALRef::new(ChunkBasedWAL::new(container)?);
     let processes = Processes::new(wal, index.clone());
     let sub_client = processes.subscriptions_client().clone();

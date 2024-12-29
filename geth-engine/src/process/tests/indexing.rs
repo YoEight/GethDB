@@ -6,11 +6,10 @@ use crate::process::{indexing::IndexClient, start_process_manager, Proc};
 
 #[tokio::test]
 async fn test_store_read() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage);
+    let manager = start_process_manager(storage).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone(), buffer.split());
+    let mut client = IndexClient::new(proc_id, manager.clone());
     let mut expected = vec![];
 
     for i in 0..10 {
@@ -32,11 +31,10 @@ async fn test_store_read() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_last_revision_when_exists() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage);
+    let manager = start_process_manager(storage).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone(), buffer.split());
+    let mut client = IndexClient::new(proc_id, manager.clone());
     let mut expected = vec![];
 
     for i in 0..10 {
@@ -55,9 +53,9 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage);
+    let manager = start_process_manager(storage).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone(), BytesMut::new());
+    let mut client = IndexClient::new(proc_id, manager.clone());
     let revision = client.latest_revision(2).await?.revision();
 
     assert!(revision.is_none());

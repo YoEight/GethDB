@@ -15,14 +15,12 @@ struct Foo {
 
 #[tokio::test]
 async fn test_pubsub_proc_simple() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage.clone());
-    let container = ChunkContainer::load(storage.clone(), &mut buffer)?;
+    let manager = start_process_manager(storage.clone()).await?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let pubsub_id = manager.wait_for(Proc::PubSub).await?;
-    let mut writer_client = WriterClient::new(writer_id, manager.clone(), buffer.split());
-    let mut sub_client = SubscriptionClient::new(pubsub_id, manager.clone(), buffer);
+    let writer_client = WriterClient::new(writer_id, manager.clone());
+    let sub_client = SubscriptionClient::new(pubsub_id, manager.clone());
     let mut expected = vec![];
     let stream_name = Uuid::new_v4().to_string();
 

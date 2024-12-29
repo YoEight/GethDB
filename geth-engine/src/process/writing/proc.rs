@@ -3,14 +3,10 @@ use crate::process::indexing::IndexClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::{Request, Response};
 use crate::process::{subscription, Item, ProcessRawEnv, Runtime};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::{FileId, Storage};
-use geth_mikoshi::wal::chunks::ChunkContainer;
-use geth_mikoshi::wal::{LogEntries, LogWriter, WriteAheadLog};
-use std::io;
-use uuid::Uuid;
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::{LogEntries, LogWriter};
 
 pub struct Writing;
 
@@ -18,10 +14,13 @@ pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + 'static,
 {
-    let mut log_writer = LogWriter::load(runtime.container().clone(), env.buffer.split())?;
+    let pool = env.client.pool.clone();
+    let mut buffer = env.handle.block_on(pool.get()).unwrap();
+    let mut log_writer = LogWriter::load(runtime.container().clone(), buffer.split())?;
     let mut index_client = IndexClient::resolve_raw(&mut env)?;
     let mut sub_client = SubscriptionClient::resolve_raw(&mut env)?;
-    let mut entries = LogEntries::new(env.buffer.split());
+    let mut entries = LogEntries::new(buffer.split());
+    std::mem::drop(buffer);
 
     while let Some(item) = env.queue.recv().ok() {
         match item {
@@ -42,6 +41,7 @@ where
                     ..
                 }) = Request::try_from(mail.payload)
                 {
+                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     let key = mikoshi_hash(&ident);
                     let current_revision =
                         env.handle.block_on(index_client.latest_revision(key))?;
@@ -50,7 +50,7 @@ where
                         env.client.reply(
                             mail.origin,
                             mail.correlation,
-                            Response::Deleted.serialize(&mut env.buffer),
+                            Response::Deleted.serialize(&mut buffer),
                         )?;
 
                         continue;
@@ -61,7 +61,7 @@ where
                             mail.origin,
                             mail.correlation,
                             Response::wrong_expected_revision(e.expected, e.current)
-                                .serialize(&mut env.buffer),
+                                .serialize(&mut buffer),
                         )?;
 
                         continue;
@@ -78,10 +78,10 @@ where
                         mail.origin,
                         mail.correlation,
                         Response::committed(receipt.start_position, receipt.next_position)
-                            .serialize(&mut env.buffer),
+                            .serialize(&mut buffer),
                     )?;
 
-                    let mut builder = subscription::Request::push(&mut env.buffer);
+                    let mut builder = subscription::Request::push(&mut buffer);
                     for event in entries.committed_events() {
                         builder.push_entry(event);
                     }

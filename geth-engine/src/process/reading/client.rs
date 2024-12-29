@@ -35,19 +35,15 @@ impl Streaming {
     }
 }
 
+#[derive(Clone)]
 pub struct ReaderClient {
     target: ProcId,
     inner: ManagerClient,
-    buffer: BytesMut,
 }
 
 impl ReaderClient {
-    pub fn new(target: ProcId, inner: ManagerClient, buffer: BytesMut) -> Self {
-        Self {
-            target,
-            inner,
-            buffer,
-        }
+    pub fn new(target: ProcId, inner: ManagerClient) -> Self {
+        Self { target, inner }
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
@@ -55,21 +51,22 @@ impl ReaderClient {
         let proc_id = env.client.wait_for(Proc::Reading).await?;
         tracing::debug!("reader process available on {}", proc_id);
 
-        Ok(Self::new(proc_id, env.client.clone(), env.buffer.split()))
+        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub async fn read(
-        &mut self,
+        &self,
         stream_name: &str,
         start: Revision<u64>,
         direction: Direction,
         count: usize,
     ) -> eyre::Result<ReadStreamCompleted> {
+        let mut buffer = self.inner.pool.get().await.unwrap();
         let mut mailbox = self
             .inner
             .request_stream(
                 self.target,
-                Request::read(&mut self.buffer, stream_name, start, direction, count),
+                Request::read(&mut buffer, stream_name, start, direction, count),
             )
             .await?;
 

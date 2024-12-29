@@ -37,6 +37,7 @@ where
         match item {
             Item::Mail(mail) => {
                 if let Some(req) = Request::try_from(mail.payload) {
+                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     match req {
                         Request::Store { key, entries } => {
                             let last_revision = entries
@@ -49,7 +50,7 @@ where
                                 let _ = env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    Response::Error.serialize(env.buffer.split()),
+                                    Response::Error.serialize(buffer.split()),
                                 );
                             } else {
                                 revision_cache.insert(key, last_revision);
@@ -57,18 +58,18 @@ where
                                 let _ = env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    Response::Committed.serialize(env.buffer.split()),
+                                    Response::Committed.serialize(buffer.split()),
                                 );
                             }
                         }
 
                         Request::LatestRevision { key } => {
                             if let Some(current) = revision_cache.get(&key) {
-                                env.buffer.put_u64_le(current);
+                                buffer.put_u64_le(current);
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    env.buffer.split().freeze(),
+                                    buffer.split().freeze(),
                                 )?;
                             } else {
                                 let lsm_read = lsm.read().map_err(|e| {
@@ -79,13 +80,13 @@ where
 
                                 if let Some(revision) = revison {
                                     revision_cache.insert(key, revision);
-                                    env.buffer.put_u64_le(revision);
+                                    buffer.put_u64_le(revision);
                                 }
 
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    env.buffer.split().freeze(),
+                                    buffer.split().freeze(),
                                 )?;
                             }
                         }
@@ -96,7 +97,7 @@ where
                             env.client.reply(
                                 mail.origin,
                                 mail.correlation,
-                                Response::Error.serialize(env.buffer.split()),
+                                Response::Error.serialize(buffer.split()),
                             )?;
                         }
                     }
@@ -111,9 +112,10 @@ where
                     dir,
                 }) = Request::try_from(stream.payload)
                 {
+                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
-                    let mut stream_buffer = env.buffer.split();
+                    let mut stream_buffer = buffer.split();
                     let _: JoinHandle<eyre::Result<()>> = env.handle.spawn_blocking(move || {
                         if stream_indexed_read(
                             stream_lsm,

@@ -53,6 +53,7 @@ strum = "0.26"
 strum_macros = "0.26"
 ctor = "0.2"
 lazy_static = "1.4.0"
+bb8 = "0.9"
 
 [dev-dependencies]
 tracing-subscriber = "0.3"

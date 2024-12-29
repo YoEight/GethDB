@@ -1,4 +1,3 @@
-use crate::messages::ProcessTarget;
 use crate::process::{Item, ManagerClient, Proc, ProcId, ProcessEnv};
 use bytes::{Buf, BufMut, BytesMut};
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -6,12 +5,13 @@ use tokio::sync::mpsc::UnboundedReceiver;
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     while let Some(item) = env.queue.recv().await {
         if let Item::Stream(mut stream) = item {
+            let mut buffer = env.client.pool.get().await.unwrap();
             let low = stream.payload.get_u64_le();
             let high = stream.payload.get_u64_le();
 
             for num in low..high {
-                env.buffer.put_u64_le(num);
-                if stream.sender.send(env.buffer.split().freeze()).is_err() {
+                buffer.put_u64_le(num);
+                if stream.sender.send(buffer.split().freeze()).is_err() {
                     break;
                 }
             }

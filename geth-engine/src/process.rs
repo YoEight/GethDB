@@ -1,6 +1,8 @@
+use bb8::Pool;
 use bytes::{Bytes, BytesMut};
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
+use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
@@ -39,6 +41,7 @@ mod echo;
 pub mod grpc;
 pub mod indexing;
 pub mod reading;
+mod resource;
 mod sink;
 pub mod storage;
 pub mod subscription;
@@ -380,19 +383,6 @@ pub struct Process {
     pub created: Instant,
 }
 
-pub struct Manager<S> {
-    runtime: Runtime<S>,
-    catalog: Catalog,
-    proc_id_gen: ProcId,
-    sender: UnboundedSender<ManagerCommand>,
-    requests: HashMap<Uuid, oneshot::Sender<Mail>>,
-    buffer: BytesMut,
-    queue: UnboundedReceiver<ManagerCommand>,
-    closing: bool,
-    close_resp: Vec<oneshot::Sender<()>>,
-    processes_shutting_down: usize,
-}
-
 #[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub enum Proc {
     Writing,
@@ -532,6 +522,19 @@ impl CatalogBuilder {
 struct CatalogItem {
     proc: Proc,
     topology: Topology,
+}
+
+pub struct Manager<S> {
+    pool: Pool<BufferManager>,
+    runtime: Runtime<S>,
+    catalog: Catalog,
+    proc_id_gen: ProcId,
+    sender: UnboundedSender<ManagerCommand>,
+    requests: HashMap<Uuid, oneshot::Sender<Mail>>,
+    queue: UnboundedReceiver<ManagerCommand>,
+    closing: bool,
+    close_resp: Vec<oneshot::Sender<()>>,
+    processes_shutting_down: usize,
 }
 
 impl<S> Manager<S>
@@ -751,20 +754,19 @@ pub struct ProcessEnv {
     id: ProcId,
     queue: UnboundedReceiver<Item>,
     client: ManagerClient,
-    buffer: BytesMut,
 }
 
 pub struct ProcessRawEnv {
     id: ProcId,
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
-    buffer: BytesMut,
     handle: Handle,
 }
 
 #[derive(Clone)]
 pub struct ManagerClient {
     id: ProcId,
+    pool: Pool<BufferManager>,
     inner: UnboundedSender<ManagerCommand>,
 }
 
@@ -915,7 +917,7 @@ impl ManagerClient {
     }
 }
 
-pub fn start_process_manager<S>(storage: S) -> ManagerClient
+pub async fn start_process_manager<S>(storage: S) -> eyre::Result<ManagerClient>
 where
     S: Storage + Send + Sync + 'static,
 {
@@ -926,29 +928,30 @@ where
         .register(Proc::PubSub)
         .build();
 
-    start_process_manager_with_catalog(storage, catalog).unwrap()
+    start_process_manager_with_catalog(storage, catalog).await
 }
 
-pub fn start_process_manager_with_catalog<S>(
+pub async fn start_process_manager_with_catalog<S>(
     storage: S,
     catalog: Catalog,
-) -> io::Result<ManagerClient>
+) -> eyre::Result<ManagerClient>
 where
     S: Storage + Send + Sync + 'static,
 {
+    let pool = create_buffer_pool().await?;
     let (sender, queue) = unbounded_channel();
-    let mut buffer = BytesMut::new();
-    let container = ChunkContainer::load(storage, &mut buffer)?;
+    let container = ChunkContainer::load(storage)?;
     tokio::spawn(process_manager(
+        pool.clone(),
         catalog,
         container,
-        buffer,
         sender.clone(),
         queue,
     ));
 
     Ok(ManagerClient {
         id: 0,
+        pool,
         inner: sender,
     })
 }
@@ -965,21 +968,21 @@ impl<S> Runtime<S> {
 }
 
 async fn process_manager<S>(
+    pool: Pool<BufferManager>,
     catalog: Catalog,
     container: ChunkContainer<S>,
-    buffer: BytesMut,
     sender: UnboundedSender<ManagerCommand>,
     queue: UnboundedReceiver<ManagerCommand>,
 ) where
     S: Storage + Send + Sync + 'static,
 {
     let mut manager = Manager {
+        pool,
         runtime: Runtime { container },
         catalog,
         proc_id_gen: 1,
         sender,
         requests: Default::default(),
-        buffer,
         closing: false,
         close_resp: vec![],
         queue,
@@ -997,7 +1000,7 @@ async fn process_manager<S>(
 fn spawn_raw<S, F>(
     sender: UnboundedSender<ManagerCommand>,
     runtime: Runtime<S>,
-    buffer: BytesMut,
+    pool: Pool<BufferManager>,
     handle: Handle,
     id: ProcId,
     proc: Proc,
@@ -1013,9 +1016,9 @@ where
         queue: proc_queue,
         client: ManagerClient {
             id,
+            pool: pool.clone(),
             inner: sender.clone(),
         },
-        buffer,
         handle,
     };
 
@@ -1038,7 +1041,7 @@ where
 
 fn spawn<F, Fut>(
     sender: UnboundedSender<ManagerCommand>,
-    buffer: BytesMut,
+    pool: Pool<BufferManager>,
     id: ProcId,
     proc: Proc,
     runnable: F,
@@ -1053,9 +1056,9 @@ where
         queue: proc_queue,
         client: ManagerClient {
             id,
+            pool: pool.clone(),
             inner: sender.clone(),
         },
-        buffer,
     };
 
     tokio::spawn(async move {
