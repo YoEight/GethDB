@@ -1039,7 +1039,7 @@ impl From<StreamRead> for operation_out::StreamRead {
     }
 }
 
-pub struct StreamReadError {}
+pub struct StreamReadError;
 
 impl Display for StreamReadError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
