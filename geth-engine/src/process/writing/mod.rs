@@ -121,10 +121,6 @@ impl Response {
         Self::WrongExpectedRevision { expected, current }
     }
 
-    fn error() -> Self {
-        Self::Error
-    }
-
     fn committed(start: u64, next: u64) -> Self {
         Self::Committed { start, next }
     }

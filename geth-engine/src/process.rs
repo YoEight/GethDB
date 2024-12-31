@@ -1,30 +1,24 @@
 use bb8::Pool;
-use bytes::{Bytes, BytesMut};
+use bytes::Bytes;
 use futures::stream::BoxStream;
 use futures::TryStreamExt;
 use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
-use std::{io, thread};
-use strum_macros::EnumString;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
-use tokio::sync::oneshot;
+use tokio::sync::{oneshot, Notify};
 use uuid::Uuid;
 
 use crate::bus::{
     GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
 };
-use crate::domain::index::IndexRef;
 use crate::messages::{
-    AppendStream, DeleteStream, ProcessTarget, ReadStream, ReadStreamCompleted, StreamTarget,
-    SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
+    ProcessTarget, StreamTarget, SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
 };
-use crate::process::storage::StorageService;
-pub use crate::process::subscriptions::SubscriptionsClient;
-use crate::process::write_request_manager::WriteRequestManagerClient;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
     GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
@@ -32,7 +26,6 @@ use geth_common::{
 };
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
 
 #[cfg(test)]
 mod tests;
@@ -43,312 +36,12 @@ pub mod indexing;
 pub mod reading;
 mod resource;
 mod sink;
-pub mod storage;
 pub mod subscription;
-mod subscriptions;
-mod write_request_manager;
+// mod subscriptions;
 pub mod writing;
 
-pub struct InternalClient<WAL, S: Storage> {
-    storage: StorageService<WAL, S>,
-    subscriptions: SubscriptionsClient,
-    write_request_manager_client: WriteRequestManagerClient,
-}
-
-impl<WAL, S> InternalClient<WAL, S>
-where
-    S: Storage + Send + Sync + 'static,
-    WAL: WriteAheadLog + Send + Sync + 'static,
-{
-    pub fn new(processes: Processes<WAL, S>) -> Self {
-        Self {
-            storage: processes.storage,
-            subscriptions: processes.subscriptions,
-            write_request_manager_client: processes.write_request_manager_client,
-        }
-    }
-}
-
-#[async_trait::async_trait]
-impl<WAL, S> Client for InternalClient<WAL, S>
-where
-    WAL: WriteAheadLog + Send + Sync + 'static,
-    S: Storage + Send + Sync + 'static,
-{
-    async fn append_stream(
-        &self,
-        stream_id: &str,
-        expected_revision: ExpectedRevision,
-        proposes: Vec<Propose>,
-    ) -> eyre::Result<AppendStreamCompleted> {
-        let outcome = self
-            .storage
-            .append_stream(AppendStream {
-                stream_name: stream_id.to_string(),
-                events: proposes,
-                expected: expected_revision,
-            })
-            .await?;
-
-        if let AppendStreamCompleted::Success(ref result) = outcome {
-            self.write_request_manager_client
-                .wait_until_indexing_reach(result.position.raw())
-                .await?;
-        }
-
-        Ok(outcome)
-    }
-
-    async fn read_stream(
-        &self,
-        stream_id: &str,
-        direction: Direction,
-        revision: Revision<u64>,
-        max_count: u64,
-    ) -> BoxStream<'static, eyre::Result<Record>> {
-        let outcome = self
-            .storage
-            .read_stream(ReadStream {
-                correlation: Default::default(),
-                stream_name: stream_id.to_string(),
-                direction,
-                starting: revision,
-                count: max_count as usize,
-            })
-            .await;
-
-        let stream_id = stream_id.to_string();
-        // // FIXME: should return first class error.
-        // Box::pin(async_stream::try_stream! {
-        //     match outcome {
-        //         ReadStreamCompleted::StreamDeleted => {
-        //             let () = Err(eyre::eyre!("stream '{}' deleted", stream_id))?;
-        //
-        //         } ,
-        //         ReadStreamCompleted::Success(mut stream) => {
-        //             while let Some(record) = stream.next().await? {
-        //                 yield record;
-        //             }
-        //         }
-        //         ReadStreamCompleted::Unexpected(e) => {
-        //             let () = Err(e)?;
-        //         }
-        //     }
-        // })
-        todo!()
-    }
-
-    async fn subscribe_to_stream(
-        &self,
-        stream_id: &str,
-        start: Revision<u64>,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        let catchup_stream = if start == Revision::End {
-            None
-        } else {
-            Some(
-                self.read_stream(stream_id, Direction::Forward, start, u64::MAX)
-                    .await,
-            )
-        };
-
-        let (sender, recv) = oneshot::channel();
-        let outcome = self.subscriptions.subscribe(SubscribeMsg {
-            payload: SubscribeTo {
-                target: SubscriptionTarget::Stream(StreamTarget {
-                    parent: None,
-                    stream_name: stream_id.to_string(),
-                }),
-            },
-            mail: sender,
-        });
-
-        let stream_id = stream_id.to_string();
-        Box::pin(async_stream::try_stream! {
-            outcome?;
-            let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
-
-            let mut threshold = start.raw();
-            let mut pre_read_events = false;
-            if let Some(mut catchup_stream) = catchup_stream {
-                while let Some(record) = catchup_stream.try_next().await? {
-                    pre_read_events = true;
-                    let revision = record.revision;
-                    yield SubscriptionEvent::EventAppeared(record);
-                    threshold = revision;
-                }
-
-                yield SubscriptionEvent::CaughtUp;
-            }
-
-            match resp.outcome {
-                SubscriptionRequestOutcome::Success(mut stream) => {
-                    yield SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(stream_id));
-
-                    while let Some(record) = stream.next().await? {
-                        if pre_read_events && record.revision <= threshold {
-                            continue;
-                        }
-
-                        yield SubscriptionEvent::EventAppeared(record);
-                    }
-                }
-                SubscriptionRequestOutcome::Failure(e) => {
-                    let () = Err(e)?;
-                }
-            }
-        })
-    }
-
-    async fn subscribe_to_process(
-        &self,
-        name: &str,
-        source_code: &str,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        let (sender, recv) = oneshot::channel();
-        let outcome = self.subscriptions.subscribe(SubscribeMsg {
-            payload: SubscribeTo {
-                target: SubscriptionTarget::Process(ProcessTarget {
-                    id: Uuid::new_v4(),
-                    name: name.to_string(),
-                    source_code: source_code.to_string(),
-                }),
-            },
-            mail: sender,
-        });
-
-        Box::pin(async_stream::try_stream! {
-            outcome?;
-            let resp = recv.await.map_err(|_| eyre::eyre!("Main bus has shutdown!"))?;
-
-            match resp.outcome {
-                SubscriptionRequestOutcome::Success(mut stream) => {
-                    while let Some(record) = stream.next().await? {
-                        yield SubscriptionEvent::EventAppeared(record);
-                    }
-                }
-                SubscriptionRequestOutcome::Failure(e) => {
-                    let () = Err(e)?;
-                }
-            }
-        })
-    }
-
-    async fn delete_stream(
-        &self,
-        stream_id: &str,
-        expected_revision: ExpectedRevision,
-    ) -> eyre::Result<DeleteStreamCompleted> {
-        let outcome = self
-            .storage
-            .delete_stream(DeleteStream {
-                stream_name: stream_id.to_string(),
-                expected: expected_revision,
-            })
-            .await?;
-
-        Ok(outcome)
-    }
-
-    async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .list_programmable_subscriptions(sender)
-            .await
-            .is_err()
-        {
-            eyre::bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp);
-        }
-
-        eyre::bail!("Main bus has shutdown!");
-    }
-
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .get_programmable_subscription_stats(GetProgrammableSubscriptionStatsMsg {
-                id,
-                mail: sender,
-            })
-            .await
-            .is_err()
-        {
-            eyre::bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(resp.map_or(
-                ProgramObtained::Error(GetProgramError::NotExists),
-                ProgramObtained::Success,
-            ));
-        }
-
-        eyre::bail!("Main bus has shutdown!");
-    }
-
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
-        let (sender, recv) = oneshot::channel();
-        if self
-            .subscriptions
-            .kill_programmable_subscription(KillProgrammableSubscriptionMsg { id, mail: sender })
-            .await
-            .is_err()
-        {
-            eyre::bail!("Main bus has shutdown!");
-        }
-
-        if let Ok(resp) = recv.await {
-            return Ok(
-                resp.map_or(ProgramKilled::Error(ProgramKillError::NotExists), |_| {
-                    ProgramKilled::Success
-                }),
-            );
-        }
-
-        eyre::bail!("Main bus has shutdown!");
-    }
-}
-
 #[derive(Clone)]
-pub struct Processes<WAL, S>
-where
-    S: Storage,
-{
-    storage: StorageService<WAL, S>,
-    subscriptions: SubscriptionsClient,
-    write_request_manager_client: WriteRequestManagerClient,
-}
-
-impl<WAL, S> Processes<WAL, S>
-where
-    WAL: WriteAheadLog + Send + Sync + 'static,
-    S: Storage + Send + Sync + 'static,
-{
-    pub fn new(wal: WALRef<WAL>, index: IndexRef<S>) -> Self {
-        let subscriptions = subscriptions::start();
-        let write_request_manager_client = write_request_manager::start(subscriptions.clone());
-        let storage = StorageService::new(wal, index, subscriptions.clone());
-
-        Self {
-            storage,
-            subscriptions,
-            write_request_manager_client,
-        }
-    }
-
-    pub fn subscriptions_client(&self) -> &SubscriptionsClient {
-        &self.subscriptions
-    }
-}
-
-#[derive(Clone)]
-pub enum Mailbox {
+enum Mailbox {
     Tokio(UnboundedSender<Item>),
     Raw(std::sync::mpsc::Sender<Item>),
 }
@@ -372,17 +65,6 @@ pub struct Mail {
     pub created: Instant,
 }
 
-impl Mail {}
-
-#[derive(Clone)]
-pub struct Process {
-    pub id: ProcId,
-    pub parent: Option<ProcId>,
-    pub name: &'static str,
-    pub mailbox: Mailbox,
-    pub created: Instant,
-}
-
 #[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub enum Proc {
     Writing,
@@ -392,20 +74,6 @@ pub enum Proc {
     Grpc,
     Echo,
     Sink,
-}
-
-impl Proc {
-    // fn spawn(&self) {
-    //     match self {
-    //         Activator::Managed(builder) => {
-    //             let toto = builder();
-    //             let name = toto.name();
-    //             let toto = builder();
-    //         }
-    //
-    //         Activator::Raw(_) => {}
-    //     }
-    // }
 }
 
 enum Topology {
@@ -525,11 +193,10 @@ struct CatalogItem {
 }
 
 pub struct Manager<S> {
-    pool: Pool<BufferManager>,
+    client: ManagerClient,
     runtime: Runtime<S>,
     catalog: Catalog,
     proc_id_gen: ProcId,
-    sender: UnboundedSender<ManagerCommand>,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
@@ -553,7 +220,7 @@ where
         }
 
         match cmd {
-            ManagerCommand::Spawn { parent, resp } => {
+            ManagerCommand::Spawn { parent: _, resp: _ } => {
                 // TODO - might change that command to start.
             }
 
@@ -587,44 +254,25 @@ where
                 } else {
                     let id = self.gen_proc_id();
                     let runtime = self.runtime.clone();
-                    let sender = self.sender.clone();
-                    let pool = self.pool.clone();
+                    let client = self.client.clone();
 
                     let running_proc = match proc {
-                        Proc::Writing => spawn_raw(
-                            sender,
-                            runtime,
-                            pool,
-                            Handle::current(),
-                            id,
-                            proc,
-                            writing::run,
-                        ),
+                        Proc::Writing => {
+                            spawn_raw(client, runtime, Handle::current(), id, proc, writing::run)
+                        }
 
-                        Proc::Reading => spawn_raw(
-                            sender,
-                            runtime,
-                            pool,
-                            Handle::current(),
-                            id,
-                            proc,
-                            reading::run,
-                        ),
+                        Proc::Reading => {
+                            spawn_raw(client, runtime, Handle::current(), id, proc, reading::run)
+                        }
 
-                        Proc::Indexing => spawn_raw(
-                            sender,
-                            runtime,
-                            pool,
-                            Handle::current(),
-                            id,
-                            proc,
-                            indexing::run,
-                        ),
+                        Proc::Indexing => {
+                            spawn_raw(client, runtime, Handle::current(), id, proc, indexing::run)
+                        }
 
-                        Proc::PubSub => spawn(sender, pool, id, proc, subscription::run),
-                        Proc::Grpc => spawn(sender, pool, id, proc, grpc::run),
-                        Proc::Echo => spawn(sender, pool, id, proc, echo::run),
-                        Proc::Sink => spawn(sender, pool, id, proc, sink::run),
+                        Proc::PubSub => spawn(client, id, proc, subscription::run),
+                        Proc::Grpc => spawn(client, id, proc, grpc::run),
+                        Proc::Echo => spawn(client, id, proc, echo::run),
+                        Proc::Sink => spawn(client, id, proc, sink::run),
                     };
 
                     let proc_id = running_proc.id;
@@ -768,6 +416,7 @@ pub struct ManagerClient {
     id: ProcId,
     pool: Pool<BufferManager>,
     inner: UnboundedSender<ManagerCommand>,
+    notify: Arc<Notify>,
 }
 
 impl ManagerClient {
@@ -915,6 +564,10 @@ impl ManagerClient {
         let _ = recv.await;
         Ok(())
     }
+
+    pub async fn manager_exited(self) {
+        self.notify.notified().await;
+    }
 }
 
 pub async fn start_process_manager<S>(storage: S) -> eyre::Result<ManagerClient>
@@ -931,29 +584,33 @@ where
     start_process_manager_with_catalog(storage, catalog).await
 }
 
-pub async fn start_process_manager_with_catalog<S>(
+async fn start_process_manager_with_catalog<S>(
     storage: S,
     catalog: Catalog,
 ) -> eyre::Result<ManagerClient>
 where
     S: Storage + Send + Sync + 'static,
 {
+    let notify = Arc::new(Notify::new());
     let pool = create_buffer_pool().await?;
     let (sender, queue) = unbounded_channel();
     let container = ChunkContainer::load(storage)?;
-    tokio::spawn(process_manager(
-        pool.clone(),
-        catalog,
-        container,
-        sender.clone(),
-        queue,
-    ));
-
-    Ok(ManagerClient {
+    let client = ManagerClient {
         id: 0,
-        pool,
-        inner: sender,
-    })
+        pool: pool.clone(),
+        inner: sender.clone(),
+        notify: notify.clone(),
+    };
+
+    let mgr_client = client.clone();
+
+    tokio::spawn(async move {
+        let notify = mgr_client.notify.clone();
+        process_manager(mgr_client, catalog, container, queue).await;
+        notify.notify_one();
+    });
+
+    Ok(client)
 }
 
 #[derive(Clone)]
@@ -968,20 +625,18 @@ impl<S> Runtime<S> {
 }
 
 async fn process_manager<S>(
-    pool: Pool<BufferManager>,
+    client: ManagerClient,
     catalog: Catalog,
     container: ChunkContainer<S>,
-    sender: UnboundedSender<ManagerCommand>,
     queue: UnboundedReceiver<ManagerCommand>,
 ) where
     S: Storage + Send + Sync + 'static,
 {
     let mut manager = Manager {
-        pool,
+        client,
         runtime: Runtime { container },
         catalog,
         proc_id_gen: 1,
-        sender,
         requests: Default::default(),
         closing: false,
         close_resp: vec![],
@@ -998,9 +653,8 @@ async fn process_manager<S>(
 }
 
 fn spawn_raw<S, F>(
-    sender: UnboundedSender<ManagerCommand>,
+    client: ManagerClient,
     runtime: Runtime<S>,
-    pool: Pool<BufferManager>,
     handle: Handle,
     id: ProcId,
     proc: Proc,
@@ -1014,14 +668,11 @@ where
     let env = ProcessRawEnv {
         id,
         queue: proc_queue,
-        client: ManagerClient {
-            id,
-            pool: pool.clone(),
-            inner: sender.clone(),
-        },
+        client: client.clone(),
         handle,
     };
 
+    let sender = client.inner.clone();
     thread::spawn(move || {
         if let Err(e) = runnable(runtime, env) {
             tracing::error!("process {:?} terminated with error: {}", proc, e);
@@ -1039,13 +690,7 @@ where
     }
 }
 
-fn spawn<F, Fut>(
-    sender: UnboundedSender<ManagerCommand>,
-    pool: Pool<BufferManager>,
-    id: ProcId,
-    proc: Proc,
-    runnable: F,
-) -> RunningProc
+fn spawn<F, Fut>(client: ManagerClient, id: ProcId, proc: Proc, runnable: F) -> RunningProc
 where
     F: FnOnce(ProcessEnv) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = eyre::Result<()>> + Send + 'static,
@@ -1054,13 +699,10 @@ where
     let env = ProcessEnv {
         id,
         queue: proc_queue,
-        client: ManagerClient {
-            id,
-            pool: pool.clone(),
-            inner: sender.clone(),
-        },
+        client: client.clone(),
     };
 
+    let sender = client.inner.clone();
     tokio::spawn(async move {
         if let Err(e) = runnable(env).await {
             tracing::error!("process {:?} terminated with error: {}", proc, e);

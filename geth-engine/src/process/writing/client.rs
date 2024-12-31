@@ -1,5 +1,5 @@
 use crate::process::writing::{Request, Response};
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
+use crate::process::{ManagerClient, ProcId};
 use bytes::Bytes;
 use geth_common::{
     AppendError, AppendStreamCompleted, ExpectedRevision, Position, WriteResult,
@@ -15,14 +15,6 @@ pub struct WriterClient {
 impl WriterClient {
     pub fn new(target: ProcId, inner: ManagerClient) -> Self {
         Self { target, inner }
-    }
-
-    pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        tracing::debug!("waiting for process for the writer process to be available...");
-        let proc_id = env.client.wait_for(Proc::Writing).await?;
-        tracing::debug!("writer process available on {}", proc_id);
-
-        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub async fn append<I>(

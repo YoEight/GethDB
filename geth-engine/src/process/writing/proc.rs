@@ -8,8 +8,6 @@ use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{LogEntries, LogWriter};
 
-pub struct Writing;
-
 pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + 'static,

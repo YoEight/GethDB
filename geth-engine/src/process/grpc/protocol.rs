@@ -429,25 +429,28 @@ where
             }
 
             Operation::ListPrograms(_) => {
-                let programs = client.list_programs().await?;
-                yield OperationOut {
-                    correlation,
-                    reply: Reply::ProgramsListed(ProgramListed { programs }),
-                };
+                not_implemented()?;
+                // let programs = client.list_programs().await?;
+                // yield OperationOut {
+                //     correlation,
+                //     reply: Reply::ProgramsListed(ProgramListed { programs }),
+                // };
             }
 
-            Operation::GetProgram(params) => {
-                yield OperationOut {
-                    correlation,
-                    reply: Reply::ProgramObtained(client.get_program(params.id).await?),
-                };
+            Operation::GetProgram(_) => {
+                not_implemented()?;
+                // yield OperationOut {
+                //     correlation,
+                //     reply: Reply::ProgramObtained(client.get_program(params.id).await?),
+                // };
             }
 
-            Operation::KillProgram(params) => {
-                yield OperationOut {
-                    correlation,
-                    reply: Reply::ProgramKilled(client.kill_program(params.id).await?),
-                };
+            Operation::KillProgram(_) => {
+                not_implemented()?;
+                // yield OperationOut {
+                //     correlation,
+                //     reply: Reply::ProgramKilled(client.kill_program(params.id).await?),
+                // };
             }
 
             Operation::Unsubscribe => {
