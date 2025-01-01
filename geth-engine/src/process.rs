@@ -169,7 +169,7 @@ impl CatalogBuilder {
         self
     }
 
-    pub fn build(self) -> Catalog {
+    fn build(self) -> Catalog {
         Catalog {
             inner: self.inner,
             monitor: Default::default(),
@@ -245,8 +245,10 @@ where
                 } else {
                     let id = self.gen_proc_id();
                     let runtime = self.runtime.clone();
-                    let client = self.client.clone();
+                    let mut client = self.client.clone();
                     let options = self.options.clone();
+
+                    client.id = id;
 
                     let running_proc = match proc {
                         Proc::Writing => spawn_raw(
@@ -254,7 +256,6 @@ where
                             client,
                             runtime,
                             Handle::current(),
-                            id,
                             proc,
                             writing::run,
                         ),
@@ -264,7 +265,6 @@ where
                             client,
                             runtime,
                             Handle::current(),
-                            id,
                             proc,
                             reading::run,
                         ),
@@ -274,15 +274,14 @@ where
                             client,
                             runtime,
                             Handle::current(),
-                            id,
                             proc,
                             indexing::run,
                         ),
 
-                        Proc::PubSub => spawn(options, client, id, proc, subscription::run),
-                        Proc::Grpc => spawn(options, client, id, proc, grpc::run),
-                        Proc::Echo => spawn(options, client, id, proc, echo::run),
-                        Proc::Sink => spawn(options, client, id, proc, sink::run),
+                        Proc::PubSub => spawn(options, client, proc, subscription::run),
+                        Proc::Grpc => spawn(options, client, proc, grpc::run),
+                        Proc::Echo => spawn(options, client, proc, echo::run),
+                        Proc::Sink => spawn(options, client, proc, sink::run),
                     };
 
                     let proc_id = running_proc.id;
@@ -399,14 +398,12 @@ impl ManagerCommand {
 }
 
 pub struct ProcessEnv {
-    id: ProcId,
     queue: UnboundedReceiver<Item>,
     client: ManagerClient,
     options: Options,
 }
 
 pub struct ProcessRawEnv {
-    id: ProcId,
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     handle: Handle,
@@ -614,7 +611,7 @@ async fn start_process_manager_with_catalog(
         } else {
             match load_fs_chunk_container(&options) {
                 Err(e) => {
-                    tracing::error!("failed to load in-memory storage: {}", e);
+                    tracing::error!("failed to load filesystem-based storage: {}", e);
                 }
 
                 Ok(container) => {
@@ -679,7 +676,6 @@ fn spawn_raw<S, F>(
     client: ManagerClient,
     runtime: Runtime<S>,
     handle: Handle,
-    id: ProcId,
     proc: Proc,
     runnable: F,
 ) -> RunningProc
@@ -687,9 +683,9 @@ where
     S: Storage + Send + Sync + 'static,
     F: FnOnce(Runtime<S>, ProcessRawEnv) -> eyre::Result<()> + Send + Sync + 'static,
 {
+    let id = client.id;
     let (proc_sender, proc_queue) = std::sync::mpsc::channel();
     let env = ProcessRawEnv {
-        id,
         queue: proc_queue,
         client: client.clone(),
         handle,
@@ -714,20 +710,14 @@ where
     }
 }
 
-fn spawn<F, Fut>(
-    options: Options,
-    client: ManagerClient,
-    id: ProcId,
-    proc: Proc,
-    runnable: F,
-) -> RunningProc
+fn spawn<F, Fut>(options: Options, client: ManagerClient, proc: Proc, runnable: F) -> RunningProc
 where
     F: FnOnce(ProcessEnv) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = eyre::Result<()>> + Send + 'static,
 {
+    let id = client.id;
     let (proc_sender, proc_queue) = unbounded_channel();
     let env = ProcessEnv {
-        id,
         queue: proc_queue,
         client: client.clone(),
         options,

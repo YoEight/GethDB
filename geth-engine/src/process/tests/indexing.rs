@@ -1,5 +1,4 @@
 use geth_common::Direction;
-use geth_mikoshi::InMemoryStorage;
 
 use crate::{
     process::{indexing::IndexClient, start_process_manager, Proc},
@@ -8,7 +7,6 @@ use crate::{
 
 #[tokio::test]
 async fn test_store_read() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone());
@@ -33,7 +31,6 @@ async fn test_store_read() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_last_revision_when_exists() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone());
@@ -54,7 +51,6 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut client = IndexClient::new(proc_id, manager.clone());

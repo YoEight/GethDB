@@ -1,9 +1,8 @@
 use crate::{
-    process::{start_process_manager_with_catalog, Catalog, Mail, Proc},
+    process::{start_process_manager_with_catalog, Catalog, Proc},
     Options,
 };
 use bytes::{Buf, BufMut, BytesMut};
-use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 fn test_catalog() -> Catalog {
@@ -11,12 +10,6 @@ fn test_catalog() -> Catalog {
         .register(Proc::Echo)
         .register(Proc::Sink)
         .build()
-}
-
-struct Sink {
-    target: &'static str,
-    sender: UnboundedSender<Mail>,
-    mails: Vec<Mail>,
 }
 
 #[tokio::test]
