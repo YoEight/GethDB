@@ -1,31 +1,21 @@
 use bb8::Pool;
 use bytes::Bytes;
-use futures::stream::BoxStream;
-use futures::TryStreamExt;
+use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
+use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
 use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
+use std::path::PathBuf;
 use std::sync::Arc;
-use std::thread;
 use std::time::Instant;
+use std::{io, thread};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Notify};
 use uuid::Uuid;
 
-use crate::bus::{
-    GetProgrammableSubscriptionStatsMsg, KillProgrammableSubscriptionMsg, SubscribeMsg,
-};
-use crate::messages::{
-    ProcessTarget, StreamTarget, SubscribeTo, SubscriptionRequestOutcome, SubscriptionTarget,
-};
-use geth_common::{
-    AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    GetProgramError, ProgramKillError, ProgramKilled, ProgramObtained, ProgramSummary, Propose,
-    Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
-};
-use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::chunks::ChunkContainer;
+use crate::Options;
 
 #[cfg(test)]
 mod tests;
@@ -193,6 +183,7 @@ struct CatalogItem {
 }
 
 pub struct Manager<S> {
+    options: Options,
     client: ManagerClient,
     runtime: Runtime<S>,
     catalog: Catalog,
@@ -255,24 +246,43 @@ where
                     let id = self.gen_proc_id();
                     let runtime = self.runtime.clone();
                     let client = self.client.clone();
+                    let options = self.options.clone();
 
                     let running_proc = match proc {
-                        Proc::Writing => {
-                            spawn_raw(client, runtime, Handle::current(), id, proc, writing::run)
-                        }
+                        Proc::Writing => spawn_raw(
+                            options,
+                            client,
+                            runtime,
+                            Handle::current(),
+                            id,
+                            proc,
+                            writing::run,
+                        ),
 
-                        Proc::Reading => {
-                            spawn_raw(client, runtime, Handle::current(), id, proc, reading::run)
-                        }
+                        Proc::Reading => spawn_raw(
+                            options,
+                            client,
+                            runtime,
+                            Handle::current(),
+                            id,
+                            proc,
+                            reading::run,
+                        ),
 
-                        Proc::Indexing => {
-                            spawn_raw(client, runtime, Handle::current(), id, proc, indexing::run)
-                        }
+                        Proc::Indexing => spawn_raw(
+                            options,
+                            client,
+                            runtime,
+                            Handle::current(),
+                            id,
+                            proc,
+                            indexing::run,
+                        ),
 
-                        Proc::PubSub => spawn(client, id, proc, subscription::run),
-                        Proc::Grpc => spawn(client, id, proc, grpc::run),
-                        Proc::Echo => spawn(client, id, proc, echo::run),
-                        Proc::Sink => spawn(client, id, proc, sink::run),
+                        Proc::PubSub => spawn(options, client, id, proc, subscription::run),
+                        Proc::Grpc => spawn(options, client, id, proc, grpc::run),
+                        Proc::Echo => spawn(options, client, id, proc, echo::run),
+                        Proc::Sink => spawn(options, client, id, proc, sink::run),
                     };
 
                     let proc_id = running_proc.id;
@@ -347,16 +357,6 @@ enum Item {
     Stream(Stream),
 }
 
-impl Item {
-    fn into_mail(self) -> Mail {
-        if let Item::Mail(mail) = self {
-            return mail;
-        }
-
-        panic!("item was not a mail");
-    }
-}
-
 pub enum ManagerCommand {
     Spawn {
         parent: Option<ProcId>,
@@ -402,6 +402,7 @@ pub struct ProcessEnv {
     id: ProcId,
     queue: UnboundedReceiver<Item>,
     client: ManagerClient,
+    options: Options,
 }
 
 pub struct ProcessRawEnv {
@@ -409,6 +410,7 @@ pub struct ProcessRawEnv {
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     handle: Handle,
+    options: Options,
 }
 
 #[derive(Clone)]
@@ -570,10 +572,7 @@ impl ManagerClient {
     }
 }
 
-pub async fn start_process_manager<S>(storage: S) -> eyre::Result<ManagerClient>
-where
-    S: Storage + Send + Sync + 'static,
-{
+pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClient> {
     let catalog = Catalog::builder()
         .register(Proc::Indexing)
         .register(Proc::Writing)
@@ -581,20 +580,16 @@ where
         .register(Proc::PubSub)
         .build();
 
-    start_process_manager_with_catalog(storage, catalog).await
+    start_process_manager_with_catalog(options, catalog).await
 }
 
-async fn start_process_manager_with_catalog<S>(
-    storage: S,
+async fn start_process_manager_with_catalog(
+    options: Options,
     catalog: Catalog,
-) -> eyre::Result<ManagerClient>
-where
-    S: Storage + Send + Sync + 'static,
-{
+) -> eyre::Result<ManagerClient> {
     let notify = Arc::new(Notify::new());
     let pool = create_buffer_pool().await?;
     let (sender, queue) = unbounded_channel();
-    let container = ChunkContainer::load(storage)?;
     let client = ManagerClient {
         id: 0,
         pool: pool.clone(),
@@ -606,11 +601,36 @@ where
 
     tokio::spawn(async move {
         let notify = mgr_client.notify.clone();
-        process_manager(mgr_client, catalog, container, queue).await;
+        if options.db == "in-mem" {
+            match ChunkContainer::load(InMemoryStorage::new()) {
+                Err(e) => {
+                    tracing::error!("failed to load in-memory storage: {}", e);
+                }
+
+                Ok(container) => {
+                    process_manager(options, mgr_client, catalog, container, queue).await
+                }
+            }
+        } else {
+            match load_fs_chunk_container(&options) {
+                Err(e) => {
+                    tracing::error!("failed to load in-memory storage: {}", e);
+                }
+
+                Ok(container) => {
+                    process_manager(options, mgr_client, catalog, container, queue).await
+                }
+            }
+        }
         notify.notify_one();
     });
 
     Ok(client)
+}
+
+fn load_fs_chunk_container(options: &Options) -> io::Result<ChunkContainer<FileSystemStorage>> {
+    let storage = FileSystemStorage::new(options.db.clone().into())?;
+    ChunkContainer::load(storage)
 }
 
 #[derive(Clone)]
@@ -625,6 +645,7 @@ impl<S> Runtime<S> {
 }
 
 async fn process_manager<S>(
+    options: Options,
     client: ManagerClient,
     catalog: Catalog,
     container: ChunkContainer<S>,
@@ -633,6 +654,7 @@ async fn process_manager<S>(
     S: Storage + Send + Sync + 'static,
 {
     let mut manager = Manager {
+        options,
         client,
         runtime: Runtime { container },
         catalog,
@@ -653,6 +675,7 @@ async fn process_manager<S>(
 }
 
 fn spawn_raw<S, F>(
+    options: Options,
     client: ManagerClient,
     runtime: Runtime<S>,
     handle: Handle,
@@ -670,6 +693,7 @@ where
         queue: proc_queue,
         client: client.clone(),
         handle,
+        options,
     };
 
     let sender = client.inner.clone();
@@ -690,7 +714,13 @@ where
     }
 }
 
-fn spawn<F, Fut>(client: ManagerClient, id: ProcId, proc: Proc, runnable: F) -> RunningProc
+fn spawn<F, Fut>(
+    options: Options,
+    client: ManagerClient,
+    id: ProcId,
+    proc: Proc,
+    runnable: F,
+) -> RunningProc
 where
     F: FnOnce(ProcessEnv) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = eyre::Result<()>> + Send + 'static,
@@ -700,6 +730,7 @@ where
         id,
         queue: proc_queue,
         client: client.clone(),
+        options,
     };
 
     let sender = client.inner.clone();

@@ -1,10 +1,9 @@
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
-use bytes::{Buf, Bytes, BytesMut};
+use crate::Options;
+use bytes::{Buf, Bytes};
 use geth_common::ExpectedRevision;
-use geth_mikoshi::wal::chunks::ChunkContainer;
-use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -15,8 +14,7 @@ struct Foo {
 
 #[tokio::test]
 async fn test_pubsub_proc_simple() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage.clone()).await?;
+    let manager = start_process_manager(Options::in_mem()).await?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let pubsub_id = manager.wait_for(Proc::PubSub).await?;
     let writer_client = WriterClient::new(writer_id, manager.clone());

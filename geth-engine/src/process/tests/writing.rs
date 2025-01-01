@@ -1,6 +1,7 @@
 use crate::process::indexing::IndexClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
+use crate::Options;
 use bytes::{Buf, Bytes};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -18,10 +19,10 @@ struct Foo {
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
     let storage = InMemoryStorage::new();
-    let manager = start_process_manager(storage.clone()).await?;
+    let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone());
-    let container = ChunkContainer::load(storage.clone())?;
+    let container = ChunkContainer::load(storage)?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
     let mut expected = vec![];

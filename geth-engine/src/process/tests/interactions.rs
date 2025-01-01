@@ -1,6 +1,8 @@
-use crate::process::{start_process_manager_with_catalog, Catalog, Mail, Proc};
+use crate::{
+    process::{start_process_manager_with_catalog, Catalog, Mail, Proc},
+    Options,
+};
 use bytes::{Buf, BufMut, BytesMut};
-use geth_mikoshi::InMemoryStorage;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
@@ -20,8 +22,7 @@ struct Sink {
 #[tokio::test]
 async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
-    let manager =
-        start_process_manager_with_catalog(InMemoryStorage::new(), test_catalog()).await?;
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let echo_proc_id = manager.wait_for(Proc::Echo).await?;
 
     let mut count = 0u64;
@@ -43,8 +44,7 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_find_proc() -> eyre::Result<()> {
-    let manager =
-        start_process_manager_with_catalog(InMemoryStorage::new(), test_catalog()).await?;
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?;
     let find_proc_id = manager.find(Proc::Echo).await?;
 
@@ -57,8 +57,7 @@ async fn test_find_proc() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_simple_request() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
-    let manager =
-        start_process_manager_with_catalog(InMemoryStorage::new(), test_catalog()).await?;
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?;
 
     let random_uuid = Uuid::new_v4();
@@ -74,8 +73,7 @@ async fn test_simple_request() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_shutdown_reported_properly() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
-    let manager =
-        start_process_manager_with_catalog(InMemoryStorage::new(), test_catalog()).await?;
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?;
 
     let random_uuid = Uuid::new_v4();

@@ -1,7 +1,4 @@
-use process::start_process_manager;
-use std::path::PathBuf;
-
-use geth_mikoshi::storage::FileSystemStorage;
+use process::{start_process_manager, Proc};
 
 pub use crate::options::Options;
 
@@ -13,8 +10,10 @@ mod options;
 mod process;
 
 pub async fn run(options: Options) -> eyre::Result<()> {
-    let storage = FileSystemStorage::new(PathBuf::from(&options.db))?;
-    start_process_manager(storage).await?.manager_exited().await;
+    let manager = start_process_manager(options).await?;
+
+    manager.wait_for(Proc::Grpc).await?;
+    manager.manager_exited().await;
 
     Ok(())
 }

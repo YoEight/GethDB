@@ -21,23 +21,19 @@ use geth_common::{
 
 use crate::messages::ReadStreamCompleted;
 use crate::process::grpc::local::LocalStorage;
-use crate::process::reading::{self, ReaderClient};
+use crate::process::reading::ReaderClient;
 use crate::process::resource::BufferManager;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
-use crate::process::{ManagerClient, Proc, ProcessEnv};
+use crate::process::{ManagerClient, Proc};
 
-pub struct ProtocolImpl<C> {
-    client: Arc<C>,
-    env: ProcessEnv,
+pub struct ProtocolImpl {
+    client: ManagerClient,
 }
 
-impl<C> ProtocolImpl<C> {
-    pub fn new(client: C, env: ProcessEnv) -> Self {
-        Self {
-            client: Arc::new(client),
-            env,
-        }
+impl ProtocolImpl {
+    pub fn new(client: ManagerClient) -> Self {
+        Self { client }
     }
 }
 
@@ -66,10 +62,7 @@ async fn resolve_internal(mgr: ManagerClient) -> eyre::Result<Internal> {
 type Downstream = UnboundedSender<Result<protocol::OperationOut, Status>>;
 
 #[tonic::async_trait]
-impl<C> Protocol for ProtocolImpl<C>
-where
-    C: Client + Send + Sync + 'static,
-{
+impl Protocol for ProtocolImpl {
     type MultiplexStream = UnboundedReceiverStream<Result<protocol::OperationOut, Status>>;
 
     async fn multiplex(
@@ -78,17 +71,12 @@ where
     ) -> Result<Response<Self::MultiplexStream>, Status> {
         let (tx, rx) = mpsc::unbounded_channel();
 
-        let internal = match resolve_internal(self.env.client.clone()).await {
+        let internal = match resolve_internal(self.client.clone()).await {
             Err(e) => return Err(Status::unavailable(e.to_string())),
             Ok(i) => i,
         };
 
-        tokio::spawn(multiplex(
-            self.client.clone(),
-            internal,
-            tx,
-            request.into_inner(),
-        ));
+        tokio::spawn(multiplex(internal, tx, request.into_inner()));
 
         Ok(Response::new(UnboundedReceiverStream::new(rx)))
     }
@@ -143,14 +131,11 @@ impl Pipeline {
     }
 }
 
-async fn multiplex<C>(
-    client: Arc<C>,
-    mut internal: Internal,
+async fn multiplex(
+    internal: Internal,
     downstream: Downstream,
     input: Streaming<protocol::OperationIn>,
-) where
-    C: Client + Send + Sync + 'static,
-{
+) {
     let local_storage = LocalStorage::new();
     let (tx, out_rx) = mpsc::unbounded_channel();
     let mut pipeline = Pipeline {
@@ -170,7 +155,6 @@ async fn multiplex<C>(
                 Some(msg) => match msg {
                     Msg::User(operation) => {
                         run_operation(
-                            client.clone(),
                             internal.clone(),
                             local_storage.clone(),
                             tx.clone(),
@@ -190,17 +174,14 @@ async fn multiplex<C>(
     }
 }
 
-fn run_operation<C>(
-    client: Arc<C>,
+fn run_operation(
     internal: Internal,
     local_storage: LocalStorage,
     tx: UnboundedSender<eyre::Result<OperationOut>>,
     input: OperationIn,
-) where
-    C: Client + Send + Sync + 'static,
-{
+) {
     tokio::spawn(async move {
-        let stream = execute_operation(client, internal, local_storage, input).await;
+        let stream = execute_operation(internal, local_storage, input).await;
 
         pin_mut!(stream);
         while let Some(out) = stream.next().await {
@@ -215,15 +196,11 @@ fn not_implemented<A>() -> eyre::Result<A> {
     eyre::bail!("not implemented");
 }
 
-async fn execute_operation<C>(
-    client: Arc<C>,
+async fn execute_operation(
     internal: Internal,
     local_storage: LocalStorage,
     input: OperationIn,
-) -> impl Stream<Item = eyre::Result<OperationOut>>
-where
-    C: Client + Send + Sync + 'static,
-{
+) -> impl Stream<Item = eyre::Result<OperationOut>> {
     async_stream::try_stream! {
         let correlation = input.correlation;
         match input.operation {
