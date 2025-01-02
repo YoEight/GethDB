@@ -5,9 +5,7 @@ use crate::Options;
 use bytes::{Buf, Bytes};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
-use geth_mikoshi::InMemoryStorage;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,15 +16,13 @@ struct Foo {
 
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone());
-    let container = ChunkContainer::load(storage)?;
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
     let mut expected = vec![];
-    let wal = LogReader::new(container);
+    // let wal = LogReader::new(container);
 
     for i in 0..10 {
         expected.push(Bytes::from(serde_json::to_vec(&Foo { baz: i + 10 })?));

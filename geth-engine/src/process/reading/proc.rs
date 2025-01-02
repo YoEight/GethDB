@@ -1,5 +1,8 @@
+use std::cmp::min;
+use std::mem;
+
 use crate::process::indexing::IndexClient;
-use crate::process::reading::{LogEntryExt, Request, Response};
+use crate::process::messages::{ReadRequests, ReadResponses};
 use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -10,71 +13,61 @@ pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
-    let batch_size = 500usize;
     let reader = LogReader::new(runtime.container().clone());
     let mut index_client = IndexClient::resolve_raw(&mut env)?;
 
     while let Some(item) = env.queue.recv().ok() {
         match item {
             Item::Stream(stream) => {
-                if let Some(req) = Request::try_from(stream.payload) {
-                    match req {
-                        Request::Read {
-                            ident,
-                            start,
-                            direction,
-                            count,
-                        } => {
-                            // FIXME - it might worth calling that part in the same future that we use to complete our call to the reader process.
-                            let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
-                            let index_stream = env.handle.block_on(index_client.read(
-                                mikoshi_hash(ident),
-                                start.raw(),
-                                count,
-                                direction,
-                            ))?;
+                if let Some(ReadRequests::Read {
+                    ident,
+                    start,
+                    direction,
+                    count,
+                }) = stream.payload.try_into().ok()
+                {
+                    // FIXME - it might worth calling that part in the same future that we use to complete our call to the reader process.
+                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
+                    let index_stream = env.handle.block_on(index_client.read(
+                        mikoshi_hash(ident),
+                        start,
+                        count,
+                        direction,
+                    ))?;
 
-                            let mut index_stream = match index_stream {
-                                ReadCompleted::Success(r) => r,
-                                ReadCompleted::StreamDeleted => {
-                                    let _ = stream
-                                        .sender
-                                        .send(Response::StreamDeleted.serialize(&mut buffer));
+                    let mut index_stream = match index_stream {
+                        ReadCompleted::Success(r) => r,
+                        ReadCompleted::StreamDeleted => {
+                            let _ = stream.sender.send(ReadResponses::StreamDeleted.into());
 
-                                    continue;
-                                }
-                            };
+                            continue;
+                        }
+                    };
 
-                            if stream
-                                .sender
-                                .send(Response::Streaming.serialize(&mut buffer))
-                                .is_err()
-                            {
-                                continue;
-                            }
+                    let batch_size = min(count, 500);
+                    let mut batch = Vec::with_capacity(batch_size);
+                    while let Some(entry) = env.handle.block_on(index_stream.next())? {
+                        let entry = reader.read_at(entry.position)?;
+                        batch.push(entry);
 
-                            let mut count = 0usize;
-                            while let Some((_, position)) =
-                                env.handle.block_on(index_stream.next())?
-                            {
-                                reader.read_at(position)?.serialize(&mut buffer);
-                                count += 1;
+                        if batch.len() < batch_size {
+                            continue;
+                        }
 
-                                if count < batch_size {
-                                    continue;
-                                }
-
-                                count = 0;
-                                if stream.sender.send(buffer.split().freeze()).is_err() {
-                                    break;
-                                }
-                            }
-
-                            if !buffer.is_empty() {
-                                let _ = stream.sender.send(buffer.split().freeze());
-                            }
+                        let entries = mem::replace(&mut batch, Vec::with_capacity(batch_size));
+                        if stream
+                            .sender
+                            .send(ReadResponses::Entries(entries).into())
+                            .is_err()
+                        {
+                            break;
                         }
                     }
+
+                    if !buffer.is_empty() {
+                        let _ = stream.sender.send(ReadResponses::Entries(batch).into());
+                    }
+
                     continue;
                 }
 

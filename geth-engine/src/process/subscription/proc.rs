@@ -1,28 +1,38 @@
-use crate::process::subscription::{Request, Response};
+use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
+use crate::process::subscription::Request;
 use crate::process::{Item, ProcessEnv};
-use bytes::{Buf, Bytes};
+use bytes::Buf;
+use geth_mikoshi::wal::LogEntry;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
-const ALL_IDENT: Bytes = Bytes::from_static(b"$all");
+const ALL_IDENT: &'static str = "$all";
 
 #[derive(Default)]
 struct Register {
-    inner: HashMap<Bytes, Vec<UnboundedSender<Bytes>>>,
+    inner: HashMap<String, Vec<UnboundedSender<Messages>>>,
 }
 
 impl Register {
-    fn register(&mut self, key: Bytes, sender: UnboundedSender<Bytes>) {
+    fn register(&mut self, key: String, sender: UnboundedSender<Messages>) {
         self.inner.entry(key).or_default().push(sender);
     }
 
-    fn publish(&mut self, ident: &Bytes, payload: Bytes) {
+    fn publish(&mut self, ident: &String, payload: LogEntry) {
         if let Some(senders) = self.inner.get_mut(ident) {
-            senders.retain(|sender| sender.send(payload.clone()).is_ok());
+            senders.retain(|sender| {
+                sender
+                    .send(SubscribeResponses::Entry(payload.clone()).into())
+                    .is_ok()
+            });
         }
 
-        if let Some(senders) = self.inner.get_mut(&ALL_IDENT) {
-            senders.retain(|sender| sender.send(payload.clone()).is_ok());
+        if let Some(senders) = self.inner.get_mut(ALL_IDENT) {
+            senders.retain(|sender| {
+                sender
+                    .send(SubscribeResponses::Entry(payload.clone()).into())
+                    .is_ok()
+            });
         }
     }
 }
@@ -32,13 +42,12 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     while let Some(item) = env.queue.recv().await {
         match item {
             Item::Stream(stream) => {
-                if let Some(req) = Request::try_from(stream.payload) {
+                if let Some(req) = stream.payload.try_into().ok() {
                     match req {
-                        Request::Subscribe { ident } => {
-                            let mut buffer = env.client.pool.get().await.unwrap();
+                        SubscribeRequests::Subscribe { ident } => {
                             if stream
                                 .sender
-                                .send(Response::Confirmed.serialize(&mut buffer))
+                                .send(SubscribeResponses::Confirmed.into())
                                 .is_ok()
                             {
                                 reg.register(ident, stream.sender);
@@ -62,32 +71,22 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
             }
 
             Item::Mail(mail) => {
-                if let Some(req) = Request::try_from(mail.payload) {
+                if let Some(req) = mail.payload.try_into().ok() {
                     match req {
-                        Request::Push { mut events } => {
-                            while events.has_remaining() {
-                                let size = events.get_u32_le() as usize;
-                                // There is no need to deal with events that doesn't hold
-                                // data. We read right after the u64 encoded position to get
-                                // the record type.
-                                if events[size_of::<u64>()] != 0 {
-                                    events.advance(size + size_of::<u32>());
+                        SubscribeRequests::Push { events } => {
+                            for event in events {
+                                if event.r#type != 0 {
                                     continue;
                                 }
 
-                                // we discard record's position, type and revision bytes.
-                                let mut sub_entry =
-                                    events.slice(size_of::<u64>() + 1 + size_of::<u64>()..);
+                                let mut sub_entry = event.payload.clone();
 
                                 let str_len = sub_entry.get_u16_le() as usize;
-                                let ident = sub_entry.copy_to_bytes(str_len);
-                                let event = events.copy_to_bytes(size);
-
-                                debug_assert_eq!(
-                                    size,
-                                    events.get_u32_le() as usize,
-                                    "pre and after sizes don't match!"
-                                );
+                                let ident = unsafe {
+                                    String::from_utf8_unchecked(
+                                        sub_entry.copy_to_bytes(str_len).to_vec(),
+                                    )
+                                };
 
                                 reg.publish(&ident, event);
                             }

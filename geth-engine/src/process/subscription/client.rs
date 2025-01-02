@@ -1,30 +1,35 @@
-use crate::process::resource::BufferManager;
-use crate::process::subscription::{PushBuilder, Request, Response};
+use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
-use bb8::Pool;
-use bytes::{Buf, Bytes};
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct Streaming {
-    inner: UnboundedReceiver<Bytes>,
+    inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub fn from(inner: UnboundedReceiver<Bytes>) -> Self {
+    pub fn from(inner: UnboundedReceiver<Messages>) -> Self {
         Self { inner }
     }
 
-    pub async fn next(&mut self) -> Option<LogEntry> {
-        if let Some(mut bytes) = self.inner.recv().await {
-            return Some(LogEntry {
-                position: bytes.get_u64_le(),
-                r#type: bytes.get_u8(),
-                payload: bytes,
-            });
+    pub async fn next(&mut self) -> eyre::Result<Option<LogEntry>> {
+        if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_from().ok()) {
+            match resp {
+                SubscribeResponses::Error => {
+                    eyre::bail!("error when streaming from the pubsub process");
+                }
+
+                SubscribeResponses::Entry(entry) => {
+                    return Ok(Some(entry));
+                }
+
+                _ => {
+                    eyre::bail!("unexpected message when streaming from the pubsub process");
+                }
+            }
         }
 
-        None
+        Ok(None)
     }
 }
 
@@ -52,35 +57,59 @@ impl SubscriptionClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    pub fn push(&mut self, builder: PushBuilder<'_>) -> eyre::Result<()> {
-        self.inner.send(self.target, builder.build())?;
-
-        Ok(())
-    }
-
     pub async fn subscribe(&self, stream_name: &str) -> eyre::Result<Streaming> {
-        let mut buffer = self.inner.pool.get().await.unwrap();
         let mut mailbox = self
             .inner
-            .request_stream(self.target, Request::subscribe(&mut buffer, stream_name))
+            .request_stream(
+                self.target,
+                SubscribeRequests::Subscribe {
+                    ident: stream_name.to_string(),
+                }
+                .into(),
+            )
             .await?;
 
-        if let Some(resp) = mailbox.recv().await {
-            if let Some(resp) = Response::try_from(resp) {
-                match resp {
-                    Response::Error => {
-                        eyre::bail!("internal error");
-                    }
+        if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
+            match resp {
+                SubscribeResponses::Error => {
+                    eyre::bail!("internal error");
+                }
 
-                    Response::Confirmed => {
-                        return Ok(Streaming::from(mailbox));
-                    }
+                SubscribeResponses::Confirmed => {
+                    return Ok(Streaming::from(mailbox));
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
                 }
             }
-
-            eyre::bail!("protocol error when communicating with the pubsub process");
         }
 
         eyre::bail!("pubsub process is no longer running")
+    }
+
+    pub async fn push(&self, events: Vec<LogEntry>) -> eyre::Result<()> {
+        let resp = self
+            .inner
+            .request(self.target, SubscribeRequests::Push { events }.into())
+            .await?;
+
+        if let Some(resp) = resp.payload.try_into().ok() {
+            match resp {
+                SubscribeResponses::Error => {
+                    eyre::bail!("internal error");
+                }
+
+                SubscribeResponses::Confirmed => {
+                    return Ok(());
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("unexpected response from the pubsub process")
     }
 }

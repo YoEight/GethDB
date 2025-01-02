@@ -175,6 +175,7 @@ pub trait WriteAheadLog {
     fn write_position(&self) -> u64;
 }
 
+#[derive(Clone)]
 pub struct LogEntry {
     pub position: u64,
     pub r#type: u8,

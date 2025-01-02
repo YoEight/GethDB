@@ -1,5 +1,4 @@
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use geth_common::Revision;
 
 mod client;
 mod proc;

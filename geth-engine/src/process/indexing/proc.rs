@@ -1,14 +1,14 @@
 use crate::domain::index::CurrentRevision;
-use crate::process::indexing::{Request, Response, ENTRY_SIZE};
+use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::{Item, ProcessRawEnv, Runtime};
-use bytes::{Buf, BufMut, Bytes, BytesMut};
+use bytes::{Buf, Bytes};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::storage::Storage;
 use std::cmp::min;
-use std::io;
 use std::sync::{Arc, RwLock};
+use std::{io, mem};
 use tokio::sync::mpsc::UnboundedSender;
 use tokio::task::JoinHandle;
 
@@ -36,40 +36,38 @@ where
     while let Some(item) = env.queue.recv().ok() {
         match item {
             Item::Mail(mail) => {
-                if let Some(req) = Request::try_from(mail.payload) {
-                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
+                if let Some(req) = mail.payload.into_index_request() {
                     match req {
-                        Request::Store { key, entries } => {
-                            let last_revision = entries
-                                .slice(entries.len() - 2 * std::mem::size_of::<u64>()..)
-                                .get_u64_le();
-
-                            if let Err(e) = store_entries(&lsm, key, entries) {
+                        IndexRequests::Store { entries } => {
+                            let last = entries.last().copied().unwrap();
+                            if let Err(e) = store_entries(&lsm, entries) {
                                 tracing::error!("error when storing index entries: {}", e);
 
                                 let _ = env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    Response::Error.serialize(buffer.split()),
+                                    IndexResponses::Error.into(),
                                 );
                             } else {
-                                revision_cache.insert(key, last_revision);
+                                revision_cache.insert(last.key, last.revision);
 
                                 let _ = env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    Response::Committed.serialize(buffer.split()),
+                                    IndexResponses::Committed.into(),
                                 );
                             }
                         }
 
-                        Request::LatestRevision { key } => {
+                        IndexRequests::LatestRevision { key } => {
                             if let Some(current) = revision_cache.get(&key) {
-                                buffer.put_u64_le(current);
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    buffer.split().freeze(),
+                                    IndexResponses::CurrentRevision(CurrentRevision::Revision(
+                                        current,
+                                    ))
+                                    .into(),
                                 )?;
                             } else {
                                 let lsm_read = lsm.read().map_err(|e| {
@@ -77,27 +75,28 @@ where
                                 })?;
 
                                 let revison = lsm_read.highest_revision(key)?;
+                                let mut value = CurrentRevision::NoStream;
 
                                 if let Some(revision) = revison {
                                     revision_cache.insert(key, revision);
-                                    buffer.put_u64_le(revision);
+                                    value = CurrentRevision::Revision(revision);
                                 }
 
                                 env.client.reply(
                                     mail.origin,
                                     mail.correlation,
-                                    buffer.split().freeze(),
+                                    IndexResponses::CurrentRevision(value).into(),
                                 )?;
                             }
                         }
 
-                        Request::Read { .. } => {
+                        IndexRequests::Read { .. } => {
                             tracing::error!("read from the index should be a streaming operation");
 
                             env.client.reply(
                                 mail.origin,
                                 mail.correlation,
-                                Response::Error.serialize(buffer.split()),
+                                IndexResponses::Error.into(),
                             )?;
                         }
                     }
@@ -105,17 +104,15 @@ where
             }
 
             Item::Stream(stream) => {
-                if let Some(Request::Read {
+                if let Some(IndexRequests::Read {
                     key,
                     start,
                     count,
                     dir,
-                }) = Request::try_from(stream.payload)
+                }) = stream.payload.try_into().ok()
                 {
-                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
-                    let mut stream_buffer = buffer.split();
                     let _: JoinHandle<eyre::Result<()>> = env.handle.spawn_blocking(move || {
                         if stream_indexed_read(
                             stream_lsm,
@@ -124,14 +121,11 @@ where
                             start,
                             count as usize,
                             dir,
-                            stream_buffer.split(),
                             &stream.sender,
                         )
                         .is_err()
                         {
-                            let _ = stream
-                                .sender
-                                .send(Response::Error.serialize(stream_buffer.split()));
+                            let _ = stream.sender.send(IndexResponses::Error.into());
                         }
 
                         Ok(())
@@ -169,7 +163,7 @@ where
     Ok(current_revision)
 }
 
-fn store_entries<S>(lsm: &Arc<RwLock<Lsm<S>>>, key: u64, entries: Bytes) -> eyre::Result<()>
+fn store_entries<S>(lsm: &Arc<RwLock<Lsm<S>>>, entries: Vec<BlockEntry>) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
@@ -177,7 +171,7 @@ where
         .write()
         .map_err(|e| eyre::eyre!("poisoned lock when writing to the index: {}", e))?;
 
-    lsm.put_values(StoreEntries { key, entries })?;
+    lsm.put_values(entries.into_iter().map(|e| (e.key, e.revision, e.position)))?;
 
     Ok(())
 }
@@ -210,8 +204,7 @@ fn stream_indexed_read<S>(
     start: u64,
     count: usize,
     dir: Direction,
-    mut buffer: BytesMut,
-    stream: &UnboundedSender<Bytes>,
+    stream: &UnboundedSender<Messages>,
 ) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
@@ -223,10 +216,7 @@ where
     let current_revision = key_latest_revision(&lsm, cache, key)?;
 
     if current_revision.is_deleted() {
-        if stream
-            .send(Response::StreamDeleted.serialize(buffer.split()))
-            .is_err()
-        {
+        if stream.send(IndexResponses::StreamDeleted.into()).is_err() {
             return Ok(());
         }
     }
@@ -236,35 +226,24 @@ where
         Direction::Backward => Box::new(lsm.scan_backward(key, start, count)),
     };
 
-    if stream
-        .send(Response::Streaming.serialize(buffer.split()))
-        .is_err()
-    {
-        return Ok(());
-    }
-
     let batch_size = min(count, 500);
-    let mem_requirement = batch_size * ENTRY_SIZE;
-    if buffer.remaining() < mem_requirement {
-        buffer.reserve(mem_requirement - buffer.remaining());
-    }
-
-    let mut count = 0;
+    let mut batch = Vec::with_capacity(batch_size);
     while let Some(item) = iter.next()? {
-        if count >= batch_size {
-            count = 0;
-            if stream.send(buffer.split().freeze()).is_err() {
+        if batch.len() >= batch_size {
+            let entries = mem::replace(&mut batch, Vec::with_capacity(batch_size));
+            if stream
+                .send(IndexResponses::Entries(entries).into())
+                .is_err()
+            {
                 return Ok(());
             }
         }
 
-        count += 1;
-        buffer.put_u64_le(item.revision);
-        buffer.put_u64_le(item.position);
+        batch.push(item);
     }
 
-    if !buffer.is_empty() {
-        let _ = stream.send(buffer.split().freeze());
+    if !batch.is_empty() {
+        let _ = stream.send(IndexResponses::Entries(batch).into());
     }
 
     Ok(())

@@ -1,12 +1,12 @@
 use bb8::Pool;
 use bytes::Bytes;
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::chunks::{ChunkBasedWAL, ChunkContainer};
+use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
+use messages::Messages;
 use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
-use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Instant;
 use std::{io, thread};
@@ -23,6 +23,7 @@ mod tests;
 mod echo;
 pub mod grpc;
 pub mod indexing;
+mod messages;
 pub mod reading;
 mod resource;
 mod sink;
@@ -47,11 +48,10 @@ impl Mailbox {
 
 pub type ProcId = u64;
 
-#[derive(Clone)]
 pub struct Mail {
     pub origin: ProcId,
     pub correlation: Uuid,
-    pub payload: Bytes,
+    pub payload: Messages,
     pub created: Instant,
 }
 
@@ -346,8 +346,8 @@ where
 struct Stream {
     origin: ProcId,
     correlation: Uuid,
-    payload: Bytes,
-    sender: UnboundedSender<Bytes>,
+    payload: Messages,
+    sender: UnboundedSender<Messages>,
     created: Instant,
 }
 
@@ -435,7 +435,7 @@ impl ManagerClient {
         }
     }
 
-    pub fn send(&self, dest: ProcId, payload: Bytes) -> eyre::Result<()> {
+    pub fn send(&self, dest: ProcId, payload: Messages) -> eyre::Result<()> {
         self.send_with_correlation(dest, Uuid::new_v4(), payload)
     }
 
@@ -443,7 +443,7 @@ impl ManagerClient {
         &self,
         dest: ProcId,
         correlation: Uuid,
-        payload: Bytes,
+        payload: Messages,
     ) -> eyre::Result<()> {
         if self
             .inner
@@ -465,7 +465,7 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn request(&self, dest: ProcId, payload: Bytes) -> eyre::Result<Mail> {
+    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -493,8 +493,8 @@ impl ManagerClient {
     pub async fn request_stream(
         &self,
         dest: ProcId,
-        payload: Bytes,
-    ) -> eyre::Result<UnboundedReceiver<Bytes>> {
+        payload: Messages,
+    ) -> eyre::Result<UnboundedReceiver<Messages>> {
         let (sender, receiver) = unbounded_channel();
         if self
             .inner
@@ -517,7 +517,7 @@ impl ManagerClient {
         Ok(receiver)
     }
 
-    pub fn reply(&self, dest: ProcId, correlation: Uuid, payload: Bytes) -> eyre::Result<()> {
+    pub fn reply(&self, dest: ProcId, correlation: Uuid, payload: Messages) -> eyre::Result<()> {
         if self
             .inner
             .send(ManagerCommand::Send {

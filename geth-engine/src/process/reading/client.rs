@@ -1,36 +1,43 @@
+use std::vec;
+
 use crate::messages::ReadStreamCompleted;
-use crate::process::reading::{LogEntryExt, Request, Response};
+use crate::process::messages::{Messages, ReadRequests, ReadResponses};
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
-use bytes::{Bytes, BytesMut};
 use geth_common::{Direction, Revision};
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct Streaming {
-    inner: UnboundedReceiver<Bytes>,
-    batch: Option<Bytes>,
+    inner: UnboundedReceiver<Messages>,
+    batch: Option<vec::IntoIter<LogEntry>>,
 }
 
 impl Streaming {
-    pub fn from(inner: UnboundedReceiver<Bytes>) -> Self {
-        Self { inner, batch: None }
-    }
-
-    pub async fn next(&mut self) -> Option<LogEntry> {
+    pub async fn next(&mut self) -> eyre::Result<Option<LogEntry>> {
         loop {
-            if let Some(batch) = self.batch.as_mut() {
-                if !batch.is_empty() {
-                    return Some(LogEntry::deserialize(batch));
-                }
+            if let Some(entry) = self.batch.as_mut().and_then(Iterator::next) {
+                return Ok(Some(entry));
             }
 
             self.batch = None;
-            if let Some(bytes) = self.inner.recv().await {
-                self.batch = Some(bytes);
-                continue;
+            if let Some(resp) = self.inner.recv().await.and_then(|m| m.try_into().ok()) {
+                match resp {
+                    ReadResponses::Error => {
+                        eyre::bail!("error when streaming from the reader process");
+                    }
+
+                    ReadResponses::Entries(entries) => {
+                        self.batch = Some(entries.into_iter());
+                        continue;
+                    }
+
+                    _ => {
+                        eyre::bail!("unexpected message when streaming from the reader process");
+                    }
+                }
             }
 
-            return None;
+            return Ok(None);
         }
     }
 }
@@ -61,30 +68,37 @@ impl ReaderClient {
         direction: Direction,
         count: usize,
     ) -> eyre::Result<ReadStreamCompleted> {
-        let mut buffer = self.inner.pool.get().await.unwrap();
         let mut mailbox = self
             .inner
             .request_stream(
                 self.target,
-                Request::read(&mut buffer, stream_name, start, direction, count),
+                ReadRequests::Read {
+                    ident: stream_name.to_string(),
+                    start: start.raw(),
+                    direction,
+                    count,
+                }
+                .into(),
             )
             .await?;
 
         if let Some(resp) = mailbox.recv().await {
-            if let Some(resp) = Response::try_from(resp) {
+            if let Some(resp) = resp.try_into().ok() {
                 match resp {
-                    Response::Error => {
-                        eyre::bail!("internal error");
+                    ReadResponses::Error => {
+                        eyre::bail!(
+                            "internal error when running a read request to the reader process"
+                        );
                     }
 
-                    Response::StreamDeleted => {
+                    ReadResponses::StreamDeleted => {
                         return Ok(ReadStreamCompleted::StreamDeleted);
                     }
 
-                    Response::Streaming => {
+                    ReadResponses::Entries(entries) => {
                         return Ok(ReadStreamCompleted::Success(Streaming {
                             inner: mailbox,
-                            batch: None,
+                            batch: Some(entries.into_iter()),
                         }));
                     }
                 }
