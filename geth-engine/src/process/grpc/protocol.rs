@@ -1,10 +1,7 @@
 use bb8::Pool;
-use bytes::{Buf, BufMut, BytesMut};
+use bytes::{Buf, BufMut};
 use futures::{pin_mut, Stream, StreamExt};
 use geth_mikoshi::wal::LogEntry;
-use serde::de;
-use std::str;
-use std::sync::Arc;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -15,8 +12,8 @@ use uuid::Uuid;
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
-    Client, Direction, Operation, OperationIn, OperationOut, Position, ProgramListed, Record,
-    Reply, StreamRead, StreamReadError, Subscribe, SubscriptionEvent, UnsubscribeReason,
+    Direction, Operation, OperationIn, OperationOut, Position, Record, Reply, StreamRead,
+    StreamReadError, Subscribe, SubscriptionEvent, UnsubscribeReason,
 };
 
 use crate::messages::ReadStreamCompleted;
@@ -205,16 +202,7 @@ async fn execute_operation(
         let correlation = input.correlation;
         match input.operation {
             Operation::AppendStream(params) => {
-                let mut batch = Vec::with_capacity(params.events.len());
-                let mut buffer = internal.pool.get().await.unwrap();
-
-                for event in params.events {
-                    buffer.put_u128_le(event.id.to_u128_le());
-                    buffer.extend_from_slice(&event.data);
-                    batch.push(buffer.split().freeze());
-                }
-
-                let completed = internal.writer.append(&params.stream_name, params.expected_revision, true, batch).await?;
+                let completed = internal.writer.append(params.stream_name, params.expected_revision, params.events).await?;
 
                 yield OperationOut {
                     correlation,
@@ -272,23 +260,38 @@ async fn execute_operation(
                 let token = local_storage.new_cancellation_token(correlation).await;
                 loop {
                     select! {
-                        entry = stream.next() => {
-                            match entry {
-                                None => {
-                                   yield OperationOut {
+                        outcome = stream.next() => {
+                            match outcome {
+                                Err(e) => {
+                                    tracing::error!(target = correlation.to_string(), "{}", e);
+                                    yield OperationOut {
                                         correlation,
-                                        reply: Reply::StreamRead(StreamRead::EndOfStream),
+                                        reply: Reply::StreamRead(StreamRead::Error(StreamReadError)),
                                     };
 
                                     local_storage.complete(&correlation).await;
                                     break;
                                 }
 
-                                Some(entry) => {
-                                    yield OperationOut {
-                                        correlation,
-                                        reply: Reply::StreamRead(StreamRead::EventAppeared(into_record(entry))),
-                                    };
+                                Ok(entry) => {
+                                    match entry {
+                                        None => {
+                                        yield OperationOut {
+                                                correlation,
+                                                reply: Reply::StreamRead(StreamRead::EndOfStream),
+                                            };
+
+                                            local_storage.complete(&correlation).await;
+                                            break;
+                                        }
+
+                                        Some(entry) => {
+                                            yield OperationOut {
+                                                correlation,
+                                                reply: Reply::StreamRead(StreamRead::EventAppeared(into_record(entry))),
+                                            };
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -347,50 +350,80 @@ async fn execute_operation(
 
                 loop {
                     select! {
-                        entry = read_stream.next() => {
-                            if let Some(entry) = entry {
-                                position = entry.position;
-                                yield OperationOut {
-                                    correlation,
-                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
-                                };
-                            } else {
-                                catching_up = false;
-
-                                for entry in history.drain(..) {
-                                    position = entry.position;
+                        outcome = read_stream.next() => {
+                            match outcome {
+                                Err(e) => {
+                                    tracing::error!(target = correlation.to_string(), "{}", e);
                                     yield OperationOut {
                                         correlation,
-                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
                                     };
+
+                                    local_storage.complete(&correlation).await;
+                                    break;
+                                }
+
+                                Ok(entry) => {
+                                    if let Some(entry) = entry {
+                                        position = entry.position;
+                                        yield OperationOut {
+                                            correlation,
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                        };
+                                    } else {
+                                        catching_up = false;
+
+                                        for entry in history.drain(..) {
+                                            position = entry.position;
+                                            yield OperationOut {
+                                                correlation,
+                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                            };
+                                        }
+                                    }
                                 }
                             }
                         }
 
-                        entry = sub_stream.next() => {
-                            if let Some(entry) = entry {
-                                if entry.position <= position {
-                                    continue;
+                        outcome = sub_stream.next() => {
+                            match outcome {
+                                Err(e) => {
+                                    tracing::error!(target = correlation.to_string(), "{}", e);
+                                    yield OperationOut {
+                                        correlation,
+                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                                    };
+
+                                    local_storage.complete(&correlation).await;
+                                    break;
                                 }
 
-                                if catching_up {
-                                    history.push(entry);
-                                    continue;
-                                 }
+                                Ok(entry) => {
+                                    if let Some(entry) = entry {
+                                        if entry.position <= position {
+                                            continue;
+                                        }
 
-                                position = entry.position;
-                                yield OperationOut {
-                                    correlation,
-                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
-                                };
-                            } else {
-                                yield OperationOut {
-                                    correlation,
-                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-                                };
+                                        if catching_up {
+                                            history.push(entry);
+                                            continue;
+                                        }
 
-                                local_storage.complete(&correlation).await;
-                                break;
+                                        position = entry.position;
+                                        yield OperationOut {
+                                            correlation,
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                        };
+                                    } else {
+                                        yield OperationOut {
+                                            correlation,
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                                        };
+
+                                        local_storage.complete(&correlation).await;
+                                        break;
+                                    }
+                                }
                             }
                         }
 

@@ -1,9 +1,10 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::IndexClient;
+use crate::process::messages::{IndexResponses, WriteRequests, WriteResponses};
 use crate::process::subscription::SubscriptionClient;
-use crate::process::writing::{Request, Response};
-use crate::process::{subscription, Item, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
+use geth_domain::index::BlockEntry;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::{LogEntries, LogWriter};
@@ -16,8 +17,8 @@ where
     let mut buffer = env.handle.block_on(pool.get()).unwrap();
     let mut log_writer = LogWriter::load(runtime.container().clone(), buffer.split())?;
     let mut index_client = IndexClient::resolve_raw(&mut env)?;
-    let mut sub_client = SubscriptionClient::resolve_raw(&mut env)?;
-    let mut entries = LogEntries::new(buffer.split());
+    let sub_client = SubscriptionClient::resolve_raw(&mut env)?;
+    let mut entries = LogEntries::new();
     std::mem::drop(buffer);
 
     while let Some(item) = env.queue.recv().ok() {
@@ -32,14 +33,13 @@ where
             }
 
             Item::Mail(mail) => {
-                if let Some(Request::Append {
+                if let Some(WriteRequests::Write {
                     ident,
                     expected,
                     events,
                     ..
-                }) = Request::try_from(mail.payload)
+                }) = mail.payload.try_into().ok()
                 {
-                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     let key = mikoshi_hash(&ident);
                     let current_revision =
                         env.handle.block_on(index_client.latest_revision(key))?;
@@ -48,7 +48,7 @@ where
                         env.client.reply(
                             mail.origin,
                             mail.correlation,
-                            Response::Deleted.serialize(&mut buffer),
+                            WriteResponses::StreamDeleted.into(),
                         )?;
 
                         continue;
@@ -58,8 +58,11 @@ where
                         env.client.reply(
                             mail.origin,
                             mail.correlation,
-                            Response::wrong_expected_revision(e.expected, e.current)
-                                .serialize(&mut buffer),
+                            WriteResponses::WrongExpectedRevision {
+                                expected: e.expected,
+                                current: e.current,
+                            }
+                            .into(),
                         )?;
 
                         continue;
@@ -68,23 +71,25 @@ where
                     let revision = current_revision.next_revision();
                     entries.begin(ident, revision, events);
                     let receipt = log_writer.append(&mut entries)?;
-                    let index_entries = entries.complete();
+                    let index_entries = entries
+                        .complete()
+                        .map(|(k, r, p)| BlockEntry {
+                            key: k,
+                            revision: r,
+                            position: p,
+                        })
+                        .collect();
 
-                    env.handle.block_on(index_client.store_raw(index_entries))?;
+                    env.handle.block_on(index_client.store(index_entries))?;
 
                     env.client.reply(
                         mail.origin,
                         mail.correlation,
-                        Response::committed(receipt.start_position, receipt.next_position)
-                            .serialize(&mut buffer),
+                        IndexResponses::Committed.into(),
                     )?;
 
-                    let mut builder = subscription::Request::push(&mut buffer);
-                    for event in entries.committed_events() {
-                        builder.push_entry(event);
-                    }
-
-                    sub_client.push(builder)?;
+                    let log_entries = entries.committed_events();
+                    env.handle.block_on(sub_client.push(log_entries))?;
 
                     continue;
                 }

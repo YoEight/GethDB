@@ -54,7 +54,7 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = inner.recv().await.and_then(Messages::into_index_response) {
+        if let Some(resp) = inner.recv().await.and_then(|m| m.try_into().ok()) {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("internal error when running a read request to the index process")
@@ -89,7 +89,7 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = resp.payload.into_index_response() {
+        if let Some(resp) = resp.payload.try_into().ok() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("error when storing entries to the index process");
@@ -115,7 +115,7 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = resp.payload.into_index_response() {
+        if let Some(resp) = resp.payload.try_into().ok() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("error when fetching the latest revision from the index process");
@@ -146,12 +146,7 @@ impl Streaming {
             }
 
             self.batch = None;
-            if let Some(resp) = self
-                .inner
-                .recv()
-                .await
-                .and_then(Messages::into_index_response)
-            {
+            if let Some(resp) = self.inner.recv().await.and_then(|m| m.try_into().ok()) {
                 match resp {
                     IndexResponses::Error => {
                         eyre::bail!("error when streaming from the index process");

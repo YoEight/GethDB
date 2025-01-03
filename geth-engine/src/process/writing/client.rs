@@ -1,8 +1,9 @@
-use crate::process::writing::{Request, Response};
-use crate::process::{ManagerClient, ProcId};
-use bytes::Bytes;
+use crate::process::{
+    messages::{WriteRequests, WriteResponses},
+    ManagerClient, ProcId,
+};
 use geth_common::{
-    AppendError, AppendStreamCompleted, ExpectedRevision, Position, WriteResult,
+    AppendError, AppendStreamCompleted, ExpectedRevision, Position, Propose, WriteResult,
     WrongExpectedRevisionError,
 };
 
@@ -17,38 +18,41 @@ impl WriterClient {
         Self { target, inner }
     }
 
-    pub async fn append<I>(
+    pub async fn append(
         &self,
-        stream: &str,
+        stream: String,
         expected: ExpectedRevision,
-        index: bool,
-        entries: I,
-    ) -> eyre::Result<AppendStreamCompleted>
-    where
-        I: IntoIterator<Item = Bytes>,
-    {
-        let mut buffer = self.inner.pool.get().await.unwrap();
-        let mut builder = Request::append_builder(&mut buffer, stream, expected, index);
+        events: Vec<Propose>,
+    ) -> eyre::Result<AppendStreamCompleted> {
+        let resp = self
+            .inner
+            .request(
+                self.target,
+                WriteRequests::Write {
+                    ident: stream.clone(),
+                    expected,
+                    events,
+                }
+                .into(),
+            )
+            .await?;
 
-        for payload in entries {
-            builder.push(&payload);
-        }
-
-        let resp = self.inner.request(self.target, builder.build()).await?;
-        if let Some(resp) = Response::try_from(resp.payload) {
+        if let Some(resp) = resp.payload.try_into().ok() {
             match resp {
-                Response::Error => {
+                WriteResponses::Error => {
                     eyre::bail!("internal error when appending to stream: '{}'", stream);
                 }
 
-                Response::Deleted => Ok(AppendStreamCompleted::Error(AppendError::StreamDeleted)),
+                WriteResponses::StreamDeleted => {
+                    Ok(AppendStreamCompleted::Error(AppendError::StreamDeleted))
+                }
 
-                Response::WrongExpectedRevision { expected, current } => Ok(
+                WriteResponses::WrongExpectedRevision { expected, current } => Ok(
                     AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
                         WrongExpectedRevisionError { expected, current },
                     )),
                 ),
-                Response::Committed { start, next: _next } => {
+                WriteResponses::Committed { start, next: _next } => {
                     Ok(AppendStreamCompleted::Success(WriteResult {
                         next_expected_version: ExpectedRevision::NoStream,
                         position: Position(start),

@@ -36,7 +36,7 @@ where
     while let Some(item) = env.queue.recv().ok() {
         match item {
             Item::Mail(mail) => {
-                if let Some(req) = mail.payload.into_index_request() {
+                if let Some(req) = mail.payload.try_into().ok() {
                     match req {
                         IndexRequests::Store { entries } => {
                             let last = entries.last().copied().unwrap();

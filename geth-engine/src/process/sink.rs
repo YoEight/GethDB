@@ -1,18 +1,21 @@
 use crate::process::{Item, ManagerClient, Proc, ProcId, ProcessEnv};
-use bytes::{Buf, BufMut, BytesMut};
 use tokio::sync::mpsc::UnboundedReceiver;
+
+use super::messages::{Messages, TestSinkRequests, TestSinkResponses};
 
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     while let Some(item) = env.queue.recv().await {
-        if let Item::Stream(mut stream) = item {
-            let mut buffer = env.client.pool.get().await.unwrap();
-            let low = stream.payload.get_u64_le();
-            let high = stream.payload.get_u64_le();
-
-            for num in low..high {
-                buffer.put_u64_le(num);
-                if stream.sender.send(buffer.split().freeze()).is_err() {
-                    break;
+        if let Item::Stream(stream) = item {
+            if let Some(TestSinkRequests::StreamFrom { low, high }) = stream.payload.try_into().ok()
+            {
+                for num in low..high {
+                    if stream
+                        .sender
+                        .send(TestSinkResponses::Stream(num).into())
+                        .is_err()
+                    {
+                        break;
+                    }
                 }
             }
         }
@@ -24,7 +27,6 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 pub struct SinkClient {
     target: ProcId,
     inner: ManagerClient,
-    buffer: BytesMut,
 }
 
 impl SinkClient {
@@ -32,17 +34,16 @@ impl SinkClient {
         Ok(Self {
             target: inner.wait_for(Proc::Sink).await?,
             inner,
-            buffer: BytesMut::new(),
         })
     }
 
     pub async fn stream_from(&mut self, low: u64, high: u64) -> eyre::Result<Streaming> {
-        self.buffer.put_u64_le(low);
-        self.buffer.put_u64_le(high);
-
         let inner = self
             .inner
-            .request_stream(self.target, self.buffer.split().freeze())
+            .request_stream(
+                self.target,
+                TestSinkRequests::StreamFrom { low, high }.into(),
+            )
             .await?;
 
         Ok(Streaming { inner })
@@ -50,15 +51,19 @@ impl SinkClient {
 }
 
 pub struct Streaming {
-    inner: UnboundedReceiver<bytes::Bytes>,
+    inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub async fn next(&mut self) -> Option<u64> {
-        if let Some(mut bytes) = self.inner.recv().await {
-            Some(bytes.get_u64_le())
-        } else {
-            None
+    pub async fn next(&mut self) -> eyre::Result<Option<u64>> {
+        if let Some(resp) = self.inner.recv().await {
+            if let Some(TestSinkResponses::Stream(value)) = resp.try_into().ok() {
+                return Ok(Some(value));
+            }
+
+            eyre::bail!("unexpected message when streaming from the sink process");
         }
+
+        Ok(None)
     }
 }

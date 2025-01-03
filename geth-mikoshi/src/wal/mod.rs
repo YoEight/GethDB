@@ -1,7 +1,8 @@
-use std::io;
 use std::sync::{Arc, RwLock};
+use std::{io, mem, vec};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
+use geth_common::Propose;
 
 use crate::wal::entries::EntryIter;
 
@@ -60,33 +61,30 @@ where {
 }
 
 pub struct LogEntries {
-    indexes: BytesMut,
-    committed: Vec<Bytes>,
-    data: Bytes,
+    indexes: Vec<(u64, u64, u64)>,
+    committed: Vec<LogEntry>,
+    events: vec::IntoIter<Propose>,
     ident: Bytes,
+    key: u64,
     revision: u64,
 }
 
 impl LogEntries {
-    pub fn new(buffer: BytesMut) -> Self {
+    pub fn new() -> Self {
         Self {
-            indexes: buffer,
+            indexes: vec![],
             committed: Vec::with_capacity(32),
-            data: Bytes::new(),
+            events: vec![].into_iter(),
             ident: Bytes::new(),
+            key: 0,
             revision: 0,
         }
     }
 
     pub fn next(&mut self) -> Option<Entry<'_>> {
-        if !self.data.has_remaining() {
-            return None;
-        }
-
-        let len = self.data.get_u32_le() as usize;
-        let record = self.data.copy_to_bytes(len);
-        let current_revision = self.revision;
+        let propose = self.events.next()?;
         let ident = self.ident.clone();
+        let current_revision = self.revision;
 
         self.revision += 1;
 
@@ -94,33 +92,28 @@ impl LogEntries {
             inner: self,
             ident,
             revision: current_revision,
-            data: record,
+            event: propose,
         })
     }
 
-    pub fn begin(&mut self, ident: Bytes, revision: u64, data: Bytes) {
-        let key = mikoshi_hash(&ident);
-
+    pub fn begin(&mut self, ident: String, revision: u64, events: Vec<Propose>) {
+        self.key = mikoshi_hash(&ident);
         self.revision = revision;
-        self.ident = ident;
-        self.data = data;
+        self.ident = ident.into_bytes().into();
+        self.events = events.into_iter();
         self.committed.clear();
-
-        self.indexes.put_u8(0x01);
-        self.indexes.put_u64_le(key);
     }
 
-    pub fn complete(&mut self) -> Bytes {
-        self.indexes.split().freeze()
+    pub fn complete(&mut self) -> impl Iterator<Item = (u64, u64, u64)> + use<'_> {
+        self.indexes.drain(..)
     }
 
     fn index(&mut self, revision: u64, position: u64) {
-        self.indexes.put_u64_le(revision);
-        self.indexes.put_u64_le(position);
+        self.indexes.push((self.key, revision, position));
     }
 
-    pub fn committed_events(&mut self) -> impl Iterator<Item = Bytes> + use<'_> {
-        self.committed.drain(..)
+    pub fn committed_events(&mut self) -> Vec<LogEntry> {
+        mem::take(&mut self.committed)
     }
 }
 
@@ -128,7 +121,7 @@ pub struct Entry<'a> {
     inner: &'a mut LogEntries,
     ident: Bytes,
     revision: u64,
-    data: Bytes,
+    event: Propose,
 }
 
 impl<'a> Entry<'a> {
@@ -139,9 +132,7 @@ impl<'a> Entry<'a> {
             + size_of::<u64>() // revision
             + size_of::<u16>() // stream name length
             + self.ident.len() // stream name
-            + size_of::<u32>() // payload size
-            + self.data.len() // payload
-            + size_of::<u32>() // entry size
+            + propose_estimate_size(&self.event)
     }
 
     pub fn commit(self, buffer: &mut BytesMut, position: u64) -> Bytes {
@@ -155,16 +146,37 @@ impl<'a> Entry<'a> {
         buffer.put_u64_le(self.revision);
         buffer.put_u16_le(self.ident.len() as u16);
         buffer.extend_from_slice(&self.ident);
-        buffer.put_u32_le(self.data.len() as u32);
-        buffer.extend_from_slice(&self.data);
+        propose_serialize(&self.event, buffer);
         buffer.put_u32_le(actual_size as u32);
 
         let event = buffer.split().freeze();
+        let payload =
+            event.slice(size_of::<u64>() + size_of::<u8>()..event.len() - size_of::<u32>());
 
-        self.inner.committed.push(event.clone());
+        self.inner.committed.push(LogEntry {
+            position,
+            r#type: 0,
+            payload,
+        });
 
         event
     }
+}
+
+fn propose_estimate_size(propose: &Propose) -> usize {
+    size_of::<u128>() // id
+        + size_of::<u16>() // type length
+        + propose.r#type.len() // type string
+        + size_of::<u32>() // payload size
+        + propose.data.len()
+}
+
+fn propose_serialize(propose: &Propose, buffer: &mut BytesMut) {
+    buffer.put_u128_le(propose.id.to_u128_le());
+    buffer.put_u16_le(propose.r#type.len() as u16);
+    buffer.extend_from_slice(propose.r#type.as_bytes());
+    buffer.put_u32_le(propose.data.len() as u32);
+    buffer.extend_from_slice(&propose.data);
 }
 
 pub trait WriteAheadLog {

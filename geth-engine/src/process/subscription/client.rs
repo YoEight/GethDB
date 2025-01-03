@@ -13,7 +13,7 @@ impl Streaming {
     }
 
     pub async fn next(&mut self) -> eyre::Result<Option<LogEntry>> {
-        if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_from().ok()) {
+        if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_into().ok()) {
             match resp {
                 SubscribeResponses::Error => {
                     eyre::bail!("error when streaming from the pubsub process");

@@ -1,5 +1,4 @@
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
-use crate::process::subscription::Request;
 use crate::process::{Item, ProcessEnv};
 use bytes::Buf;
 use geth_mikoshi::wal::LogEntry;
