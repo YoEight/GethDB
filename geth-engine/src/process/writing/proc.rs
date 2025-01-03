@@ -85,7 +85,11 @@ where
                     env.client.reply(
                         mail.origin,
                         mail.correlation,
-                        IndexResponses::Committed.into(),
+                        WriteResponses::Committed {
+                            start: receipt.start_position,
+                            next: receipt.next_position,
+                        }
+                        .into(),
                     )?;
 
                     let log_entries = entries.committed_events();

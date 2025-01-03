@@ -101,12 +101,39 @@ impl ReaderClient {
                             batch: Some(entries.into_iter()),
                         }));
                     }
+
+                    _ => {
+                        eyre::bail!("protocol error when communicating with the reader process");
+                    }
                 }
             }
-
-            eyre::bail!("protocol error when communicating with the reader process");
         }
 
         eyre::bail!("reader process is no longer running")
+    }
+
+    pub async fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
+        let resp = self
+            .inner
+            .request(self.target, ReadRequests::ReadAt { position }.into())
+            .await?;
+
+        if let Some(resp) = resp.payload.try_into().ok() {
+            match resp {
+                ReadResponses::Error => {
+                    eyre::bail!("unexpected error when reading from the reader process");
+                }
+
+                ReadResponses::Entry(entry) => {
+                    return Ok(entry);
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the reader process");
+                }
+            }
+        }
+
+        eyre::bail!("unexpected response from the reader process")
     }
 }

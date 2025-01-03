@@ -2,7 +2,9 @@ use std::sync::{Arc, RwLock};
 use std::{io, mem, vec};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
-use geth_common::Propose;
+use geth_common::{Position, Propose, Record};
+use tokio::stream;
+use uuid::Uuid;
 
 use crate::wal::entries::EntryIter;
 
@@ -133,6 +135,7 @@ impl<'a> Entry<'a> {
             + size_of::<u16>() // stream name length
             + self.ident.len() // stream name
             + propose_estimate_size(&self.event)
+            + size_of::<u32>() // entry size
     }
 
     pub fn commit(self, buffer: &mut BytesMut, position: u64) -> Bytes {
@@ -218,6 +221,32 @@ impl LogEntry {
             position,
             r#type,
             payload,
+        }
+    }
+}
+
+impl Into<Record> for LogEntry {
+    fn into(mut self) -> Record {
+        let revision = self.payload.get_u64_le();
+        let stream_name_len = self.payload.get_u16_le() as usize;
+        let stream_name = unsafe {
+            String::from_utf8_unchecked(self.payload.copy_to_bytes(stream_name_len).to_vec())
+        };
+
+        let id = Uuid::from_u128_le(self.payload.get_u128_le());
+        let type_len = self.payload.get_u16_le() as usize;
+        let r#type =
+            unsafe { String::from_utf8_unchecked(self.payload.copy_to_bytes(type_len).to_vec()) };
+
+        self.payload.advance(size_of::<u32>()); // skip the payload size
+
+        Record {
+            id,
+            r#type,
+            stream_name,
+            position: Position(self.position),
+            revision,
+            data: self.payload,
         }
     }
 }

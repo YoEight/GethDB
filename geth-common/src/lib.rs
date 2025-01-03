@@ -1,5 +1,6 @@
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
+use serde::{Deserialize, Serialize};
 use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
@@ -555,6 +556,21 @@ impl From<operation_in::append_stream::Propose> for Propose {
     }
 }
 
+impl Propose {
+    pub fn from_value<A>(value: &A) -> eyre::Result<Self>
+    where
+        A: Serialize,
+    {
+        let data = Bytes::from(serde_json::to_vec(value)?);
+        let id = Uuid::new_v4();
+        Ok(Self {
+            id,
+            r#type: "application/json".to_string(),
+            data,
+        })
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Record {
     pub id: Uuid,
@@ -589,6 +605,15 @@ impl From<Record> for next::protocol::RecordedEvent {
             payload: value.data,
             metadata: Default::default(),
         }
+    }
+}
+impl Record {
+    pub fn as_value<'a, A>(&'a self) -> eyre::Result<A>
+    where
+        A: Deserialize<'a>,
+    {
+        let value = serde_json::from_slice(&self.data)?;
+        Ok(value)
     }
 }
 

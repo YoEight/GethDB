@@ -788,6 +788,8 @@ dependencies = [
  "prost",
  "prost-derive",
  "prost-types",
+ "serde",
+ "serde_json",
  "thiserror",
  "tonic",
  "tonic-build",

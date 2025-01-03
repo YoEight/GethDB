@@ -26,8 +26,6 @@ where
                     count,
                 }) = stream.payload.try_into().ok()
                 {
-                    // FIXME - it might worth calling that part in the same future that we use to complete our call to the reader process.
-                    let mut buffer = env.handle.block_on(env.client.pool.get()).unwrap();
                     let index_stream = env.handle.block_on(index_client.read(
                         mikoshi_hash(ident),
                         start,
@@ -64,7 +62,7 @@ where
                         }
                     }
 
-                    if !buffer.is_empty() {
+                    if !batch.is_empty() {
                         let _ = stream.sender.send(ReadResponses::Entries(batch).into());
                     }
 
@@ -78,6 +76,17 @@ where
             }
 
             Item::Mail(mail) => {
+                if let Some(ReadRequests::ReadAt { position }) = mail.payload.try_into().ok() {
+                    let entry = reader.read_at(position)?;
+                    env.client.reply(
+                        mail.origin,
+                        mail.correlation,
+                        ReadResponses::Entry(entry).into(),
+                    )?;
+
+                    continue;
+                }
+
                 tracing::warn!("mail {} ignored", mail.correlation);
             }
         }

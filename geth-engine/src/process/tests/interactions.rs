@@ -1,15 +1,23 @@
 use crate::{
-    process::{start_process_manager_with_catalog, Catalog, Proc},
+    process::{
+        messages::TestSinkResponses, start_process_manager_with_catalog, Catalog, Mail, Proc,
+    },
     Options,
 };
-use bytes::{Buf, BufMut, BytesMut};
-use uuid::Uuid;
+use bytes::{BufMut, BytesMut};
 
 fn test_catalog() -> Catalog {
     Catalog::builder()
         .register(Proc::Echo)
         .register(Proc::Sink)
         .build()
+}
+
+fn sink_response(resp: Mail) -> u64 {
+    match resp.payload.try_into().ok() {
+        Some(TestSinkResponses::Stream(value)) => value,
+        _ => panic!("Unexpected response"),
+    }
 }
 
 #[tokio::test]
@@ -22,12 +30,12 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     while count < 10 {
         buffer.put_u64_le(count);
 
-        let mut resp = manager
-            .request(echo_proc_id, buffer.split().freeze())
+        let resp = manager
+            .request(echo_proc_id, TestSinkResponses::Stream(count).into())
             .await?;
 
         assert_eq!(echo_proc_id, resp.origin);
-        assert_eq!(count, resp.payload.get_u64_le());
+        assert_eq!(count, sink_response(resp));
 
         count += 1;
     }
@@ -48,33 +56,17 @@ async fn test_find_proc() -> eyre::Result<()> {
 }
 
 #[tokio::test]
-async fn test_simple_request() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
-    let proc_id = manager.wait_for(Proc::Echo).await?;
-
-    let random_uuid = Uuid::new_v4();
-    buffer.put_u128_le(random_uuid.to_u128_le());
-    let mut resp = manager.request(proc_id, buffer.split().freeze()).await?;
-
-    assert_eq!(proc_id, resp.origin);
-    assert_eq!(random_uuid, Uuid::from_u128_le(resp.payload.get_u128_le()));
-
-    Ok(())
-}
-
-#[tokio::test]
 async fn test_shutdown_reported_properly() -> eyre::Result<()> {
-    let mut buffer = BytesMut::new();
     let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?;
 
-    let random_uuid = Uuid::new_v4();
-    buffer.put_u128_le(random_uuid.to_u128_le());
-    let mut resp = manager.request(proc_id, buffer.split().freeze()).await?;
+    let num = 42;
+    let resp = manager
+        .request(proc_id, TestSinkResponses::Stream(num).into())
+        .await?;
 
     assert_eq!(proc_id, resp.origin);
-    assert_eq!(random_uuid, Uuid::from_u128_le(resp.payload.get_u128_le()));
+    assert_eq!(num, sink_response(resp));
 
     manager.shutdown().await?;
 

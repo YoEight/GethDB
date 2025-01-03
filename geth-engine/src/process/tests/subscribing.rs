@@ -2,8 +2,7 @@ use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
-use bytes::{Buf, Bytes};
-use geth_common::ExpectedRevision;
+use geth_common::{ExpectedRevision, Propose, Record};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -25,28 +24,21 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
     let mut stream = sub_client.subscribe(&stream_name).await?;
 
     for i in 0..10 {
-        expected.push(Bytes::from(serde_json::to_vec(&Foo { baz: i + 10 })?));
+        expected.push(Propose::from_value(&Foo { baz: i + 10 })?);
     }
 
     let _ = writer_client
-        .append(&stream_name, ExpectedRevision::Any, true, expected.clone())
+        .append(stream_name.clone(), ExpectedRevision::Any, expected.clone())
         .await?
         .success()?;
 
     let mut count = 0;
-    while let Some(mut entry) = stream.next().await {
-        let revision = entry.payload.get_u64_le();
-        assert_eq!(count, revision);
+    while let Some(entry) = stream.next().await? {
+        let record: Record = entry.clone().into();
+        let foo = record.as_value::<Foo>()?;
 
-        let stream_name_len = entry.payload.get_u16_le() as usize;
-        let stream_name_bytes = entry.payload.copy_to_bytes(stream_name_len);
-        let actual_stream_name = unsafe { String::from_utf8_unchecked(stream_name_bytes.to_vec()) };
-        assert_eq!(stream_name, actual_stream_name);
-
-        let payload_len = entry.payload.get_u32_le() as usize;
-        let payload = entry.payload.copy_to_bytes(payload_len);
-        let foo = serde_json::from_slice::<Foo>(&payload)?;
-
+        assert_eq!(count, record.revision);
+        assert_eq!(stream_name, record.stream_name);
         assert_eq!(foo.baz, count as u32 + 10);
 
         count += 1;

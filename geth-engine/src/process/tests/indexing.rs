@@ -1,4 +1,5 @@
 use geth_common::Direction;
+use geth_domain::index::BlockEntry;
 
 use crate::{
     process::{indexing::IndexClient, start_process_manager, Proc},
@@ -13,10 +14,14 @@ async fn test_store_read() -> eyre::Result<()> {
     let mut expected = vec![];
 
     for i in 0..10 {
-        expected.push((i, i + 10));
+        expected.push(BlockEntry {
+            key: 2,
+            revision: i,
+            position: i + 10,
+        });
     }
 
-    client.store(2, expected.clone()).await?;
+    client.store(expected.clone()).await?;
     let entries = client
         .read(2, 0, usize::MAX, Direction::Forward)
         .await?
@@ -37,10 +42,14 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
     let mut expected = vec![];
 
     for i in 0..10 {
-        expected.push((i, i + 10));
+        expected.push(BlockEntry {
+            key: 2,
+            revision: i,
+            position: i + 10,
+        });
     }
 
-    client.store(2, expected.clone()).await?;
+    client.store(expected.clone()).await?;
     let revision = client.latest_revision(2).await?.revision();
 
     assert!(revision.is_some());

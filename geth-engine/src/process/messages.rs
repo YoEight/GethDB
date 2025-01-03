@@ -254,6 +254,7 @@ pub enum ReadResponses {
     Error,
     StreamDeleted,
     Entries(Vec<LogEntry>),
+    Entry(LogEntry),
 }
 
 pub enum SubscribeResponses {

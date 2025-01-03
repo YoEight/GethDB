@@ -1,11 +1,11 @@
 use crate::process::indexing::IndexClient;
+use crate::process::reading::ReaderClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
 use bytes::{Buf, Bytes};
-use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision};
+use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::wal::LogReader;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -18,20 +18,21 @@ struct Foo {
 async fn test_writer_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::Indexing).await?;
+    let reader_id = manager.wait_for(Proc::Reading).await?;
     let mut index_client = IndexClient::new(proc_id, manager.clone());
     let writer_id = manager.wait_for(Proc::Writing).await?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
+    let reader_client = ReaderClient::new(reader_id, manager.clone());
     let mut expected = vec![];
-    // let wal = LogReader::new(container);
 
     for i in 0..10 {
-        expected.push(Bytes::from(serde_json::to_vec(&Foo { baz: i + 10 })?));
+        expected.push(Propose::from_value(&Foo { baz: i + 10 })?);
     }
 
     let stream_name = Uuid::new_v4().to_string();
 
     let result = writer_client
-        .append(&stream_name, ExpectedRevision::Any, true, expected.clone())
+        .append(stream_name.clone(), ExpectedRevision::Any, expected.clone())
         .await?;
 
     if let AppendStreamCompleted::Error(e) = result {
@@ -49,21 +50,14 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
         .await?
         .ok()?;
 
-    while let Some((revision, position)) = stream.next().await? {
-        assert_eq!(index as u64, revision);
+    while let Some(entry) = stream.next().await? {
+        assert_eq!(index as u64, entry.revision);
 
-        let mut log = wal.read_at(position)?;
-        let entry_revision = log.payload.get_u64_le();
-        assert_eq!(revision, entry_revision);
+        let record: Record = reader_client.read_at(entry.position).await?.into();
+        assert_eq!(index as u64, record.revision);
+        assert_eq!(stream_name, record.stream_name);
 
-        let stream_name_len = log.payload.get_u16_le() as usize;
-        let stream_name_bytes = log.payload.copy_to_bytes(stream_name_len);
-        let actual_stream_name = unsafe { String::from_utf8_unchecked(stream_name_bytes.to_vec()) };
-        assert_eq!(stream_name, actual_stream_name);
-
-        let payload_len = log.payload.get_u32_le() as usize;
-        let payload = log.payload.copy_to_bytes(payload_len);
-        let foo = serde_json::from_slice::<Foo>(&payload)?;
+        let foo = record.as_value::<Foo>()?;
 
         assert_eq!(foo.baz, index as u32 + 10);
 
