@@ -762,6 +762,7 @@ name = "geth-client-tests"
 version = "0.1.0"
 dependencies = [
  "bytes",
+ "ctor",
  "eyre",
  "fake",
  "futures",
@@ -772,6 +773,8 @@ dependencies = [
  "serde_json",
  "temp-dir",
  "tokio",
+ "tracing",
+ "tracing-subscriber",
  "uuid",
 ]
 

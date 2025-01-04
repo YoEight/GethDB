@@ -288,7 +288,7 @@ async fn execute_operation(
                                         Some(entry) => {
                                             yield OperationOut {
                                                 correlation,
-                                                reply: Reply::StreamRead(StreamRead::EventAppeared(into_record(entry))),
+                                                reply: Reply::StreamRead(StreamRead::EventAppeared(entry.into())),
                                             };
                                         }
                                     }
@@ -368,7 +368,7 @@ async fn execute_operation(
                                         position = entry.position;
                                         yield OperationOut {
                                             correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(entry.into())),
                                         };
                                     } else {
                                         catching_up = false;
@@ -377,7 +377,7 @@ async fn execute_operation(
                                             position = entry.position;
                                             yield OperationOut {
                                                 correlation,
-                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(entry.into())),
                                             };
                                         }
                                     }
@@ -412,7 +412,7 @@ async fn execute_operation(
                                         position = entry.position;
                                         yield OperationOut {
                                             correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(into_record(entry))),
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(entry.into())),
                                         };
                                     } else {
                                         yield OperationOut {
@@ -467,20 +467,5 @@ async fn execute_operation(
                 local_storage.cancel(&correlation).await;
             }
         };
-    }
-}
-
-fn into_record(mut entry: LogEntry) -> Record {
-    let revision = entry.payload.get_u64_le();
-    let str_len = entry.payload.get_u16_le() as usize;
-    let stream_name_bytes = entry.payload.copy_to_bytes(str_len);
-    let stream_name = unsafe { String::from_utf8_unchecked(stream_name_bytes.to_vec()) };
-    Record {
-        id: Uuid::nil(),
-        r#type: String::new(),
-        stream_name,
-        position: Position(entry.position),
-        revision,
-        data: entry.payload.copy_to_bytes(entry.payload.remaining()),
     }
 }

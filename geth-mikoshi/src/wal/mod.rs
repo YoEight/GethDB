@@ -1,9 +1,8 @@
 use std::sync::{Arc, RwLock};
-use std::{io, mem, vec};
+use std::{mem, vec};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Position, Propose, Record};
-use tokio::stream;
 use uuid::Uuid;
 
 use crate::wal::entries::EntryIter;

@@ -8,6 +8,7 @@ mod local;
 mod protocol;
 
 pub async fn start_server(env: ProcessEnv) -> Result<(), transport::Error> {
+    let client = env.client.clone();
     let addr = format!("{}:{}", env.options.host, env.options.port)
         .parse()
         .unwrap();
@@ -18,7 +19,7 @@ pub async fn start_server(env: ProcessEnv) -> Result<(), transport::Error> {
 
     Server::builder()
         .add_service(ProtocolServer::new(protocols))
-        .serve(addr)
+        .serve_with_shutdown(addr, client.manager_exited())
         .await?;
 
     Ok(())

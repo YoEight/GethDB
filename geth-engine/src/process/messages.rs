@@ -273,8 +273,9 @@ pub enum WriteResponses {
     },
 
     Committed {
-        start: u64,
-        next: u64,
+        start_position: u64,
+        next_position: u64,
+        next_expected_version: ExpectedRevision,
     },
 }
 

@@ -52,13 +52,15 @@ impl WriterClient {
                         WrongExpectedRevisionError { expected, current },
                     )),
                 ),
-                WriteResponses::Committed { start, next: _next } => {
-                    Ok(AppendStreamCompleted::Success(WriteResult {
-                        next_expected_version: ExpectedRevision::NoStream,
-                        position: Position(start),
-                        next_logical_position: 0,
-                    }))
-                }
+                WriteResponses::Committed {
+                    start_position: start,
+                    next_position: next,
+                    next_expected_version,
+                } => Ok(AppendStreamCompleted::Success(WriteResult {
+                    next_expected_version,
+                    position: Position(start),
+                    next_logical_position: next,
+                })),
             }
         } else {
             eyre::bail!("internal protocol error when appending to the writer process");

@@ -69,6 +69,7 @@ where
                     }
 
                     let revision = current_revision.next_revision();
+                    let count = events.len() as u64;
                     entries.begin(ident, revision, events);
                     let receipt = log_writer.append(&mut entries)?;
                     let index_entries = entries
@@ -86,8 +87,9 @@ where
                         mail.origin,
                         mail.correlation,
                         WriteResponses::Committed {
-                            start: receipt.start_position,
-                            next: receipt.next_position,
+                            start_position: receipt.start_position,
+                            next_position: receipt.next_position,
+                            next_expected_version: ExpectedRevision::Revision(revision + count),
                         }
                         .into(),
                     )?;

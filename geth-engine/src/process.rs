@@ -575,6 +575,7 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
         .register(Proc::Writing)
         .register(Proc::Reading)
         .register(Proc::PubSub)
+        .register(Proc::Grpc)
         .build();
 
     start_process_manager_with_catalog(options, catalog).await
