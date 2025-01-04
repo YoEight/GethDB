@@ -1,65 +1,16 @@
-use std::sync::{Arc, RwLock};
 use std::{mem, vec};
 
 use bytes::{Buf, BufMut, Bytes, BytesMut};
 use geth_common::{Position, Propose, Record};
 use uuid::Uuid;
 
-use crate::wal::entries::EntryIter;
-
 pub mod chunks;
-pub mod entries;
 mod log_reader;
 mod log_writer;
 
 use crate::hashing::mikoshi_hash;
 pub use log_reader::LogReader;
 pub use log_writer::LogWriter;
-
-pub struct WALRef<A> {
-    inner: Arc<RwLock<A>>,
-}
-
-impl<A> Clone for WALRef<A> {
-    fn clone(&self) -> Self {
-        Self {
-            inner: self.inner.clone(),
-        }
-    }
-}
-
-impl<WAL: WriteAheadLog> WALRef<WAL> {
-    pub fn new(inner: WAL) -> Self {
-        Self {
-            inner: Arc::new(RwLock::new(inner)),
-        }
-    }
-
-    pub fn append(&self, entries: &mut LogEntries) -> eyre::Result<LogReceipt>
-where {
-        let mut inner = self.inner.write().unwrap();
-        inner.append(entries)
-    }
-
-    pub fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
-        let inner = self.inner.read().unwrap();
-        inner.read_at(position)
-    }
-
-    pub fn entries(&self, from: u64) -> EntryIter<WAL> {
-        let to = {
-            let inner = self.inner.read().unwrap();
-            inner.write_position()
-        };
-
-        EntryIter::new(self.clone(), from, to)
-    }
-
-    pub fn write_position(&self) -> u64 {
-        let inner = self.inner.read().unwrap();
-        inner.write_position()
-    }
-}
 
 pub struct LogEntries {
     indexes: Vec<(u64, u64, u64)>,

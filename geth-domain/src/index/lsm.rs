@@ -5,17 +5,12 @@ use std::iter::once;
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{IteratorIO, IteratorIOExt};
-use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::{FileId, Storage};
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-
-use crate::binary::models::Event;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::parse_event;
+use geth_common::{IteratorIO, IteratorIOExt};
+use geth_mikoshi::storage::{FileId, Storage};
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
@@ -95,31 +90,6 @@ where
         }
 
         Ok(lsm)
-    }
-
-    pub fn rebuild<WAL: WriteAheadLog>(&mut self, wal: &WALRef<WAL>) -> eyre::Result<()> {
-        let records = wal.entries(self.logical_position).map_io(|entry| {
-            let event = parse_event(&entry.payload)
-                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-
-            match event.event.unwrap() {
-                Event::RecordedEvent(event) => Ok((
-                    mikoshi_hash(&event.stream_name),
-                    event.revision,
-                    entry.position,
-                )),
-
-                Event::StreamDeleted(event) => {
-                    Ok((mikoshi_hash(&event.stream_name), u64::MAX, entry.position))
-                }
-            }
-        });
-
-        self.put(records)?;
-
-        self.logical_position = wal.write_position();
-
-        Ok(())
     }
 
     pub fn ss_table_count(&self) -> usize {

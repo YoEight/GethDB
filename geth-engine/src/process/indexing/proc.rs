@@ -30,6 +30,8 @@ where
         runtime.container().storage().clone(),
     )?;
 
+    // TODO - We need to rebuild the index upon start.
+
     let lsm = Arc::new(RwLock::new(lsm));
     let revision_cache = new_revision_cache();
 

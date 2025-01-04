@@ -1,5 +1,3 @@
-use std::io;
-
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use prost::Message;
@@ -13,7 +11,6 @@ use crate::binary::models::Events;
 mod append_propose;
 pub mod binary;
 pub mod index;
-mod iter;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ExpectedRevision {
