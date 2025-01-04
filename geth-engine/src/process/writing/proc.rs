@@ -1,6 +1,6 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::indexing::IndexClient;
-use crate::process::messages::{IndexResponses, WriteRequests, WriteResponses};
+use crate::process::messages::{WriteRequests, WriteResponses};
 use crate::process::subscription::SubscriptionClient;
 use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};

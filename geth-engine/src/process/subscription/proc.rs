@@ -1,6 +1,7 @@
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
 use crate::process::{Item, ProcessEnv};
 use bytes::Buf;
+use geth_common::Record;
 use geth_mikoshi::wal::LogEntry;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
@@ -78,16 +79,8 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                     continue;
                                 }
 
-                                let mut sub_entry = event.payload.clone();
-
-                                let str_len = sub_entry.get_u16_le() as usize;
-                                let ident = unsafe {
-                                    String::from_utf8_unchecked(
-                                        sub_entry.copy_to_bytes(str_len).to_vec(),
-                                    )
-                                };
-
-                                reg.publish(&ident, event);
+                                let record: Record = event.clone().into();
+                                reg.publish(&record.stream_name, event);
                             }
                         }
 

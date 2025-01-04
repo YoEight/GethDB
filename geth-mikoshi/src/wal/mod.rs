@@ -153,8 +153,9 @@ impl<'a> Entry<'a> {
         buffer.put_u32_le(actual_size as u32);
 
         let event = buffer.split().freeze();
-        let payload =
-            event.slice(size_of::<u64>() + size_of::<u8>()..event.len() - size_of::<u32>());
+        let payload = event.slice(
+            size_of::<u32>() + size_of::<u64>() + size_of::<u8>()..event.len() - size_of::<u32>(),
+        );
 
         self.inner.committed.push(LogEntry {
             position,

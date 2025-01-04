@@ -34,6 +34,7 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
 
     let mut count = 0;
     while let Some(entry) = stream.next().await? {
+        tracing::debug!("received entry {}/10", count + 1);
         let record: Record = entry.clone().into();
         let foo = record.as_value::<Foo>()?;
 
