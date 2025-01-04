@@ -10,6 +10,16 @@ pub mod tests {
     use geth_common::EndPoint;
     use geth_engine::Options;
 
+    #[ctor::ctor]
+    fn test_init() {
+        let _ = tracing_subscriber::fmt::fmt()
+            .with_max_level(tracing::Level::DEBUG)
+            .with_file(true)
+            .with_line_number(true)
+            .with_target(true)
+            .init();
+    }
+
     pub fn random_valid_options(temp_dir: &TempDir) -> Options {
         Options {
             host: "127.0.0.1".to_string(),

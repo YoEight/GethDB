@@ -139,4 +139,12 @@ impl CurrentRevision {
 
         false
     }
+
+    pub fn revision(self) -> Option<u64> {
+        if let CurrentRevision::Revision(r) = self {
+            return Some(r);
+        }
+
+        None
+    }
 }
