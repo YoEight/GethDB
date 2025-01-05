@@ -26,7 +26,7 @@ impl IndexClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    pub fn resolve_raw(env: &mut ProcessRawEnv) -> eyre::Result<Self> {
+    pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting the index process to be available...");
         let proc_id = env.handle.block_on(env.client.wait_for(Proc::Indexing))?;
         tracing::debug!("index process available on {}", proc_id);
@@ -89,7 +89,7 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = resp.payload.try_into().ok() {
+        if let Ok(resp) = resp.payload.try_into() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("error when storing entries to the index process");
@@ -115,7 +115,7 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = resp.payload.try_into().ok() {
+        if let Ok(resp) = resp.payload.try_into() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("error when fetching the latest revision from the index process");

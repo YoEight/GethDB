@@ -4,6 +4,7 @@ use geth_mikoshi::wal::LogEntry;
 
 use crate::domain::index::CurrentRevision;
 
+#[derive(Debug)]
 pub enum Messages {
     Requests(Requests),
     Responses(Responses),
@@ -179,6 +180,7 @@ impl TryFrom<Messages> for TestSinkResponses {
     }
 }
 
+#[derive(Debug)]
 pub enum Requests {
     Index(IndexRequests),
     Read(ReadRequests),
@@ -187,6 +189,7 @@ pub enum Requests {
     TestSink(TestSinkRequests),
 }
 
+#[derive(Debug)]
 pub enum IndexRequests {
     Read {
         key: u64,
@@ -204,6 +207,7 @@ pub enum IndexRequests {
     },
 }
 
+#[derive(Debug)]
 pub enum ReadRequests {
     Read {
         ident: String,
@@ -217,23 +221,29 @@ pub enum ReadRequests {
     },
 }
 
+#[derive(Debug)]
 pub enum SubscribeRequests {
     Subscribe { ident: String },
     Push { events: Vec<LogEntry> },
 }
 
+#[derive(Debug)]
 pub enum WriteRequests {
     Write {
         ident: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
     },
+
+    GetWritePosition,
 }
 
+#[derive(Debug)]
 pub enum TestSinkRequests {
     StreamFrom { low: u64, high: u64 },
 }
 
+#[derive(Debug)]
 pub enum Responses {
     Index(IndexResponses),
     Read(ReadResponses),
@@ -242,6 +252,7 @@ pub enum Responses {
     TestSink(TestSinkResponses),
 }
 
+#[derive(Debug)]
 pub enum IndexResponses {
     Error,
     StreamDeleted,
@@ -250,6 +261,7 @@ pub enum IndexResponses {
     Committed,
 }
 
+#[derive(Debug)]
 pub enum ReadResponses {
     Error,
     StreamDeleted,
@@ -257,12 +269,14 @@ pub enum ReadResponses {
     Entry(LogEntry),
 }
 
+#[derive(Debug)]
 pub enum SubscribeResponses {
     Error,
     Confirmed,
     Entry(LogEntry),
 }
 
+#[derive(Debug)]
 pub enum WriteResponses {
     Error,
     StreamDeleted,
@@ -277,8 +291,11 @@ pub enum WriteResponses {
         next_position: u64,
         next_expected_version: ExpectedRevision,
     },
+
+    WritePosition(u64),
 }
 
+#[derive(Debug)]
 pub enum TestSinkResponses {
     Stream(u64),
 }

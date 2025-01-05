@@ -1,12 +1,11 @@
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
 use crate::process::{Item, ProcessEnv};
-use bytes::Buf;
 use geth_common::Record;
 use geth_mikoshi::wal::LogEntry;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
-const ALL_IDENT: &'static str = "$all";
+const ALL_IDENT: &str = "$all";
 
 #[derive(Default)]
 struct Register {
@@ -42,7 +41,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     while let Some(item) = env.queue.recv().await {
         match item {
             Item::Stream(stream) => {
-                if let Some(req) = stream.payload.try_into().ok() {
+                if let Ok(req) = stream.payload.try_into() {
                     match req {
                         SubscribeRequests::Subscribe { ident } => {
                             if stream
@@ -71,7 +70,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
             }
 
             Item::Mail(mail) => {
-                if let Some(req) = mail.payload.try_into().ok() {
+                if let Ok(req) = mail.payload.try_into() {
                     match req {
                         SubscribeRequests::Push { events } => {
                             for event in events {

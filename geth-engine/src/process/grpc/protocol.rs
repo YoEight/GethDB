@@ -1,5 +1,3 @@
-use bb8::Pool;
-use bytes::{Buf, BufMut};
 use futures::{pin_mut, Stream, StreamExt};
 use geth_mikoshi::wal::LogEntry;
 use tokio::select;
@@ -7,19 +5,17 @@ use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 use tonic::{Request, Response, Status, Streaming};
-use uuid::Uuid;
 
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
-    Direction, Operation, OperationIn, OperationOut, Position, Record, Reply, StreamRead,
-    StreamReadError, Subscribe, SubscriptionEvent, UnsubscribeReason,
+    Direction, Operation, OperationIn, OperationOut, Reply, StreamRead, StreamReadError, Subscribe,
+    SubscriptionEvent, UnsubscribeReason,
 };
 
 use crate::messages::ReadStreamCompleted;
 use crate::process::grpc::local::LocalStorage;
 use crate::process::reading::ReaderClient;
-use crate::process::resource::BufferManager;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{ManagerClient, Proc};
@@ -39,20 +35,17 @@ struct Internal {
     writer: WriterClient,
     reader: ReaderClient,
     sub: SubscriptionClient,
-    pool: Pool<BufferManager>,
 }
 
 async fn resolve_internal(mgr: ManagerClient) -> eyre::Result<Internal> {
     let writer_id = mgr.wait_for(Proc::Writing).await?;
     let reader_id = mgr.wait_for(Proc::Reading).await?;
     let sub_id = mgr.wait_for(Proc::PubSub).await?;
-    let pool = mgr.pool.clone();
 
     Ok(Internal {
         writer: WriterClient::new(writer_id, mgr.clone()),
         reader: ReaderClient::new(reader_id, mgr.clone()),
         sub: SubscriptionClient::new(sub_id, mgr),
-        pool,
     })
 }
 

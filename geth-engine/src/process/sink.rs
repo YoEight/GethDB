@@ -37,7 +37,7 @@ impl SinkClient {
         })
     }
 
-    pub async fn stream_from(&mut self, low: u64, high: u64) -> eyre::Result<Streaming> {
+    pub async fn stream_from(&self, low: u64, high: u64) -> eyre::Result<Streaming> {
         let inner = self
             .inner
             .request_stream(

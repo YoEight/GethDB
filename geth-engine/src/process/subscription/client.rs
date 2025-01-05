@@ -1,5 +1,5 @@
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessRawEnv};
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
 
@@ -44,12 +44,6 @@ impl SubscriptionClient {
         Self { target, inner }
     }
 
-    pub async fn resolve(env: &ProcessEnv) -> eyre::Result<Self> {
-        tracing::debug!("waiting for the pubsub process to be available...");
-        let proc_id = env.client.wait_for(Proc::PubSub).await?;
-        tracing::debug!("pubsub process available on {}", proc_id);
-        Ok(Self::new(proc_id, env.client.clone()))
-    }
     pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the pubsub process to be available...");
         let proc_id = env.handle.block_on(env.client.wait_for(Proc::PubSub))?;
@@ -94,7 +88,7 @@ impl SubscriptionClient {
             .request(self.target, SubscribeRequests::Push { events }.into())
             .await?;
 
-        if let Some(resp) = resp.payload.try_into().ok() {
+        if let Ok(resp) = resp.payload.try_into() {
             match resp {
                 SubscribeResponses::Error => {
                     eyre::bail!("internal error");

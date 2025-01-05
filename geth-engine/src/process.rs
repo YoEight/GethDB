@@ -1,5 +1,4 @@
 use bb8::Pool;
-use bytes::Bytes;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
@@ -20,12 +19,14 @@ use crate::Options;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
 mod echo;
 pub mod grpc;
 pub mod indexing;
 mod messages;
 pub mod reading;
 mod resource;
+#[cfg(test)]
 mod sink;
 pub mod subscription;
 // mod subscriptions;
@@ -62,7 +63,9 @@ pub enum Proc {
     Indexing,
     PubSub,
     Grpc,
+    #[cfg(test)]
     Echo,
+    #[cfg(test)]
     Sink,
 }
 
@@ -77,16 +80,16 @@ struct RunningProc {
     mailbox: Mailbox,
 }
 
-struct Catalog {
-    inner: HashMap<Proc, CatalogItem>,
+pub struct Catalog {
+    inner: HashMap<Proc, Topology>,
     monitor: HashMap<ProcId, RunningProc>,
 }
 
 impl Catalog {
     fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProcId>> {
-        if let Some(item) = self.inner.get(proc) {
-            return match &item.topology {
-                Topology::Singleton(prev) => Ok(prev.clone()),
+        if let Some(topology) = self.inner.get(proc) {
+            return match &topology {
+                Topology::Singleton(prev) => Ok(*prev),
             };
         }
 
@@ -95,8 +98,8 @@ impl Catalog {
 
     fn report(&mut self, running: RunningProc) -> eyre::Result<()> {
         let proc = running.proc;
-        if let Some(item) = self.inner.get_mut(&running.proc) {
-            match &mut item.topology {
+        if let Some(mut topology) = self.inner.get_mut(&running.proc) {
+            match &mut topology {
                 Topology::Singleton(prev) => {
                     if let Some(prev) = prev.as_ref() {
                         eyre::bail!(
@@ -119,8 +122,8 @@ impl Catalog {
 
     fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
         if let Some(running) = self.monitor.remove(&proc_id) {
-            if let Some(item) = self.inner.get_mut(&running.proc) {
-                match &mut item.topology {
+            if let Some(mut topology) = self.inner.get_mut(&running.proc) {
+                match &mut topology {
                     Topology::Singleton(prev) => {
                         *prev = None;
                     }
@@ -153,33 +156,22 @@ impl Catalog {
 }
 
 pub struct CatalogBuilder {
-    inner: HashMap<Proc, CatalogItem>,
+    inner: HashMap<Proc, Topology>,
 }
 
 impl CatalogBuilder {
     pub fn register(mut self, proc: Proc) -> Self {
-        self.inner.insert(
-            proc,
-            CatalogItem {
-                proc,
-                topology: Topology::Singleton(None),
-            },
-        );
+        self.inner.insert(proc, Topology::Singleton(None));
 
         self
     }
 
-    fn build(self) -> Catalog {
+    pub fn build(self) -> Catalog {
         Catalog {
             inner: self.inner,
             monitor: Default::default(),
         }
     }
-}
-
-struct CatalogItem {
-    proc: Proc,
-    topology: Topology,
 }
 
 pub struct Manager<S> {
@@ -211,10 +203,9 @@ where
         }
 
         match cmd {
-            ManagerCommand::Spawn { parent: _, resp: _ } => {
-                // TODO - might change that command to start.
-            }
-
+            // ManagerCommand::Spawn { parent: _, resp: _ } => {
+            //     // TODO - might change that command to start.
+            // }
             ManagerCommand::Find { proc, resp } => {
                 let _ = resp.send(self.catalog.lookup(&proc)?);
             }
@@ -251,36 +242,25 @@ where
                     client.id = id;
 
                     let running_proc = match proc {
-                        Proc::Writing => spawn_raw(
-                            options,
-                            client,
-                            runtime,
-                            Handle::current(),
-                            proc,
-                            writing::run,
-                        ),
+                        Proc::Writing => {
+                            spawn_raw(client, runtime, Handle::current(), proc, writing::run)
+                        }
 
-                        Proc::Reading => spawn_raw(
-                            options,
-                            client,
-                            runtime,
-                            Handle::current(),
-                            proc,
-                            reading::run,
-                        ),
+                        Proc::Reading => {
+                            spawn_raw(client, runtime, Handle::current(), proc, reading::run)
+                        }
 
-                        Proc::Indexing => spawn_raw(
-                            options,
-                            client,
-                            runtime,
-                            Handle::current(),
-                            proc,
-                            indexing::run,
-                        ),
+                        Proc::Indexing => {
+                            spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
+                        }
 
                         Proc::PubSub => spawn(options, client, proc, subscription::run),
                         Proc::Grpc => spawn(options, client, proc, grpc::run),
+
+                        #[cfg(test)]
                         Proc::Echo => spawn(options, client, proc, echo::run),
+
+                        #[cfg(test)]
                         Proc::Sink => spawn(options, client, proc, sink::run),
                     };
 
@@ -343,25 +323,22 @@ where
     }
 }
 
-struct Stream {
-    origin: ProcId,
+pub struct Stream {
     correlation: Uuid,
     payload: Messages,
     sender: UnboundedSender<Messages>,
-    created: Instant,
 }
 
-enum Item {
+pub enum Item {
     Mail(Mail),
     Stream(Stream),
 }
 
 pub enum ManagerCommand {
-    Spawn {
-        parent: Option<ProcId>,
-        resp: oneshot::Sender<ProcId>,
-    },
-
+    // Spawn {
+    //     parent: Option<ProcId>,
+    //     resp: oneshot::Sender<ProcId>,
+    // },
     Find {
         proc: Proc,
         resp: oneshot::Sender<Option<ProcId>>,
@@ -390,10 +367,10 @@ pub enum ManagerCommand {
 
 impl ManagerCommand {
     fn is_shutdown_related(&self) -> bool {
-        match self {
-            ManagerCommand::ProcTerminated { .. } | ManagerCommand::Shutdown { .. } => true,
-            _ => false,
-        }
+        matches!(
+            self,
+            ManagerCommand::ProcTerminated { .. } | ManagerCommand::Shutdown { .. }
+        )
     }
 }
 
@@ -407,7 +384,6 @@ pub struct ProcessRawEnv {
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     handle: Handle,
-    options: Options,
 }
 
 #[derive(Clone)]
@@ -501,9 +477,7 @@ impl ManagerClient {
             .send(ManagerCommand::Send {
                 dest,
                 item: Item::Stream(Stream {
-                    origin: self.id,
                     correlation: Uuid::new_v4(),
-                    created: Instant::now(),
                     payload,
                     sender,
                 }),
@@ -548,8 +522,22 @@ impl ManagerClient {
             eyre::bail!("process manager has shutdown");
         }
 
+        tracing::debug!(
+            target = format!("process-{}", self.id),
+            "waiting for process {:?} to be available...",
+            proc
+        );
         match receiver.await {
-            Ok(id) => Ok(id),
+            Ok(id) => {
+                tracing::debug!(
+                    target = format!("process-{}", self.id),
+                    "resolved process {:?} to be {}",
+                    proc,
+                    id
+                );
+
+                Ok(id)
+            }
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
     }
@@ -581,7 +569,7 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
     start_process_manager_with_catalog(options, catalog).await
 }
 
-async fn start_process_manager_with_catalog(
+pub async fn start_process_manager_with_catalog(
     options: Options,
     catalog: Catalog,
 ) -> eyre::Result<ManagerClient> {
@@ -596,32 +584,21 @@ async fn start_process_manager_with_catalog(
     };
 
     let mgr_client = client.clone();
+    let notify = mgr_client.notify.clone();
 
-    tokio::spawn(async move {
-        let notify = mgr_client.notify.clone();
-        if options.db == "in-mem" {
-            match ChunkContainer::load(InMemoryStorage::new()) {
-                Err(e) => {
-                    tracing::error!("failed to load in-memory storage: {}", e);
-                }
-
-                Ok(container) => {
-                    process_manager(options, mgr_client, catalog, container, queue).await
-                }
-            }
-        } else {
-            match load_fs_chunk_container(&options) {
-                Err(e) => {
-                    tracing::error!("failed to load filesystem-based storage: {}", e);
-                }
-
-                Ok(container) => {
-                    process_manager(options, mgr_client, catalog, container, queue).await
-                }
-            }
-        }
-        notify.notify_one();
-    });
+    if options.db == "in_mem" {
+        let container = ChunkContainer::load(InMemoryStorage::new())?;
+        tokio::spawn(async move {
+            process_manager(options, mgr_client, catalog, container, queue).await;
+            notify.notify_one();
+        });
+    } else {
+        let container = load_fs_chunk_container(&options)?;
+        tokio::spawn(async move {
+            process_manager(options, mgr_client, catalog, container, queue).await;
+            notify.notify_one();
+        });
+    }
 
     Ok(client)
 }
@@ -673,7 +650,6 @@ async fn process_manager<S>(
 }
 
 fn spawn_raw<S, F>(
-    options: Options,
     client: ManagerClient,
     runtime: Runtime<S>,
     handle: Handle,
@@ -690,7 +666,6 @@ where
         queue: proc_queue,
         client: client.clone(),
         handle,
-        options,
     };
 
     let sender = client.inner.clone();

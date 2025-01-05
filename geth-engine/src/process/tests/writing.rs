@@ -3,7 +3,6 @@ use crate::process::reading::ReaderClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
-use bytes::{Buf, Bytes};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
 use serde::{Deserialize, Serialize};

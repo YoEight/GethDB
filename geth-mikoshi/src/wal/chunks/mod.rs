@@ -1,14 +1,13 @@
-use bytes::{Buf, Bytes, BytesMut};
+use bytes::BytesMut;
 use std::collections::BTreeMap;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};
 
 use crate::constants::{CHUNK_FOOTER_SIZE, CHUNK_HEADER_SIZE, CHUNK_SIZE};
-use crate::storage::{FileCategory, FileId, Storage};
-use crate::wal::chunks::chunk::{Chunk, ChunkInfo};
+use crate::storage::{FileCategory, Storage};
+use crate::wal::chunks::chunk::ChunkInfo;
 use crate::wal::chunks::footer::{ChunkFooter, FooterFlags};
 use crate::wal::chunks::header::ChunkHeader;
-use crate::wal::{LogEntries, LogEntry, LogReceipt, WriteAheadLog};
 
 mod chunk;
 mod footer;
@@ -16,6 +15,8 @@ mod header;
 
 #[cfg(test)]
 mod tests;
+
+pub use chunk::Chunk;
 
 #[derive(Copy, Clone, Debug)]
 pub struct Chunks;
@@ -123,7 +124,7 @@ impl<S> ChunkContainer<S> {
         Ok(None)
     }
 
-    pub fn new(&self, buffer: &mut BytesMut, position: u64) -> eyre::Result<Chunk>
+    pub fn new_chunk(&self, buffer: &mut BytesMut, position: u64) -> eyre::Result<Chunk>
     where
         S: Storage,
     {
@@ -159,116 +160,5 @@ impl<S> ChunkContainer<S> {
 
     pub fn storage(&self) -> &S {
         &self.storage
-    }
-}
-
-pub struct ChunkBasedWAL<S> {
-    buffer: BytesMut,
-    container: ChunkContainer<S>,
-    writer: u64,
-}
-
-impl<S> ChunkBasedWAL<S>
-where
-    S: Storage + 'static,
-{
-    pub fn new(container: ChunkContainer<S>) -> io::Result<Self> {
-        let mut buffer = BytesMut::new();
-        let mut writer = 0u64;
-        let storage = container.storage();
-
-        if !storage.exists(FileId::writer_chk())? {
-            flush_writer_chk(storage, writer)?;
-        } else {
-            writer = container
-                .storage()
-                .read_from(FileId::writer_chk(), 0, 8)?
-                .get_u64_le();
-        }
-
-        Ok(Self {
-            buffer,
-            container,
-            writer,
-        })
-    }
-}
-
-fn flush_writer_chk<S: Storage>(storage: &S, log_pos: u64) -> io::Result<()> {
-    storage.write_to(
-        FileId::writer_chk(),
-        0,
-        Bytes::copy_from_slice(log_pos.to_le_bytes().as_slice()),
-    )
-}
-
-impl<S> WriteAheadLog for ChunkBasedWAL<S>
-where
-    S: Storage + 'static,
-{
-    fn append(&mut self, mut entries: &mut LogEntries) -> eyre::Result<LogReceipt> {
-        let mut position = self.writer;
-        let starting_position = position;
-        let storage = self.container.storage();
-
-        let mut chunk = self.container.ongoing()?;
-        while let Some(entry) = entries.next() {
-            let entry_size = entry.size();
-            let projected_next_logical_position = entry_size as u64 + position;
-
-            // Chunk is full, and we need to flush previous data we accumulated. We also create a new
-            // chunk for next writes.
-            if !chunk.contains_log_position(projected_next_logical_position) {
-                let remaining_space = chunk.remaining_space_from(position);
-                chunk = self.container.new(&mut self.buffer, position)?;
-                position += remaining_space;
-            }
-
-            let record = entry.commit(&mut self.buffer, position);
-            let local_offset = chunk.raw_position(position);
-            position += entry_size as u64;
-            storage.write_to(chunk.file_id(), local_offset, record)?;
-
-            self.writer = position;
-        }
-
-        flush_writer_chk(storage, self.writer)?;
-
-        Ok(LogReceipt {
-            start_position: starting_position,
-            next_position: self.writer,
-        })
-    }
-
-    fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
-        let chunk = if let Some(chunk) = self.container.find(position)? {
-            chunk
-        } else {
-            eyre::bail!("log position {} not found", position);
-        };
-
-        let storage = self.container.storage();
-
-        let local_offset = chunk.raw_position(position);
-        let record_size = storage
-            .read_from(chunk.file_id(), local_offset, 4)?
-            .get_u32_le() as usize;
-
-        let record_bytes = storage.read_from(chunk.file_id(), local_offset + 4, record_size)?;
-
-        let post_record_size = storage
-            .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
-            .get_u32_le() as usize;
-
-        debug_assert_eq!(
-            record_size, post_record_size,
-            "pre and post record size don't match!"
-        );
-
-        Ok(LogEntry::get(record_bytes))
-    }
-
-    fn write_position(&self) -> u64 {
-        self.writer
     }
 }

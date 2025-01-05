@@ -21,8 +21,8 @@ pub struct LogEntries {
     revision: u64,
 }
 
-impl LogEntries {
-    pub fn new() -> Self {
+impl Default for LogEntries {
+    fn default() -> Self {
         Self {
             indexes: vec![],
             committed: Vec::with_capacity(32),
@@ -32,8 +32,14 @@ impl LogEntries {
             revision: 0,
         }
     }
+}
 
-    pub fn next(&mut self) -> Option<Entry<'_>> {
+impl LogEntries {
+    pub fn new() -> Self {
+        Self::default()
+    }
+
+    pub fn next_entry(&mut self) -> Option<Entry<'_>> {
         let propose = self.events.next()?;
         let ident = self.ident.clone();
         let current_revision = self.revision;
@@ -76,7 +82,7 @@ pub struct Entry<'a> {
     event: Propose,
 }
 
-impl<'a> Entry<'a> {
+impl Entry<'_> {
     pub fn size(&self) -> usize {
         size_of::<u32>() // entry size
             + size_of::<u64>() // logical position
@@ -141,7 +147,7 @@ pub trait WriteAheadLog {
     fn write_position(&self) -> u64;
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct LogEntry {
     pub position: u64,
     pub r#type: u8,
@@ -176,28 +182,28 @@ impl LogEntry {
     }
 }
 
-impl Into<Record> for LogEntry {
-    fn into(mut self) -> Record {
-        let revision = self.payload.get_u64_le();
-        let stream_name_len = self.payload.get_u16_le() as usize;
+impl From<LogEntry> for Record {
+    fn from(mut entry: LogEntry) -> Record {
+        let revision = entry.payload.get_u64_le();
+        let stream_name_len = entry.payload.get_u16_le() as usize;
         let stream_name = unsafe {
-            String::from_utf8_unchecked(self.payload.copy_to_bytes(stream_name_len).to_vec())
+            String::from_utf8_unchecked(entry.payload.copy_to_bytes(stream_name_len).to_vec())
         };
 
-        let id = Uuid::from_u128_le(self.payload.get_u128_le());
-        let type_len = self.payload.get_u16_le() as usize;
+        let id = Uuid::from_u128_le(entry.payload.get_u128_le());
+        let type_len = entry.payload.get_u16_le() as usize;
         let r#type =
-            unsafe { String::from_utf8_unchecked(self.payload.copy_to_bytes(type_len).to_vec()) };
+            unsafe { String::from_utf8_unchecked(entry.payload.copy_to_bytes(type_len).to_vec()) };
 
-        self.payload.advance(size_of::<u32>()); // skip the payload size
+        entry.payload.advance(size_of::<u32>()); // skip the payload size
 
         Record {
             id,
             r#type,
             stream_name,
-            position: Position(self.position),
+            position: Position(entry.position),
             revision,
-            data: self.payload,
+            data: entry.payload,
         }
     }
 }

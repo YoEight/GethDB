@@ -83,7 +83,7 @@ impl ReaderClient {
             .await?;
 
         if let Some(resp) = mailbox.recv().await {
-            if let Some(resp) = resp.try_into().ok() {
+            if let Ok(resp) = resp.try_into() {
                 match resp {
                     ReadResponses::Error => {
                         eyre::bail!(
@@ -118,7 +118,7 @@ impl ReaderClient {
             .request(self.target, ReadRequests::ReadAt { position }.into())
             .await?;
 
-        if let Some(resp) = resp.payload.try_into().ok() {
+        if let Ok(resp) = resp.payload.try_into() {
             match resp {
                 ReadResponses::Error => {
                     eyre::bail!("unexpected error when reading from the reader process");

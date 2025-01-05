@@ -33,13 +33,13 @@ where
         })
     }
 
-    pub fn append(&mut self, mut entries: &mut LogEntries) -> eyre::Result<LogReceipt> {
+    pub fn append(&mut self, entries: &mut LogEntries) -> eyre::Result<LogReceipt> {
         let mut position = self.writer;
         let starting_position = position;
         let storage = self.container.storage();
 
         let mut chunk = self.container.ongoing()?;
-        while let Some(entry) = entries.next() {
+        while let Some(entry) = entries.next_entry() {
             let entry_size = entry.size();
             let projected_next_logical_position = entry_size as u64 + position;
 
@@ -47,7 +47,7 @@ where
             // chunk for next writes.
             if !chunk.contains_log_position(projected_next_logical_position) {
                 let remaining_space = chunk.remaining_space_from(position);
-                chunk = self.container.new(&mut self.buffer, position)?;
+                chunk = self.container.new_chunk(&mut self.buffer, position)?;
                 position += remaining_space;
             }
 
@@ -65,6 +65,10 @@ where
             start_position: starting_position,
             next_position: self.writer,
         })
+    }
+
+    pub fn writer_position(&self) -> u64 {
+        self.writer
     }
 }
 

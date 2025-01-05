@@ -1,16 +1,18 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
+use crate::process::writing::WriterClient;
 use crate::process::{Item, ProcessRawEnv, Runtime};
-use bytes::{Buf, Bytes};
-use geth_common::{Direction, IteratorIO};
+use geth_common::{Direction, IteratorIO, Record};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
+use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
+use geth_mikoshi::wal::chunks::ChunkContainer;
+use geth_mikoshi::wal::LogReader;
 use std::cmp::min;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};
 use tokio::sync::mpsc::UnboundedSender;
-use tokio::task::JoinHandle;
 
 type RevisionCache = moka::sync::Cache<u64, u64>;
 
@@ -21,24 +23,25 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
-pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
-    let lsm = Lsm::load(
+    let mut lsm = Lsm::load(
         LsmSettings::default(),
         runtime.container().storage().clone(),
     )?;
 
-    // TODO - We need to rebuild the index upon start.
+    tracing::info!("rebuilding index...");
+    let revision_cache = rebuild_index(&mut lsm, &env, runtime.container().clone())?;
+    tracing::info!("index rebuilt successfully");
 
     let lsm = Arc::new(RwLock::new(lsm));
-    let revision_cache = new_revision_cache();
 
-    while let Some(item) = env.queue.recv().ok() {
+    while let Ok(item) = env.queue.recv() {
         match item {
             Item::Mail(mail) => {
-                if let Some(req) = mail.payload.try_into().ok() {
+                if let Ok(req) = mail.payload.try_into() {
                     match req {
                         IndexRequests::Store { entries } => {
                             let last = entries.last().copied().unwrap();
@@ -106,22 +109,22 @@ where
             }
 
             Item::Stream(stream) => {
-                if let Some(IndexRequests::Read {
+                if let Ok(IndexRequests::Read {
                     key,
                     start,
                     count,
                     dir,
-                }) = stream.payload.try_into().ok()
+                }) = stream.payload.try_into()
                 {
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
-                    let _: JoinHandle<eyre::Result<()>> = env.handle.spawn_blocking(move || {
+                    env.handle.spawn_blocking(move || {
                         if stream_indexed_read(
                             stream_lsm,
                             stream_cache,
                             key,
                             start,
-                            count as usize,
+                            count,
                             dir,
                             &stream.sender,
                         )
@@ -130,7 +133,7 @@ where
                             let _ = stream.sender.send(IndexResponses::Error.into());
                         }
 
-                        Ok(())
+                        Ok::<_, eyre::Report>(())
                     });
                 }
             }
@@ -138,6 +141,37 @@ where
     }
 
     Ok(())
+}
+
+fn rebuild_index<S>(
+    lsm: &mut Lsm<S>,
+    env: &ProcessRawEnv,
+    container: ChunkContainer<S>,
+) -> eyre::Result<RevisionCache>
+where
+    S: Storage + Send + Sync + 'static,
+{
+    let reader = LogReader::new(container);
+    let writer_checkpoint = env
+        .handle
+        .block_on(WriterClient::from(env)?.get_write_position())?;
+
+    let cache = new_revision_cache();
+    let mut entries = reader.entries(0, writer_checkpoint);
+
+    while let Some(entry) = entries.next()? {
+        if entry.r#type != 0 {
+            continue;
+        }
+
+        let record: Record = entry.into();
+        let key = mikoshi_hash(&record.stream_name);
+
+        lsm.put_single(key, record.revision, record.position.raw())?;
+        cache.insert(key, record.revision);
+    }
+
+    Ok(cache)
 }
 
 fn key_latest_revision<S>(
@@ -178,27 +212,6 @@ where
     Ok(())
 }
 
-struct StoreEntries {
-    key: u64,
-    entries: Bytes,
-}
-
-impl Iterator for StoreEntries {
-    type Item = (u64, u64, u64);
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if !self.entries.has_remaining() {
-            return None;
-        }
-
-        Some((
-            self.key,
-            self.entries.get_u64_le(),
-            self.entries.get_u64_le(),
-        ))
-    }
-}
-
 fn stream_indexed_read<S>(
     lsm: Arc<RwLock<Lsm<S>>>,
     cache: RevisionCache,
@@ -217,10 +230,8 @@ where
 
     let current_revision = key_latest_revision(&lsm, cache, key)?;
 
-    if current_revision.is_deleted() {
-        if stream.send(IndexResponses::StreamDeleted.into()).is_err() {
-            return Ok(());
-        }
+    if current_revision.is_deleted() && stream.send(IndexResponses::StreamDeleted.into()).is_err() {
+        return Ok(());
     }
 
     let mut iter: Box<dyn IteratorIO<Item = BlockEntry>> = match dir {

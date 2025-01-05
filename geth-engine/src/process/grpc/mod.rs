@@ -15,7 +15,11 @@ pub async fn start_server(env: ProcessEnv) -> Result<(), transport::Error> {
 
     let protocols = protocol::ProtocolImpl::new(env.client);
 
-    tracing::info!("GethDB is listening on {}", addr);
+    tracing::info!(
+        "GethDB is listening on {} using database '{}'",
+        addr,
+        env.options.db
+    );
 
     Server::builder()
         .add_service(ProtocolServer::new(protocols))

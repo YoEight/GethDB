@@ -9,22 +9,22 @@ use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::LogReader;
 
-pub fn run<S>(runtime: Runtime<S>, mut env: ProcessRawEnv) -> eyre::Result<()>
+pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
     let reader = LogReader::new(runtime.container().clone());
-    let mut index_client = IndexClient::resolve_raw(&mut env)?;
+    let mut index_client = IndexClient::resolve_raw(&env)?;
 
-    while let Some(item) = env.queue.recv().ok() {
+    while let Ok(item) = env.queue.recv() {
         match item {
             Item::Stream(stream) => {
-                if let Some(ReadRequests::Read {
+                if let Ok(ReadRequests::Read {
                     ident,
                     start,
                     direction,
                     count,
-                }) = stream.payload.try_into().ok()
+                }) = stream.payload.try_into()
                 {
                     let index_stream = env.handle.block_on(index_client.read(
                         mikoshi_hash(ident),
@@ -76,7 +76,7 @@ where
             }
 
             Item::Mail(mail) => {
-                if let Some(ReadRequests::ReadAt { position }) = mail.payload.try_into().ok() {
+                if let Ok(ReadRequests::ReadAt { position }) = mail.payload.try_into() {
                     let entry = reader.read_at(position)?;
                     env.client.reply(
                         mail.origin,

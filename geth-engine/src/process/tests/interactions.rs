@@ -1,6 +1,7 @@
 use crate::{
     process::{
-        messages::TestSinkResponses, start_process_manager_with_catalog, Catalog, Mail, Proc,
+        messages::TestSinkResponses, sink::SinkClient, start_process_manager_with_catalog, Catalog,
+        Mail, Proc,
     },
     Options,
 };
@@ -37,6 +38,21 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
         assert_eq!(echo_proc_id, resp.origin);
         assert_eq!(count, sink_response(resp));
 
+        count += 1;
+    }
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_streaming() -> eyre::Result<()> {
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let sink = SinkClient::resolve(manager.clone()).await?;
+    let mut streaming = sink.stream_from(0, 10).await?;
+    let mut count = 0u64;
+
+    while let Some(value) = streaming.next().await? {
+        assert_eq!(value, count);
         count += 1;
     }
 
