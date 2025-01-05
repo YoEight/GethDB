@@ -6,8 +6,9 @@ use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
 use geth_common::{Direction, ReadCompleted};
 use geth_domain::index::BlockEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
+use tracing::instrument;
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct IndexClient {
     target: ProcId,
     inner: ManagerClient,
@@ -19,21 +20,16 @@ impl IndexClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        tracing::debug!("waiting for the index process to be available...");
         let proc_id = env.client.wait_for(Proc::Indexing).await?;
-        tracing::debug!("index process available on {}", proc_id);
-
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        tracing::debug!("waiting the index process to be available...");
         let proc_id = env.handle.block_on(env.client.wait_for(Proc::Indexing))?;
-        tracing::debug!("index process available on {}", proc_id);
-
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
     pub async fn read(
         &mut self,
         key: u64,
@@ -80,7 +76,9 @@ impl IndexClient {
         eyre::bail!("index process is no longer reachable");
     }
 
+    #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc))]
     pub async fn store(&mut self, entries: Vec<BlockEntry>) -> eyre::Result<()> {
+        tracing::debug!("storing entries to the index process...");
         let resp = self
             .inner
             .request(
@@ -95,7 +93,10 @@ impl IndexClient {
                     eyre::bail!("error when storing entries to the index process");
                 }
 
-                IndexResponses::Committed => return Ok(()),
+                IndexResponses::Committed => {
+                    tracing::debug!("completed storing entries successfully");
+                    return Ok(());
+                }
 
                 _ => {
                     eyre::bail!("unexpected response when storing entries to the index process");
@@ -106,7 +107,10 @@ impl IndexClient {
         eyre::bail!("unexpected message from the index process");
     }
 
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
     pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
+        tracing::debug!("looking up the latest revision for key: {}", key);
+
         let resp = self
             .inner
             .request(
@@ -121,7 +125,10 @@ impl IndexClient {
                     eyre::bail!("error when fetching the latest revision from the index process");
                 }
 
-                IndexResponses::CurrentRevision(rev) => return Ok(rev),
+                IndexResponses::CurrentRevision(rev) => {
+                    tracing::debug!("latest revision for key: {} is: {:?}", key, rev);
+                    return Ok(rev);
+                }
 
                 _ => {
                     eyre::bail!("unexpected response when fetching the latest revision from the index process");

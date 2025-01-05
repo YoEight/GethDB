@@ -6,6 +6,7 @@ use geth_common::{
     AppendError, AppendStreamCompleted, ExpectedRevision, Position, Propose, WriteResult,
     WrongExpectedRevisionError,
 };
+use tracing::instrument;
 
 #[derive(Clone)]
 pub struct WriterClient {
@@ -23,12 +24,14 @@ impl WriterClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
+    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc))]
     pub async fn append(
         &self,
         stream: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
     ) -> eyre::Result<AppendStreamCompleted> {
+        tracing::debug!("sending append request to writer process {}", self.target);
         let resp = self
             .inner
             .request(
@@ -62,11 +65,15 @@ impl WriterClient {
                     start_position: start,
                     next_position: next,
                     next_expected_version,
-                } => Ok(AppendStreamCompleted::Success(WriteResult {
-                    next_expected_version,
-                    position: Position(start),
-                    next_logical_position: next,
-                })),
+                } => {
+                    tracing::debug!("completed successfully");
+
+                    Ok(AppendStreamCompleted::Success(WriteResult {
+                        next_expected_version,
+                        position: Position(start),
+                        next_logical_position: next,
+                    }))
+                }
 
                 _ => eyre::bail!("unexpected response when appending to stream: '{}'", stream),
             }
@@ -75,7 +82,13 @@ impl WriterClient {
         }
     }
 
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
     pub async fn get_write_position(&self) -> eyre::Result<u64> {
+        tracing::debug!(
+            "sending write position lookup request to writer process {}",
+            self.target
+        );
+
         let resp = self
             .inner
             .request(self.target, WriteRequests::GetWritePosition.into())
@@ -84,7 +97,10 @@ impl WriterClient {
         if let Ok(resp) = resp.payload.try_into() {
             match resp {
                 WriteResponses::Error => eyre::bail!("internal error when fetching write position"),
-                WriteResponses::WritePosition(p) => Ok(p),
+                WriteResponses::WritePosition(p) => {
+                    tracing::debug!("completed successfully");
+                    Ok(p)
+                }
                 _ => eyre::bail!(
                     "unexpected response when fetching write position from the writer process"
                 ),

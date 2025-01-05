@@ -45,9 +45,7 @@ impl SubscriptionClient {
     }
 
     pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        tracing::debug!("waiting for the pubsub process to be available...");
         let proc_id = env.handle.block_on(env.client.wait_for(Proc::PubSub))?;
-        tracing::debug!("pubsub process available on {}", proc_id);
         Ok(Self::new(proc_id, env.client.clone()))
     }
 

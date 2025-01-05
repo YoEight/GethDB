@@ -1,6 +1,5 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
-use crate::process::writing::WriterClient;
 use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::{Direction, IteratorIO, Record};
 use geth_domain::index::BlockEntry;
@@ -13,16 +12,19 @@ use std::cmp::min;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::instrument;
+use uuid::Uuid;
 
 type RevisionCache = moka::sync::Cache<u64, u64>;
 
 fn new_revision_cache() -> RevisionCache {
     moka::sync::Cache::<u64, u64>::builder()
         .max_capacity(10_000)
-        .name("revision-cache")
+        .name(&format!("revision-cache-{}", Uuid::new_v4()))
         .build()
 }
 
+#[instrument(skip(runtime, env), fields(origin = ?env.proc))]
 pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
@@ -33,7 +35,7 @@ where
     )?;
 
     tracing::info!("rebuilding index...");
-    let revision_cache = rebuild_index(&mut lsm, &env, runtime.container().clone())?;
+    let revision_cache = rebuild_index(&mut lsm, runtime.container().clone())?;
     tracing::info!("index rebuilt successfully");
 
     let lsm = Arc::new(RwLock::new(lsm));
@@ -143,19 +145,12 @@ where
     Ok(())
 }
 
-fn rebuild_index<S>(
-    lsm: &mut Lsm<S>,
-    env: &ProcessRawEnv,
-    container: ChunkContainer<S>,
-) -> eyre::Result<RevisionCache>
+fn rebuild_index<S>(lsm: &mut Lsm<S>, container: ChunkContainer<S>) -> eyre::Result<RevisionCache>
 where
     S: Storage + Send + Sync + 'static,
 {
     let reader = LogReader::new(container);
-    let writer_checkpoint = env
-        .handle
-        .block_on(WriterClient::from(env)?.get_write_position())?;
-
+    let writer_checkpoint = reader.get_writer_checkpoint()?;
     let cache = new_revision_cache();
     let mut entries = reader.entries(0, writer_checkpoint);
 

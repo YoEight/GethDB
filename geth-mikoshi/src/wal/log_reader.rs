@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::storage::Storage;
+use crate::storage::{FileId, Storage};
 use crate::wal::chunks::ChunkContainer;
 use crate::wal::LogEntry;
 use bytes::Buf;
@@ -12,7 +12,10 @@ pub struct LogReader<S> {
     container: ChunkContainer<S>,
 }
 
-impl<S> LogReader<S> {
+impl<S> LogReader<S>
+where
+    S: Storage,
+{
     pub fn new(container: ChunkContainer<S>) -> Self {
         Self { container }
     }
@@ -28,6 +31,13 @@ impl<S> LogReader<S> {
         };
 
         self.chunk_read_at(&chunk, position)
+    }
+
+    pub fn get_writer_checkpoint(&self) -> eyre::Result<u64> {
+        let storage = self.container.storage();
+        let mut position = storage.read_from(FileId::writer_chk(), 0, mem::size_of::<u64>())?;
+
+        Ok(position.get_u64_le())
     }
 
     pub fn entries(&self, start: u64, limit: u64) -> Entries<S> {

@@ -7,11 +7,12 @@ use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
 use std::sync::Arc;
+use std::thread;
 use std::time::Instant;
-use std::{io, thread};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Notify};
+use tracing::instrument;
 use uuid::Uuid;
 
 use crate::Options;
@@ -58,6 +59,7 @@ pub struct Mail {
 
 #[derive(Clone, Copy, PartialOrd, PartialEq, Eq, Ord, Hash, Debug)]
 pub enum Proc {
+    Root,
     Writing,
     Reading,
     Indexing,
@@ -240,6 +242,7 @@ where
                     let options = self.options.clone();
 
                     client.id = id;
+                    client.origin_proc = proc;
 
                     let running_proc = match proc {
                         Proc::Writing => {
@@ -256,6 +259,11 @@ where
 
                         Proc::PubSub => spawn(options, client, proc, subscription::run),
                         Proc::Grpc => spawn(options, client, proc, grpc::run),
+
+                        Proc::Root => {
+                            let _ = resp.send(0);
+                            return Ok(());
+                        }
 
                         #[cfg(test)]
                         Proc::Echo => spawn(options, client, proc, echo::run),
@@ -381,14 +389,16 @@ pub struct ProcessEnv {
 }
 
 pub struct ProcessRawEnv {
+    proc: Proc,
     queue: std::sync::mpsc::Receiver<Item>,
     client: ManagerClient,
     handle: Handle,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ManagerClient {
     id: ProcId,
+    origin_proc: Proc,
     pool: Pool<BufferManager>,
     inner: UnboundedSender<ManagerCommand>,
     notify: Arc<Notify>,
@@ -512,6 +522,7 @@ impl ManagerClient {
         Ok(())
     }
 
+    #[instrument(skip(self), fields(origin = ?self.origin_proc))]
     pub async fn wait_for(&self, proc: Proc) -> eyre::Result<ProcId> {
         let (resp, receiver) = oneshot::channel();
         if self
@@ -522,19 +533,11 @@ impl ManagerClient {
             eyre::bail!("process manager has shutdown");
         }
 
-        tracing::debug!(
-            target = format!("process-{}", self.id),
-            "waiting for process {:?} to be available...",
-            proc
-        );
+        tracing::debug!("waiting for process {:?} to be available...", proc,);
+
         match receiver.await {
             Ok(id) => {
-                tracing::debug!(
-                    target = format!("process-{}", self.id),
-                    "resolved process {:?} to be {}",
-                    proc,
-                    id
-                );
+                tracing::debug!("process {:?} resolved to be {}", proc, id);
 
                 Ok(id)
             }
@@ -578,6 +581,7 @@ pub async fn start_process_manager_with_catalog(
     let (sender, queue) = unbounded_channel();
     let client = ManagerClient {
         id: 0,
+        origin_proc: Proc::Root,
         pool: pool.clone(),
         inner: sender.clone(),
         notify: notify.clone(),
@@ -587,7 +591,9 @@ pub async fn start_process_manager_with_catalog(
     let notify = mgr_client.notify.clone();
 
     if options.db == "in_mem" {
-        let container = ChunkContainer::load(InMemoryStorage::new())?;
+        let storage = InMemoryStorage::new();
+        geth_mikoshi::storage::init(&storage)?;
+        let container = ChunkContainer::load(storage)?;
         tokio::spawn(async move {
             process_manager(options, mgr_client, catalog, container, queue).await;
             notify.notify_one();
@@ -603,9 +609,12 @@ pub async fn start_process_manager_with_catalog(
     Ok(client)
 }
 
-fn load_fs_chunk_container(options: &Options) -> io::Result<ChunkContainer<FileSystemStorage>> {
+fn load_fs_chunk_container(options: &Options) -> eyre::Result<ChunkContainer<FileSystemStorage>> {
     let storage = FileSystemStorage::new(options.db.clone().into())?;
-    ChunkContainer::load(storage)
+    geth_mikoshi::storage::init(&storage)?;
+
+    let container = ChunkContainer::load(storage)?;
+    Ok(container)
 }
 
 #[derive(Clone)]
@@ -663,6 +672,7 @@ where
     let id = client.id;
     let (proc_sender, proc_queue) = std::sync::mpsc::channel();
     let env = ProcessRawEnv {
+        proc,
         queue: proc_queue,
         client: client.clone(),
         handle,
