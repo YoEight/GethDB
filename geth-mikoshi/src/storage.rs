@@ -1,6 +1,6 @@
 use std::{fmt, io};
 
-use bytes::Bytes;
+use bytes::{BufMut, Bytes, BytesMut};
 use uuid::Uuid;
 
 pub use fs::FileSystemStorage;
@@ -90,4 +90,17 @@ pub trait Storage: Clone {
     fn list<C>(&self, category: C) -> io::Result<Vec<C::Item>>
     where
         C: FileCategory;
+}
+
+pub fn init<S>(storage: &S) -> eyre::Result<()>
+where
+    S: Storage,
+{
+    if !storage.exists(FileId::writer_chk())? {
+        let mut buffer = BytesMut::new();
+        buffer.put_u64_le(0);
+        storage.write_to(FileId::writer_chk(), 0, buffer.freeze())?;
+    }
+
+    Ok(())
 }

@@ -21,6 +21,9 @@ path = "../geth-mikoshi"
 [dependencies.geth-domain]
 path = "../geth-domain"
 
+[dependencies.geth-engine]
+path = "../geth-engine"
+
 [dependencies.tokio]
 version = "1"
 features = ["full"]
@@ -42,3 +45,4 @@ chrono = "0.4"
 bytes = "1.4.0"
 futures = "0.3"
 async-stream = "0.3.5"
+async-trait = "0.1"

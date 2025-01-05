@@ -5,17 +5,12 @@ use std::iter::once;
 use bytes::{Buf, BufMut, BytesMut};
 use uuid::Uuid;
 
-use geth_common::{IteratorIO, IteratorIOExt};
-use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::{FileId, Storage};
-use geth_mikoshi::wal::{WALRef, WriteAheadLog};
-
-use crate::binary::models::Event;
 use crate::index::block::BlockEntry;
 use crate::index::mem_table::MemTable;
 use crate::index::merge::Merge;
 use crate::index::ss_table::SsTable;
-use crate::parse_event_io;
+use geth_common::{IteratorIO, IteratorIOExt};
+use geth_mikoshi::storage::{FileId, Storage};
 
 pub const LSM_DEFAULT_MEM_TABLE_SIZE: usize = 4_096;
 pub const LSM_BASE_SSTABLE_BLOCK_COUNT: usize = 4;
@@ -97,30 +92,6 @@ where
         Ok(lsm)
     }
 
-    pub fn rebuild<WAL: WriteAheadLog>(&mut self, wal: &WALRef<WAL>) -> io::Result<()> {
-        let records = wal.entries(self.logical_position).map_io(|entry| {
-            let event = parse_event_io(&entry.payload)?;
-
-            match event.event.unwrap() {
-                Event::RecordedEvent(event) => Ok((
-                    mikoshi_hash(&event.stream_name),
-                    event.revision,
-                    entry.position,
-                )),
-
-                Event::StreamDeleted(event) => {
-                    Ok((mikoshi_hash(&event.stream_name), u64::MAX, entry.position))
-                }
-            }
-        });
-
-        self.put(records)?;
-
-        self.logical_position = wal.write_position();
-
-        Ok(())
-    }
-
     pub fn ss_table_count(&self) -> usize {
         self.levels.values().map(|ts| ts.len()).sum()
     }
@@ -147,6 +118,8 @@ where
     {
         while let Some((key, revision, position)) = values.next()? {
             self.active_table.put(key, revision, position);
+            // TODO - we shouldn't update the logical position when pushing to memtables. We must
+            // update logical_position only when flushing entries to ss_tables.
             self.logical_position = position;
         }
 

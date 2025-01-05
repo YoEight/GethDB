@@ -1,5 +1,3 @@
-use std::io;
-
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use prost::Message;
@@ -13,7 +11,6 @@ use crate::binary::models::Events;
 mod append_propose;
 pub mod binary;
 pub mod index;
-mod iter;
 
 #[derive(Copy, Clone, Eq, PartialEq)]
 pub enum ExpectedRevision {
@@ -55,8 +52,4 @@ impl RecordedEvent {
 pub fn parse_event(payload: &[u8]) -> eyre::Result<Events> {
     let evt = Events::decode(payload)?;
     Ok(evt)
-}
-
-pub fn parse_event_io(payload: &[u8]) -> io::Result<Events> {
-    parse_event(payload).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
 }
