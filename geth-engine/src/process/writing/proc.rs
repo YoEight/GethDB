@@ -4,10 +4,11 @@ use crate::process::messages::{WriteRequests, WriteResponses};
 use crate::process::subscription::SubscriptionClient;
 use crate::process::{Item, ProcessRawEnv, Runtime};
 use geth_common::{ExpectedRevision, WrongExpectedRevisionError};
-use geth_domain::index::BlockEntry;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
-use geth_mikoshi::wal::{LogEntries, LogWriter};
+use geth_mikoshi::wal::LogWriter;
+
+use super::entries::ProposeEntries;
 
 pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
 where
@@ -18,7 +19,6 @@ where
     let mut log_writer = LogWriter::load(runtime.container().clone(), buffer.split())?;
     let mut index_client = IndexClient::resolve_raw(&env)?;
     let sub_client = SubscriptionClient::resolve_raw(&env)?;
-    let mut entries = LogEntries::new();
     std::mem::drop(buffer);
 
     while let Ok(item) = env.queue.recv() {
@@ -79,19 +79,9 @@ where
                             }
 
                             let revision = current_revision.next_revision();
-                            let count = events.len() as u64;
-                            entries.begin(ident, revision, events);
+                            let mut entries = ProposeEntries::new(ident, revision, events);
                             let receipt = log_writer.append(&mut entries)?;
-                            let index_entries = entries
-                                .complete()
-                                .map(|(k, r, p)| BlockEntry {
-                                    key: k,
-                                    revision: r,
-                                    position: p,
-                                })
-                                .collect();
-
-                            env.handle.block_on(index_client.store(index_entries))?;
+                            env.handle.block_on(index_client.store(entries.indexes))?;
 
                             env.client.reply(
                                 mail.origin,
@@ -100,14 +90,13 @@ where
                                     start_position: receipt.start_position,
                                     next_position: receipt.next_position,
                                     next_expected_version: ExpectedRevision::Revision(
-                                        revision + count,
+                                        entries.revision,
                                     ),
                                 }
                                 .into(),
                             )?;
 
-                            let log_entries = entries.committed_events();
-                            env.handle.block_on(sub_client.push(log_entries))?;
+                            env.handle.block_on(sub_client.push(entries.committed))?;
 
                             continue;
                         }
