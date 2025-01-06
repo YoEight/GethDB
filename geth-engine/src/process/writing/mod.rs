@@ -1,4 +1,5 @@
 mod client;
+mod entries;
 mod proc;
 
 pub use client::WriterClient;

@@ -52,13 +52,19 @@ where
 
         let local_offset = chunk.raw_position(position);
         let record_size = storage
-            .read_from(chunk.file_id(), local_offset, 4)?
+            .read_from(chunk.file_id(), local_offset, mem::size_of::<u32>())?
             .get_u32_le() as usize;
 
-        let record_bytes = storage.read_from(chunk.file_id(), local_offset + 4, record_size)?;
+        let record_offset = local_offset + mem::size_of::<u32>() as u64;
+        let record_bytes = storage.read_from(chunk.file_id(), record_offset, record_size)?;
 
+        let post_record_size_offset = record_offset + record_size as u64;
         let post_record_size = storage
-            .read_from(chunk.file_id(), local_offset + 4 + record_size as u64, 4)?
+            .read_from(
+                chunk.file_id(),
+                post_record_size_offset,
+                mem::size_of::<u32>(),
+            )?
             .get_u32_le() as usize;
 
         debug_assert_eq!(

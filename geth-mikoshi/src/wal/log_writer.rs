@@ -1,8 +1,18 @@
 use crate::storage::{FileId, Storage};
 use crate::wal::chunks::ChunkContainer;
-use crate::wal::{LogEntries, LogReceipt};
-use bytes::{Buf, Bytes, BytesMut};
+use crate::wal::LogReceipt;
+use bytes::{Buf, BufMut, Bytes, BytesMut};
 use std::io;
+
+use super::{LogEntries, LogEntry};
+
+const ENTRY_PREFIX_SIZE: usize = size_of::<u32>() // pre-entry size
+    + ENTRY_HEADER_SIZE;
+
+const ENTRY_HEADER_SIZE: usize = size_of::<u64>() // log position
+    + size_of::<u8>(); // log type
+
+const ENTRY_META_SIZE: usize = ENTRY_PREFIX_SIZE + size_of::<u32>(); // post-entry size;
 
 pub struct LogWriter<S> {
     container: ChunkContainer<S>,
@@ -33,15 +43,19 @@ where
         })
     }
 
-    pub fn append(&mut self, entries: &mut LogEntries) -> eyre::Result<LogReceipt> {
+    pub fn append<E>(&mut self, entries: &mut E) -> eyre::Result<LogReceipt>
+    where
+        E: LogEntries,
+    {
         let mut position = self.writer;
         let starting_position = position;
         let storage = self.container.storage();
 
         let mut chunk = self.container.ongoing()?;
-        while let Some(entry) = entries.next_entry() {
-            let entry_size = entry.size();
-            let projected_next_logical_position = entry_size as u64 + position;
+        while entries.move_next() {
+            let entry_size = entries.current_entry_size();
+            let actual_size = entry_size + ENTRY_META_SIZE;
+            let projected_next_logical_position = actual_size as u64 + position;
 
             // Chunk is full, and we need to flush previous data we accumulated. We also create a new
             // chunk for next writes.
@@ -51,10 +65,28 @@ where
                 position += remaining_space;
             }
 
-            let record = entry.commit(&mut self.buffer, position);
+            let reported_size = (entry_size + ENTRY_HEADER_SIZE) as u32;
+            self.buffer.reserve(actual_size);
+            self.buffer.put_u32_le(reported_size);
+            self.buffer.put_u64_le(position);
+            self.buffer.put_u8(0);
+            let mut payload_buffer = self.buffer.split_off(ENTRY_PREFIX_SIZE);
+
+            entries.write_current_entry(&mut payload_buffer, position);
+            payload_buffer.put_u32_le(reported_size);
+            self.buffer.unsplit(payload_buffer);
+            let record = self.buffer.split().freeze();
+            let payload = record.slice(ENTRY_PREFIX_SIZE..record.len() - size_of::<u32>());
             let local_offset = chunk.raw_position(position);
-            position += entry_size as u64;
+            let entry = LogEntry {
+                position,
+                r#type: 0,
+                payload,
+            };
+
+            position += actual_size as u64;
             storage.write_to(chunk.file_id(), local_offset, record)?;
+            entries.commit(entry);
 
             self.writer = position;
         }
