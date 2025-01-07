@@ -5,10 +5,8 @@ use uuid::Uuid;
 
 pub use index::{Lsm, LsmSettings};
 
-pub use crate::append_propose::AppendProposes;
 use crate::binary::models::Events;
 
-mod append_propose;
 pub mod binary;
 pub mod index;
 

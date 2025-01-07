@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use std::any::type_name;
 use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
@@ -528,32 +529,41 @@ impl From<Direction> for i32 {
 
 pub struct WrongDirectionError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ContentType {
+    Unknown = 0,
+    Json = 1,
+    Binary = 2,
+}
+
+impl TryFrom<i32> for ContentType {
+    type Error = ();
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ContentType::Unknown),
+            1 => Ok(ContentType::Json),
+            _ => Err(()),
+        }
+    }
+}
+
+impl From<next::protocol::ContentType> for ContentType {
+    fn from(value: next::protocol::ContentType) -> Self {
+        match value {
+            next::protocol::ContentType::Unknown => Self::Unknown,
+            next::protocol::ContentType::Json => Self::Json,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Propose {
     pub id: Uuid,
-    pub r#type: String,
+    pub content_type: ContentType,
+    pub class: String,
     pub data: Bytes,
-}
-
-impl From<Propose> for operation_in::append_stream::Propose {
-    fn from(value: Propose) -> Self {
-        Self {
-            id: Some(value.id.into()),
-            class: value.r#type,
-            payload: value.data,
-            metadata: Default::default(),
-        }
-    }
-}
-
-impl From<operation_in::append_stream::Propose> for Propose {
-    fn from(value: operation_in::append_stream::Propose) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
-            r#type: value.class,
-            data: value.payload,
-        }
-    }
 }
 
 impl Propose {
@@ -565,16 +575,43 @@ impl Propose {
         let id = Uuid::new_v4();
         Ok(Self {
             id,
-            r#type: "application/json".to_string(),
+            content_type: ContentType::Json,
+            class: type_name::<A>().to_string(),
             data,
         })
+    }
+}
+
+impl From<Propose> for operation_in::append_stream::Propose {
+    fn from(value: Propose) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            content_type: value.content_type as i32,
+            class: value.class,
+            payload: value.data,
+            metadata: Default::default(),
+        }
+    }
+}
+
+impl From<operation_in::append_stream::Propose> for Propose {
+    fn from(value: operation_in::append_stream::Propose) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            content_type: next::protocol::ContentType::try_from(value.content_type)
+                .map(ContentType::from)
+                .unwrap_or(ContentType::Unknown),
+            class: value.class,
+            data: value.payload,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Record {
     pub id: Uuid,
-    pub r#type: String,
+    pub content_type: ContentType,
+    pub class: String,
     pub stream_name: String,
     pub position: Position,
     pub revision: u64,
@@ -585,8 +622,11 @@ impl From<next::protocol::RecordedEvent> for Record {
     fn from(value: next::protocol::RecordedEvent) -> Self {
         Self {
             id: value.id.unwrap().into(),
-            r#type: value.class,
+            content_type: next::protocol::ContentType::try_from(value.content_type)
+                .map(ContentType::from)
+                .unwrap_or(ContentType::Unknown),
             stream_name: value.stream_name,
+            class: value.class,
             position: Position(value.position),
             revision: value.revision,
             data: value.payload,
@@ -598,8 +638,9 @@ impl From<Record> for next::protocol::RecordedEvent {
     fn from(value: Record) -> Self {
         Self {
             id: Some(value.id.into()),
-            class: value.r#type,
+            content_type: value.content_type as i32,
             stream_name: value.stream_name,
+            class: value.class,
             position: value.position.raw(),
             revision: value.revision,
             payload: value.data,

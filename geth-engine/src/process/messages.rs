@@ -235,7 +235,10 @@ pub enum WriteRequests {
         events: Vec<Propose>,
     },
 
-    GetWritePosition,
+    Delete {
+        ident: String,
+        expected: ExpectedRevision,
+    },
 }
 
 #[derive(Debug)]

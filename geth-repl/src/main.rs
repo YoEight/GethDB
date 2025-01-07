@@ -311,7 +311,8 @@ fn load_events_from_file(path: impl AsRef<Path>) -> eyre::Result<Vec<Propose>> {
     for event in events {
         proposes.push(Propose {
             id: Uuid::new_v4(),
-            r#type: event.r#type,
+            content_type: geth_common::ContentType::Json,
+            class: event.r#type,
             data: serde_json::to_vec(&event.payload)?.into(),
         });
     }
