@@ -544,6 +544,7 @@ impl TryFrom<i32> for ContentType {
         match value {
             0 => Ok(ContentType::Unknown),
             1 => Ok(ContentType::Json),
+            2 => Ok(ContentType::Binary),
             _ => Err(()),
         }
     }
@@ -554,6 +555,7 @@ impl From<next::protocol::ContentType> for ContentType {
         match value {
             next::protocol::ContentType::Unknown => Self::Unknown,
             next::protocol::ContentType::Json => Self::Json,
+            next::protocol::ContentType::Binary => Self::Binary,
         }
     }
 }
@@ -1207,9 +1209,26 @@ pub enum DeleteStreamCompleted {
     Error(DeleteError),
 }
 
+impl DeleteStreamCompleted {
+    pub fn success(self) -> eyre::Result<WriteResult> {
+        if let Self::Success(r) = self {
+            return Ok(r);
+        }
+
+        eyre::bail!("stream deletion failed")
+    }
+}
+
 pub enum DeleteError {
+    StreamDeleted,
     WrongExpectedRevision(WrongExpectedRevisionError),
     NotLeaderException(EndPoint),
+}
+
+impl DeleteError {
+    pub fn is_stream_deleted(&self) -> bool {
+        matches!(self, DeleteError::StreamDeleted)
+    }
 }
 
 impl Display for DeleteError {
@@ -1222,8 +1241,13 @@ impl Display for DeleteError {
                     e.expected, e.current
                 )
             }
+
             DeleteError::NotLeaderException(e) => {
-                write!(f, "Not leader exception: {}:{}", e.host, e.port)
+                write!(f, "not leader exception: {}:{}", e.host, e.port)
+            }
+
+            DeleteError::StreamDeleted => {
+                write!(f, "stream deleted")
             }
         }
     }
@@ -1249,11 +1273,16 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
                         },
                     ))
                 }
+
                 operation_out::delete_stream_completed::error::Error::NotLeader(e) => {
                     DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
                         host: e.leader_host,
                         port: e.leader_port as u16,
                     }))
+                }
+
+                operation_out::delete_stream_completed::error::Error::StreamDeleted(_) => {
+                    DeleteStreamCompleted::Error(DeleteError::StreamDeleted)
                 }
             },
         }
@@ -1278,12 +1307,19 @@ impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
                                     e.into(),
                                 )
                             }
+
                             DeleteError::NotLeaderException(e) => {
                                 operation_out::delete_stream_completed::error::Error::NotLeader(
                                     operation_out::delete_stream_completed::error::NotLeader {
                                         leader_host: e.host,
                                         leader_port: e.port as u32,
                                     },
+                                )
+                            }
+
+                            DeleteError::StreamDeleted => {
+                                operation_out::delete_stream_completed::error::Error::StreamDeleted(
+                                    (),
                                 )
                             }
                         }),

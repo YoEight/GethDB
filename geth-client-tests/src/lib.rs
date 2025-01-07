@@ -2,6 +2,9 @@
 mod append_read_tests;
 
 #[cfg(test)]
+mod delete_tests;
+
+#[cfg(test)]
 pub mod tests {
     use fake::{Dummy, Fake};
     use serde::{Deserialize, Serialize};

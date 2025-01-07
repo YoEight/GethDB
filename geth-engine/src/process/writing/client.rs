@@ -3,8 +3,8 @@ use crate::process::{
     ManagerClient, Proc, ProcId, ProcessRawEnv,
 };
 use geth_common::{
-    AppendError, AppendStreamCompleted, ExpectedRevision, Position, Propose, WriteResult,
-    WrongExpectedRevisionError,
+    AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
+    Position, Propose, WriteResult, WrongExpectedRevisionError,
 };
 use tracing::instrument;
 
@@ -87,7 +87,7 @@ impl WriterClient {
         &self,
         stream: String,
         expected: ExpectedRevision,
-    ) -> eyre::Result<AppendStreamCompleted> {
+    ) -> eyre::Result<DeleteStreamCompleted> {
         tracing::debug!("sending delete request to writer process {}", self.target);
         let resp = self
             .inner
@@ -108,11 +108,11 @@ impl WriterClient {
                 }
 
                 WriteResponses::StreamDeleted => {
-                    Ok(AppendStreamCompleted::Error(AppendError::StreamDeleted))
+                    Ok(DeleteStreamCompleted::Error(DeleteError::StreamDeleted))
                 }
 
                 WriteResponses::WrongExpectedRevision { expected, current } => Ok(
-                    AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
+                    DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
                         WrongExpectedRevisionError { expected, current },
                     )),
                 ),
@@ -124,7 +124,7 @@ impl WriterClient {
                 } => {
                     tracing::debug!("completed successfully");
 
-                    Ok(AppendStreamCompleted::Success(WriteResult {
+                    Ok(DeleteStreamCompleted::Success(WriteResult {
                         next_expected_version,
                         position: Position(start),
                         next_logical_position: next,

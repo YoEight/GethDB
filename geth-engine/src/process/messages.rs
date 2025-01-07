@@ -1,4 +1,4 @@
-use geth_common::{Direction, ExpectedRevision, Propose};
+use geth_common::{Direction, ExpectedRevision, Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
 
@@ -224,7 +224,7 @@ pub enum ReadRequests {
 #[derive(Debug)]
 pub enum SubscribeRequests {
     Subscribe { ident: String },
-    Push { events: Vec<LogEntry> },
+    Push { events: Vec<Record> },
 }
 
 #[derive(Debug)]
@@ -276,7 +276,7 @@ pub enum ReadResponses {
 pub enum SubscribeResponses {
     Error,
     Confirmed,
-    Entry(LogEntry),
+    Record(Record),
 }
 
 #[derive(Debug)]

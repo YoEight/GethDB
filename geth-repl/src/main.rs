@@ -183,6 +183,13 @@ async fn main() -> eyre::Result<()> {
                                         DeleteError::NotLeaderException(_) => {
                                             println!("ERR: not leader exception when deleting stream '{}'", opts.stream);
                                         }
+
+                                        DeleteError::StreamDeleted => {
+                                            println!(
+                                                "ERR: stream '{}' was already deleted",
+                                                opts.stream
+                                            );
+                                        }
                                     },
 
                                     DeleteStreamCompleted::Success(p) => {

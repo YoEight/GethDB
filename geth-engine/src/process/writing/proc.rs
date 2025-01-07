@@ -37,129 +37,83 @@ where
 
             Item::Mail(mail) => {
                 if let Ok(req) = mail.payload.try_into() {
-                    match req {
+                    let (ident, expected, events) = match req {
                         WriteRequests::Write {
                             ident,
                             expected,
                             events,
-                        } => {
-                            let key = mikoshi_hash(&ident);
-                            let current_revision =
-                                env.handle.block_on(index_client.latest_revision(key))?;
-
-                            if current_revision.is_deleted() {
-                                env.client.reply(
-                                    mail.origin,
-                                    mail.correlation,
-                                    WriteResponses::StreamDeleted.into(),
-                                )?;
-
-                                continue;
-                            }
-
-                            if let Some(e) =
-                                optimistic_concurrency_check(expected, current_revision)
-                            {
-                                env.client.reply(
-                                    mail.origin,
-                                    mail.correlation,
-                                    WriteResponses::WrongExpectedRevision {
-                                        expected: e.expected,
-                                        current: e.current,
-                                    }
-                                    .into(),
-                                )?;
-
-                                continue;
-                            }
-
-                            let revision = current_revision.next_revision();
-                            let mut entries = ProposeEntries::new(ident, revision, events);
-                            let receipt = log_writer.append(&mut entries)?;
-                            env.handle.block_on(index_client.store(entries.indexes))?;
-
-                            env.client.reply(
-                                mail.origin,
-                                mail.correlation,
-                                WriteResponses::Committed {
-                                    start_position: receipt.start_position,
-                                    next_position: receipt.next_position,
-                                    next_expected_version: ExpectedRevision::Revision(
-                                        entries.revision,
-                                    ),
-                                }
-                                .into(),
-                            )?;
-
-                            env.handle.block_on(sub_client.push(entries.committed))?;
-
-                            continue;
-                        }
+                        } => (ident, expected, events),
 
                         WriteRequests::Delete { ident, expected } => {
-                            let key = mikoshi_hash(&ident);
-                            let current_revision =
-                                env.handle.block_on(index_client.latest_revision(key))?;
+                            tracing::debug!(
+                                "received stream deletion request for stream {}",
+                                ident
+                            );
 
-                            if current_revision.is_deleted() {
-                                env.client.reply(
-                                    mail.origin,
-                                    mail.correlation,
-                                    WriteResponses::StreamDeleted.into(),
-                                )?;
-
-                                continue;
-                            }
-
-                            if let Some(e) =
-                                optimistic_concurrency_check(expected, current_revision)
-                            {
-                                env.client.reply(
-                                    mail.origin,
-                                    mail.correlation,
-                                    WriteResponses::WrongExpectedRevision {
-                                        expected: e.expected,
-                                        current: e.current,
-                                    }
-                                    .into(),
-                                )?;
-
-                                continue;
-                            }
-
-                            let revision = current_revision.next_revision();
-                            let mut entries = ProposeEntries::new(
+                            (
                                 ident,
-                                revision,
+                                expected,
                                 vec![Propose {
                                     id: Uuid::new_v4(),
                                     content_type: ContentType::Binary,
                                     class: STREAM_DELETED.to_string(),
                                     data: Bytes::default(),
                                 }],
-                            );
-                            let receipt = log_writer.append(&mut entries)?;
-                            env.handle.block_on(index_client.store(entries.indexes))?;
-
-                            env.client.reply(
-                                mail.origin,
-                                mail.correlation,
-                                WriteResponses::Committed {
-                                    start_position: receipt.start_position,
-                                    next_position: receipt.next_position,
-                                    next_expected_version: ExpectedRevision::Revision(
-                                        entries.revision,
-                                    ),
-                                }
-                                .into(),
-                            )?;
-
-                            env.handle.block_on(sub_client.push(entries.committed))?;
-
-                            continue;
+                            )
                         }
+                    };
+
+                    let key = mikoshi_hash(&ident);
+                    let current_revision =
+                        env.handle.block_on(index_client.latest_revision(key))?;
+
+                    if current_revision.is_deleted() {
+                        env.client.reply(
+                            mail.origin,
+                            mail.correlation,
+                            WriteResponses::StreamDeleted.into(),
+                        )?;
+
+                        continue;
                     }
+
+                    if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
+                        env.client.reply(
+                            mail.origin,
+                            mail.correlation,
+                            WriteResponses::WrongExpectedRevision {
+                                expected: e.expected,
+                                current: e.current,
+                            }
+                            .into(),
+                        )?;
+
+                        continue;
+                    }
+
+                    let revision = current_revision.next_revision();
+                    let mut entries = ProposeEntries::new(ident, revision, events);
+                    let receipt = log_writer.append(&mut entries)?;
+                    env.handle.block_on(index_client.store(entries.indexes))?;
+
+                    env.client.reply(
+                        mail.origin,
+                        mail.correlation,
+                        WriteResponses::Committed {
+                            start_position: receipt.start_position,
+                            next_position: receipt.next_position,
+                            next_expected_version: ExpectedRevision::Revision(entries.revision),
+                        }
+                        .into(),
+                    )?;
+
+                    env.handle.block_on(sub_client.push(entries.committed))?;
+
+                    tracing::debug!("complete request, waiting for next message");
+                    continue;
                 }
+
+                tracing::warn!("request was not handled");
             }
         }
     }

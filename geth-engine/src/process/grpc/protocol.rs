@@ -1,5 +1,4 @@
 use futures::{pin_mut, Stream, StreamExt};
-use geth_mikoshi::wal::LogEntry;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
@@ -9,9 +8,10 @@ use tonic::{Request, Response, Status, Streaming};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
-    Direction, Operation, OperationIn, OperationOut, Reply, StreamRead, StreamReadError, Subscribe,
-    SubscriptionEvent, UnsubscribeReason,
+    Direction, Operation, OperationIn, OperationOut, Record, Reply, StreamRead, StreamReadError,
+    Subscribe, SubscriptionEvent, UnsubscribeReason,
 };
+use tracing::instrument;
 
 use crate::messages::ReadStreamCompleted;
 use crate::process::grpc::local::LocalStorage;
@@ -203,17 +203,15 @@ async fn execute_operation(
                 };
             }
 
-            Operation::DeleteStream(_) => {
-                not_implemented()?;
-                // return Err::<_, eyre::Report>(eyre::eyre!("not implemented"));
-                // let completed = client
-                //     .delete_stream(&params.stream_name, params.expected_revision)
-                //     .await?;
+            Operation::DeleteStream(params) => {
+                tracing::debug!("received deleting stream request");
+                let completed = internal.writer.delete(params.stream_name, params.expected_revision).await?;
+                tracing::debug!("delete stream request completed");
 
-                // yield OperationOut {
-                //     correlation,
-                //     reply: Reply::DeleteStreamCompleted(completed),
-                // };
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::DeleteStreamCompleted(completed),
+                };
             }
 
             Operation::ReadStream(params) => {
@@ -309,7 +307,7 @@ async fn execute_operation(
 
                 let mut position = 0u64;
                 let mut catching_up = true;
-                let mut history = Vec::<LogEntry>::new();
+                let mut history = Vec::<Record>::new();
                 let mut sub_stream = internal.sub.subscribe(&params.stream_name).await?;
                 let mut read_stream = match internal
                     .reader
@@ -366,11 +364,11 @@ async fn execute_operation(
                                     } else {
                                         catching_up = false;
 
-                                        for entry in history.drain(..) {
-                                            position = entry.position;
+                                        for record in history.drain(..) {
+                                            position = record.position.raw();
                                             yield OperationOut {
                                                 correlation,
-                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(entry.into())),
+                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
                                             };
                                         }
                                     }
@@ -391,21 +389,21 @@ async fn execute_operation(
                                     break;
                                 }
 
-                                Ok(entry) => {
-                                    if let Some(entry) = entry {
-                                        if entry.position <= position {
+                                Ok(record) => {
+                                    if let Some(record) = record {
+                                        if record.position.raw() <= position {
                                             continue;
                                         }
 
                                         if catching_up {
-                                            history.push(entry);
+                                            history.push(record);
                                             continue;
                                         }
 
-                                        position = entry.position;
+                                        position = record.position.raw();
                                         yield OperationOut {
                                             correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(entry.into())),
+                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
                                         };
                                     } else {
                                         yield OperationOut {

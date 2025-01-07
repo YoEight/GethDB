@@ -1,7 +1,7 @@
 use std::vec;
 
 use bytes::{BufMut, Bytes, BytesMut};
-use geth_common::Propose;
+use geth_common::{Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::{
     hashing::mikoshi_hash,
@@ -12,7 +12,7 @@ use crate::names::types::STREAM_DELETED;
 
 pub struct ProposeEntries {
     pub indexes: Vec<BlockEntry>,
-    pub committed: Vec<LogEntry>,
+    pub committed: Vec<Record>,
     events: vec::IntoIter<Propose>,
     current: Option<Propose>,
     ident: Bytes,
@@ -54,16 +54,16 @@ impl LogEntries for ProposeEntries {
 
     fn write_current_entry(&mut self, buffer: &mut bytes::BytesMut, position: u64) {
         let event = self.current.as_ref().unwrap();
-        let final_position = if event.class == STREAM_DELETED {
+        let final_revision = if event.class == STREAM_DELETED {
             u64::MAX
         } else {
-            position
+            self.revision
         };
 
         self.indexes.push(BlockEntry {
             key: self.key,
-            revision: self.revision,
-            position: final_position,
+            revision: final_revision,
+            position,
         });
 
         buffer.put_u64_le(self.revision);
@@ -73,7 +73,7 @@ impl LogEntries for ProposeEntries {
     }
 
     fn commit(&mut self, entry: LogEntry) {
-        self.committed.push(entry);
+        self.committed.push(entry.into());
         self.revision += 1;
     }
 }

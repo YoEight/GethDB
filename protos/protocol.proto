@@ -10,6 +10,7 @@ service Protocol {
 enum ContentType {
   UNKNOWN = 0;
   JSON = 1;
+  BINARY = 2;
 }
 
 message Ident {
@@ -271,6 +272,7 @@ message OperationOut {
       oneof error {
         NotLeader not_leader = 1;
         WrongExpectedRevision wrong_revision = 2;
+        google.protobuf.Empty stream_deleted = 3;
       }
 
       message NotLeader {

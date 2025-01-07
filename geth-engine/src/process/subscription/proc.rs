@@ -1,7 +1,7 @@
+use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
 use crate::process::{Item, ProcessEnv};
 use geth_common::Record;
-use geth_mikoshi::wal::LogEntry;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
@@ -17,19 +17,20 @@ impl Register {
         self.inner.entry(key).or_default().push(sender);
     }
 
-    fn publish(&mut self, ident: &String, payload: LogEntry) {
-        if let Some(senders) = self.inner.get_mut(ident) {
+    fn publish(&mut self, record: Record) {
+        if let Some(senders) = self.inner.get_mut(&record.stream_name) {
             senders.retain(|sender| {
                 sender
-                    .send(SubscribeResponses::Entry(payload.clone()).into())
+                    .send(SubscribeResponses::Record(record.clone()).into())
                     .is_ok()
+                    && record.class != STREAM_DELETED
             });
         }
 
         if let Some(senders) = self.inner.get_mut(ALL_IDENT) {
             senders.retain(|sender| {
                 sender
-                    .send(SubscribeResponses::Entry(payload.clone()).into())
+                    .send(SubscribeResponses::Record(record.clone()).into())
                     .is_ok()
             });
         }
@@ -73,13 +74,15 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                 if let Ok(req) = mail.payload.try_into() {
                     match req {
                         SubscribeRequests::Push { events } => {
-                            for event in events {
-                                if event.r#type != 0 {
-                                    continue;
-                                }
+                            // We don't really to confirm to the entity that sent us the push request to deliver those events first.
+                            env.client.reply(
+                                mail.origin,
+                                mail.correlation,
+                                SubscribeResponses::Confirmed.into(),
+                            )?;
 
-                                let record: Record = event.clone().into();
-                                reg.publish(&record.stream_name, event);
+                            for event in events {
+                                reg.publish(event);
                             }
                         }
 
