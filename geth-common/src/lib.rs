@@ -163,14 +163,15 @@ impl From<next::protocol::OperationOut> for OperationOut {
     }
 }
 
-impl From<OperationOut> for next::protocol::OperationOut {
-    fn from(value: OperationOut) -> Self {
+impl TryFrom<OperationOut> for next::protocol::OperationOut {
+    type Error = eyre::Report;
+    fn try_from(value: OperationOut) -> eyre::Result<Self> {
         let correlation = Some(value.correlation.into());
         let operation = match value.reply {
             Reply::AppendStreamCompleted(resp) => {
                 operation_out::Operation::AppendCompleted(resp.into())
             }
-            Reply::StreamRead(resp) => operation_out::Operation::StreamRead(resp.into()),
+            Reply::StreamRead(resp) => operation_out::Operation::StreamRead(resp.try_into()?),
             Reply::SubscriptionEvent(resp) => {
                 operation_out::Operation::SubscriptionEvent(resp.into())
             }
@@ -184,10 +185,10 @@ impl From<OperationOut> for next::protocol::OperationOut {
             Reply::ProgramObtained(resp) => operation_out::Operation::ProgramGot(resp.into()),
         };
 
-        Self {
+        Ok(Self {
             correlation,
             operation: Some(operation),
-        }
+        })
     }
 }
 
@@ -538,14 +539,14 @@ pub enum ContentType {
 }
 
 impl TryFrom<i32> for ContentType {
-    type Error = ();
+    type Error = eyre::Report;
 
     fn try_from(value: i32) -> Result<Self, Self::Error> {
         match value {
             0 => Ok(ContentType::Unknown),
             1 => Ok(ContentType::Json),
             2 => Ok(ContentType::Binary),
-            _ => Err(()),
+            x => eyre::bail!("unknown content type: {}", x),
         }
     }
 }
@@ -1065,10 +1066,31 @@ impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
     }
 }
 
+pub enum ReadStreamCompleted<A> {
+    StreamDeleted,
+    Unexpected(eyre::Report),
+    Success(A),
+}
+
+impl<A> ReadStreamCompleted<A> {
+    pub fn success(self) -> eyre::Result<A> {
+        match self {
+            ReadStreamCompleted::StreamDeleted => eyre::bail!("stream deleted"),
+            ReadStreamCompleted::Unexpected(e) => Err(e),
+            ReadStreamCompleted::Success(a) => Ok(a),
+        }
+    }
+
+    pub fn is_stream_deleted(&self) -> bool {
+        matches!(self, ReadStreamCompleted::StreamDeleted)
+    }
+}
+
 pub enum StreamRead {
     EndOfStream,
     EventAppeared(Record),
-    Error(StreamReadError),
+    StreamDeleted,
+    Unexpected(eyre::Report),
 }
 
 impl From<operation_out::StreamRead> for StreamRead {
@@ -1076,42 +1098,33 @@ impl From<operation_out::StreamRead> for StreamRead {
         match value.read_result.unwrap() {
             operation_out::stream_read::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
             operation_out::stream_read::ReadResult::EventAppeared(e) => {
-                StreamRead::EventAppeared(e.event.unwrap().into())
+                StreamRead::EventAppeared(e.into())
             }
-            operation_out::stream_read::ReadResult::Error(_) => {
-                StreamRead::Error(StreamReadError {})
-            }
+            operation_out::stream_read::ReadResult::StreamDeleted(_) => StreamRead::StreamDeleted,
         }
     }
 }
 
-impl From<StreamRead> for operation_out::StreamRead {
-    fn from(value: StreamRead) -> Self {
+impl TryFrom<StreamRead> for operation_out::StreamRead {
+    type Error = eyre::Report;
+    fn try_from(value: StreamRead) -> eyre::Result<Self> {
         match value {
-            StreamRead::EndOfStream => operation_out::StreamRead {
+            StreamRead::EndOfStream => Ok(operation_out::StreamRead {
                 read_result: Some(operation_out::stream_read::ReadResult::EndOfStream(())),
-            },
-            StreamRead::EventAppeared(e) => operation_out::StreamRead {
+            }),
+
+            StreamRead::EventAppeared(e) => Ok(operation_out::StreamRead {
                 read_result: Some(operation_out::stream_read::ReadResult::EventAppeared(
-                    operation_out::stream_read::EventAppeared {
-                        event: Some(e.into()),
-                    },
+                    e.into(),
                 )),
-            },
-            StreamRead::Error(_) => operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::Error(
-                    operation_out::stream_read::Error {},
-                )),
-            },
+            }),
+
+            StreamRead::StreamDeleted => Ok(operation_out::StreamRead {
+                read_result: Some(operation_out::stream_read::ReadResult::StreamDeleted(())),
+            }),
+
+            StreamRead::Unexpected(e) => Err(e),
         }
-    }
-}
-
-pub struct StreamReadError;
-
-impl Display for StreamReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "StreamReadError")
     }
 }
 

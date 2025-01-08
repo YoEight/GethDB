@@ -175,16 +175,12 @@ message OperationOut {
   message StreamRead {
     oneof read_result {
       google.protobuf.Empty end_of_stream = 1;
-      EventAppeared event_appeared = 2;
-      Error error = 3;
+      RecordedEvent event_appeared = 2;
+      google.protobuf.Empty stream_deleted = 3;
     }
 
     message EventAppeared {
       RecordedEvent event = 1;
-    }
-
-    message Error {
-
     }
   }
 

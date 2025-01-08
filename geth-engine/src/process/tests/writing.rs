@@ -1,5 +1,5 @@
 use crate::process::indexing::IndexClient;
-use crate::process::reading::ReaderClient;
+use crate::process::reading::{record_try_from, ReaderClient};
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
@@ -52,7 +52,7 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     while let Some(entry) = stream.next().await? {
         assert_eq!(index as u64, entry.revision);
 
-        let record: Record = reader_client.read_at(entry.position).await?.into();
+        let record: Record = record_try_from(reader_client.read_at(entry.position).await?)?;
         assert_eq!(index as u64, record.revision);
         assert_eq!(stream_name, record.stream_name);
 

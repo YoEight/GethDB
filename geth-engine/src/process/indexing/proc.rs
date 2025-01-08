@@ -1,7 +1,8 @@
 use crate::domain::index::CurrentRevision;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
+use crate::process::reading::record_try_from;
 use crate::process::{Item, ProcessRawEnv, Runtime};
-use geth_common::{Direction, IteratorIO, Record};
+use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -159,7 +160,7 @@ where
             continue;
         }
 
-        let record: Record = entry.into();
+        let record = record_try_from(entry)?;
         let key = mikoshi_hash(&record.stream_name);
 
         lsm.put_single(key, record.revision, record.position.raw())?;

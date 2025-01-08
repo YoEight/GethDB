@@ -53,7 +53,8 @@ async fn simple_append() -> eyre::Result<()> {
 
     let mut stream = client
         .read_stream(&stream_name, Direction::Forward, Revision::Start, 1)
-        .await;
+        .await?
+        .success()?;
 
     let event = stream.try_next().await?.unwrap();
 
@@ -266,7 +267,8 @@ async fn read_whole_stream_forward() -> eyre::Result<()> {
 
     let stream = client
         .read_stream(&stream_name, Direction::Forward, Revision::Start, u64::MAX)
-        .await;
+        .await?
+        .success()?;
 
     let actuals = stream.try_collect::<Vec<_>>().await?;
 

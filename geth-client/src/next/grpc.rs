@@ -8,8 +8,9 @@ use uuid::Uuid;
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
     EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
-    ProgramObtained, ProgramSummary, Propose, ReadStream, Record, Reply, Revision, StreamRead,
-    Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
+    ProgramObtained, ProgramSummary, Propose, ReadStream, ReadStreamCompleted, Record, Reply,
+    Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
+    UnsubscribeReason,
 };
 
 use crate::next::driver::Driver;
@@ -118,8 +119,8 @@ impl Client for GrpcClient {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> BoxStream<'static, eyre::Result<Record>> {
-        let outcome = self
+    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>> {
+        let mut task = self
             .mailbox
             .send_operation(Operation::ReadStream(ReadStream {
                 stream_name: stream_id.to_string(),
@@ -127,31 +128,57 @@ impl Client for GrpcClient {
                 revision,
                 max_count,
             }))
-            .await;
+            .await?;
 
-        let stream_id = stream_id.to_string();
-        Box::pin(async_stream::try_stream! {
-            let mut task = outcome?;
-            while let Some(event) = task.recv().await? {
-                match event {
-                    Reply::StreamRead(read) => match read {
-                        StreamRead::EventAppeared(record) => {
-                            yield record;
-                        }
+        if let Some(event) = task.recv().await? {
+            match event {
+                Reply::StreamRead(event) => match event {
+                    StreamRead::EventAppeared(record) => {
+                        let stream_id = stream_id.to_string();
+                        Ok(ReadStreamCompleted::Success(Box::pin(
+                            async_stream::try_stream! {
+                                yield record;
+                                while let Some(event) = task.recv().await? {
+                                    match event {
+                                        Reply::StreamRead(read) => match read {
+                                            StreamRead::EventAppeared(record) => {
+                                                yield record;
+                                            }
 
-                        StreamRead::Error(e) => {
-                            read_error(&stream_id, e)?;
-                        }
+                                            StreamRead::Unexpected(e) => {
+                                                read_error(&stream_id, e)?;
+                                            }
 
-                        StreamRead::EndOfStream => break,
+                                            StreamRead::EndOfStream => break,
+
+                                            _ => {
+                                                unexpected_reply_when_reading(&stream_id)?;
+                                            }
+                                        }
+
+                                        _ => {
+                                            unexpected_reply_when_reading(&stream_id)?;
+                                        }
+                                    }
+                                }
+                            },
+                        )))
                     }
 
-                    _ => {
-                        unexpected_reply_when_reading(&stream_id)?;
-                    }
-                }
+                    StreamRead::StreamDeleted => Ok(ReadStreamCompleted::StreamDeleted),
+
+                    StreamRead::Unexpected(e) => Err(e),
+
+                    StreamRead::EndOfStream => Ok(ReadStreamCompleted::Success(Box::pin(
+                        futures_util::stream::empty(),
+                    ))),
+                },
+
+                _ => unexpected_reply_when_reading(stream_id),
             }
-        })
+        } else {
+            eyre::bail!("multiplex process is no longer reachable");
+        }
     }
 
     async fn subscribe_to_stream(
@@ -284,7 +311,7 @@ fn produce_subscription_stream<'a>(
     })
 }
 
-fn unexpected_reply_when_reading(stream_id: &str) -> eyre::Result<()> {
+fn unexpected_reply_when_reading<A>(stream_id: &str) -> eyre::Result<A> {
     eyre::bail!("unexpected reply when reading: {}", stream_id)
 }
 
