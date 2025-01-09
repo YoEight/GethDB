@@ -4,7 +4,7 @@ use crate::process::{
 };
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
-    Position, Propose, WriteResult, WrongExpectedRevisionError,
+    Propose, WriteResult, WrongExpectedRevisionError,
 };
 use tracing::instrument;
 
@@ -70,7 +70,7 @@ impl WriterClient {
 
                     Ok(AppendStreamCompleted::Success(WriteResult {
                         next_expected_version,
-                        position: Position(start),
+                        position: start,
                         next_logical_position: next,
                     }))
                 }
@@ -126,7 +126,7 @@ impl WriterClient {
 
                     Ok(DeleteStreamCompleted::Success(WriteResult {
                         next_expected_version,
-                        position: Position(start),
+                        position: start,
                         next_logical_position: next,
                     }))
                 }

@@ -3,7 +3,7 @@ mod proc;
 
 use bytes::Buf;
 pub use client::ReaderClient;
-use geth_common::{ContentType, Position, Record};
+use geth_common::{ContentType, Record};
 use geth_mikoshi::wal::LogEntry;
 pub use proc::run;
 use uuid::Uuid;
@@ -27,7 +27,7 @@ pub fn record_try_from(mut entry: LogEntry) -> eyre::Result<Record> {
         content_type: ContentType::try_from(content_type)?,
         stream_name,
         class,
-        position: Position(entry.position),
+        position: entry.position,
         revision,
         data: entry.payload,
     })

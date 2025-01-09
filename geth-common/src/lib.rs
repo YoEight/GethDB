@@ -616,7 +616,7 @@ pub struct Record {
     pub content_type: ContentType,
     pub class: String,
     pub stream_name: String,
-    pub position: Position,
+    pub position: u64,
     pub revision: u64,
     pub data: Bytes,
 }
@@ -630,7 +630,7 @@ impl From<next::protocol::RecordedEvent> for Record {
                 .unwrap_or(ContentType::Unknown),
             stream_name: value.stream_name,
             class: value.class,
-            position: Position(value.position),
+            position: value.position,
             revision: value.revision,
             data: value.payload,
         }
@@ -644,7 +644,7 @@ impl From<Record> for next::protocol::RecordedEvent {
             content_type: value.content_type as i32,
             stream_name: value.stream_name,
             class: value.class,
-            position: value.position.raw(),
+            position: value.position,
             revision: value.revision,
             payload: value.data,
             metadata: Default::default(),
@@ -916,18 +916,6 @@ impl From<WrongExpectedRevisionError>
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Position(pub u64);
-
-impl Position {
-    pub fn raw(&self) -> u64 {
-        self.0
-    }
-    pub fn end() -> Self {
-        Self(u64::MAX)
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub enum AppendCompleted {
     Success(WriteResult),
@@ -937,7 +925,7 @@ pub enum AppendCompleted {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
-    pub position: Position,
+    pub position: u64,
     pub next_logical_position: u64,
 }
 
@@ -945,7 +933,7 @@ impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
-            position: value.position.raw(),
+            position: value.position,
         }
     }
 }
@@ -954,7 +942,7 @@ impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult 
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
-            position: value.position.raw(),
+            position: value.position,
         }
     }
 }
@@ -1011,7 +999,7 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
             operation_out::append_stream_completed::AppendResult::WriteResult(r) => {
                 AppendStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
-                    position: Position(r.position),
+                    position: r.position,
                     next_logical_position: 0,
                 })
             }
@@ -1272,7 +1260,7 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
             operation_out::delete_stream_completed::Result::WriteResult(r) => {
                 DeleteStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
-                    position: Position(r.position),
+                    position: r.position,
                     next_logical_position: 0,
                 })
             }

@@ -1,7 +1,7 @@
 use std::vec;
 
 use bytes::{BufMut, BytesMut};
-use geth_common::{Position, Propose, Record};
+use geth_common::{Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::{
     hashing::mikoshi_hash,
@@ -79,7 +79,7 @@ impl LogEntries for ProposeEntries {
             content_type: propose.content_type,
             class: propose.class,
             stream_name: self.ident.clone(),
-            position: Position(entry.position),
+            position: entry.position,
             revision: self.revision,
             data: propose.data,
         });

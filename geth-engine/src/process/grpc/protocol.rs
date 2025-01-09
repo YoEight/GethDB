@@ -347,7 +347,7 @@ async fn execute_operation(
 
                                 Ok(entry) => {
                                     if let Some(record) = entry {
-                                        position = record.position.raw();
+                                        position = record.position;
                                         yield OperationOut {
                                             correlation,
                                             reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
@@ -356,7 +356,7 @@ async fn execute_operation(
                                         catching_up = false;
 
                                         for record in history.drain(..) {
-                                            position = record.position.raw();
+                                            position = record.position;
                                             yield OperationOut {
                                                 correlation,
                                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
@@ -382,7 +382,7 @@ async fn execute_operation(
 
                                 Ok(record) => {
                                     if let Some(record) = record {
-                                        if record.position.raw() <= position {
+                                        if record.position <= position {
                                             continue;
                                         }
 
@@ -391,7 +391,7 @@ async fn execute_operation(
                                             continue;
                                         }
 
-                                        position = record.position.raw();
+                                        position = record.position;
                                         yield OperationOut {
                                             correlation,
                                             reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
