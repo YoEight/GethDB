@@ -7,6 +7,12 @@ service Protocol {
   rpc Multiplex(stream OperationIn) returns (stream OperationOut);
 }
 
+enum ContentType {
+  UNKNOWN = 0;
+  JSON = 1;
+  BINARY = 2;
+}
+
 message Ident {
   uint64 most = 1;
   uint64 least = 2;
@@ -15,11 +21,12 @@ message Ident {
 message RecordedEvent {
   Ident id = 1;
   string stream_name = 2;
-  string class = 3;
-  uint64 revision = 4;
-  uint64 position = 5;
-  bytes payload = 6;
-  bytes metadata = 7;
+  ContentType content_type = 3;
+  string class = 4;
+  uint64 revision = 5;
+  uint64 position = 6;
+  bytes payload = 7;
+  bytes metadata = 8;
 }
 
 message OperationIn {
@@ -50,9 +57,10 @@ message OperationIn {
 
     message Propose {
       Ident id = 1;
-      string class = 2;
-      bytes payload = 3;
-      bytes metadata = 4;
+      ContentType content_type = 2;
+      string class = 3;
+      bytes payload = 4;
+      bytes metadata = 5;
     }
   }
 
@@ -167,16 +175,12 @@ message OperationOut {
   message StreamRead {
     oneof read_result {
       google.protobuf.Empty end_of_stream = 1;
-      EventAppeared event_appeared = 2;
-      Error error = 3;
+      RecordedEvent event_appeared = 2;
+      google.protobuf.Empty stream_deleted = 3;
     }
 
     message EventAppeared {
       RecordedEvent event = 1;
-    }
-
-    message Error {
-
     }
   }
 
@@ -264,6 +268,7 @@ message OperationOut {
       oneof error {
         NotLeader not_leader = 1;
         WrongExpectedRevision wrong_revision = 2;
+        google.protobuf.Empty stream_deleted = 3;
       }
 
       message NotLeader {

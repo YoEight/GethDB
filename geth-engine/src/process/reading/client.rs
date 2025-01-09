@@ -1,10 +1,9 @@
-use std::vec;
-
-use crate::messages::ReadStreamCompleted;
 use crate::process::messages::{Messages, ReadRequests, ReadResponses};
+use crate::process::reading::record_try_from;
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
-use geth_common::{Direction, Revision};
+use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
 use geth_mikoshi::wal::LogEntry;
+use std::vec;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 pub struct Streaming {
@@ -13,10 +12,10 @@ pub struct Streaming {
 }
 
 impl Streaming {
-    pub async fn next(&mut self) -> eyre::Result<Option<LogEntry>> {
+    pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
         loop {
             if let Some(entry) = self.batch.as_mut().and_then(Iterator::next) {
-                return Ok(Some(entry));
+                return Ok(Some(record_try_from(entry)?));
             }
 
             self.batch = None;
@@ -67,7 +66,7 @@ impl ReaderClient {
         start: Revision<u64>,
         direction: Direction,
         count: usize,
-    ) -> eyre::Result<ReadStreamCompleted> {
+    ) -> eyre::Result<ReadStreamCompleted<Streaming>> {
         let mut mailbox = self
             .inner
             .request_stream(

@@ -1,6 +1,4 @@
 use bytes::{Buf, Bytes, BytesMut};
-use geth_common::{Position, Record};
-use uuid::Uuid;
 
 pub mod chunks;
 mod log_reader;
@@ -47,32 +45,6 @@ impl LogEntry {
             position,
             r#type,
             payload,
-        }
-    }
-}
-
-impl From<LogEntry> for Record {
-    fn from(mut entry: LogEntry) -> Record {
-        let revision = entry.payload.get_u64_le();
-        let stream_name_len = entry.payload.get_u16_le() as usize;
-        let stream_name = unsafe {
-            String::from_utf8_unchecked(entry.payload.copy_to_bytes(stream_name_len).to_vec())
-        };
-
-        let id = Uuid::from_u128_le(entry.payload.get_u128_le());
-        let type_len = entry.payload.get_u16_le() as usize;
-        let r#type =
-            unsafe { String::from_utf8_unchecked(entry.payload.copy_to_bytes(type_len).to_vec()) };
-
-        entry.payload.advance(size_of::<u32>()); // skip the payload size
-
-        Record {
-            id,
-            r#type,
-            stream_name,
-            position: Position(entry.position),
-            revision,
-            data: entry.payload,
         }
     }
 }

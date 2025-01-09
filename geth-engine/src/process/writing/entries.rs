@@ -1,19 +1,21 @@
 use std::vec;
 
-use bytes::{BufMut, Bytes, BytesMut};
-use geth_common::Propose;
+use bytes::{BufMut, BytesMut};
+use geth_common::{Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::{
     hashing::mikoshi_hash,
     wal::{LogEntries, LogEntry},
 };
 
+use crate::names::types::STREAM_DELETED;
+
 pub struct ProposeEntries {
     pub indexes: Vec<BlockEntry>,
-    pub committed: Vec<LogEntry>,
+    pub committed: Vec<Record>,
     events: vec::IntoIter<Propose>,
     current: Option<Propose>,
-    ident: Bytes,
+    ident: String,
     key: u64,
     pub revision: u64,
 }
@@ -24,7 +26,7 @@ impl Default for ProposeEntries {
             indexes: vec![],
             committed: Vec::with_capacity(32),
             events: vec![].into_iter(),
-            ident: Bytes::new(),
+            ident: String::default(),
             current: None,
             key: 0,
             revision: 0,
@@ -50,21 +52,38 @@ impl LogEntries for ProposeEntries {
                     + propose_estimate_size(self.current.as_ref().unwrap())
     }
 
-    fn write_current_entry(&mut self, buffer: &mut bytes::BytesMut, position: u64) {
+    fn write_current_entry(&mut self, buffer: &mut BytesMut, position: u64) {
+        let event = self.current.as_ref().unwrap();
+        let final_revision = if event.class == STREAM_DELETED {
+            u64::MAX
+        } else {
+            self.revision
+        };
+
         self.indexes.push(BlockEntry {
             key: self.key,
-            revision: self.revision,
+            revision: final_revision,
             position,
         });
 
         buffer.put_u64_le(self.revision);
         buffer.put_u16_le(self.ident.len() as u16);
-        buffer.extend_from_slice(&self.ident);
-        propose_serialize(self.current.as_ref().unwrap(), buffer);
+        buffer.extend_from_slice(self.ident.as_bytes());
+        propose_serialize(event, buffer);
     }
 
     fn commit(&mut self, entry: LogEntry) {
-        self.committed.push(entry);
+        let propose = self.current.take().unwrap();
+        self.committed.push(Record {
+            id: propose.id,
+            content_type: propose.content_type,
+            class: propose.class,
+            stream_name: self.ident.clone(),
+            position: entry.position,
+            revision: self.revision,
+            data: propose.data,
+        });
+
         self.revision += 1;
     }
 }
@@ -77,7 +96,7 @@ impl ProposeEntries {
             indexes: vec![],
             committed: vec![],
             events: events.into_iter(),
-            ident: Bytes::from(ident.into_bytes()),
+            ident,
             key,
             current: None,
             revision: start_revision,
@@ -87,16 +106,18 @@ impl ProposeEntries {
 
 fn propose_estimate_size(propose: &Propose) -> usize {
     size_of::<u128>() // id
-        + size_of::<u16>() // type length
-        + propose.r#type.len() // type string
+        + size_of::<u32>() // content type
+        + size_of::<u16>() // class length
+        + propose.class.len()
         + size_of::<u32>() // payload size
         + propose.data.len()
 }
 
 fn propose_serialize(propose: &Propose, buffer: &mut BytesMut) {
     buffer.put_u128_le(propose.id.to_u128_le());
-    buffer.put_u16_le(propose.r#type.len() as u16);
-    buffer.extend_from_slice(propose.r#type.as_bytes());
+    buffer.put_u32_le((propose.content_type as i32) as u32);
+    buffer.put_u16_le(propose.class.len() as u16);
+    buffer.extend_from_slice(propose.class.as_bytes());
     buffer.put_u32_le(propose.data.len() as u32);
     buffer.extend_from_slice(&propose.data);
 }

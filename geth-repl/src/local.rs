@@ -1,7 +1,8 @@
 use futures::stream::BoxStream;
 use geth_common::{
     AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    ProgramKilled, ProgramObtained, ProgramSummary, Propose, Record, Revision, SubscriptionEvent,
+    ProgramKilled, ProgramObtained, ProgramSummary, Propose, ReadStreamCompleted, Record, Revision,
+    SubscriptionEvent,
 };
 use geth_engine::{ManagerClient, Proc, ReaderClient, WriterClient};
 use uuid::Uuid;
@@ -43,19 +44,25 @@ impl Client for LocalClient {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> BoxStream<'static, eyre::Result<Record>> {
+    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>> {
         let outcome = self
             .reader
             .read(stream_id, revision, direction, max_count as usize)
-            .await;
+            .await?;
 
-        Box::pin(async_stream::try_stream! {
-            let mut reading = outcome?.success()?;
-            while let Some(entry) = reading.next().await? {
-                let record: Record = entry.into();
-                yield record;
+        match outcome {
+            ReadStreamCompleted::StreamDeleted => Ok(ReadStreamCompleted::StreamDeleted),
+            ReadStreamCompleted::Unexpected(e) => Ok(ReadStreamCompleted::Unexpected(e)),
+            ReadStreamCompleted::Success(mut reading) => {
+                let stream = async_stream::try_stream! {
+                    while let Some(record) = reading.next().await? {
+                        yield record;
+                    }
+                };
+
+                Ok(ReadStreamCompleted::Success(Box::pin(stream)))
             }
-        })
+        }
     }
 
     async fn subscribe_to_stream(

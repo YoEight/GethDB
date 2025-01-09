@@ -14,8 +14,8 @@ use uuid::Uuid;
 use geth_client::GrpcClient;
 use geth_common::{
     AppendError, AppendStreamCompleted, Client, DeleteError, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgramError, ProgramObtained, Propose, Record, Revision,
-    SubscriptionEvent,
+    EndPoint, ExpectedRevision, GetProgramError, ProgramObtained, Propose, ReadStreamCompleted,
+    Record, Revision, SubscriptionEvent,
 };
 
 use crate::cli::{
@@ -183,13 +183,19 @@ async fn main() -> eyre::Result<()> {
                                         DeleteError::NotLeaderException(_) => {
                                             println!("ERR: not leader exception when deleting stream '{}'", opts.stream);
                                         }
+
+                                        DeleteError::StreamDeleted => {
+                                            println!(
+                                                "ERR: stream '{}' was already deleted",
+                                                opts.stream
+                                            );
+                                        }
                                     },
 
                                     DeleteStreamCompleted::Success(p) => {
                                         println!(
                                             "stream '{}' deletion successful, position {}",
-                                            opts.stream,
-                                            p.position.raw(),
+                                            opts.stream, p.position,
                                         );
                                     }
                                 }
@@ -311,7 +317,8 @@ fn load_events_from_file(path: impl AsRef<Path>) -> eyre::Result<Vec<Propose>> {
     for event in events {
         proposes.push(Propose {
             id: Uuid::new_v4(),
-            r#type: event.r#type,
+            content_type: geth_common::ContentType::Json,
+            class: event.r#type,
             data: serde_json::to_vec(&event.payload)?.into(),
         });
     }
@@ -358,7 +365,7 @@ where
                 println!(
                     "{}",
                     serde_json::to_string_pretty(&serde_json::json!({
-                        "position": result.position.raw(),
+                        "position": result.position,
                         "next_expected_version": result.next_expected_version.raw(),
                         "next_logical_position": result.next_logical_position,
                     }))
@@ -373,7 +380,7 @@ async fn read_stream<C>(client: &C, opts: &ReadStream)
 where
     C: Client + 'static,
 {
-    let reading = client
+    let outcome = client
         .read_stream(
             opts.stream.as_str(),
             Direction::Forward,
@@ -382,7 +389,23 @@ where
         )
         .await;
 
-    display_stream(reading).await
+    match outcome {
+        Err(e) => {
+            println!("ERR: error when reading stream {}: {}", opts.stream, e);
+        }
+
+        Ok(outcome) => match outcome {
+            ReadStreamCompleted::StreamDeleted => {
+                println!("ERR: stream {} is deleted", opts.stream);
+            }
+
+            ReadStreamCompleted::Unexpected(e) => {
+                println!("ERR: error when reading stream {}: {}", opts.stream, e);
+            }
+
+            ReadStreamCompleted::Success(stream) => display_stream(stream).await,
+        },
+    }
 }
 
 async fn display_stream(mut stream: BoxStream<'static, eyre::Result<Record>>) {
@@ -399,7 +422,7 @@ async fn display_stream(mut stream: BoxStream<'static, eyre::Result<Record>>) {
                     "stream_name": record.stream_name,
                     "id": record.id,
                     "revision": record.revision,
-                    "position": record.position.raw(),
+                    "position": record.position,
                     "data": data,
                 });
 

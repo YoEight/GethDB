@@ -7,7 +7,8 @@ use uuid::Uuid;
 
 use crate::{
     AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramKilled,
-    ProgramObtained, ProgramSummary, Propose, Record, Revision, SubscriptionConfirmation,
+    ProgramObtained, ProgramSummary, Propose, ReadStreamCompleted, Record, Revision,
+    SubscriptionConfirmation,
 };
 
 pub enum SubscriptionEvent {
@@ -37,7 +38,7 @@ pub trait Client {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> BoxStream<'static, eyre::Result<Record>>;
+    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>>;
 
     async fn subscribe_to_stream(
         &self,
@@ -86,7 +87,7 @@ where
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> BoxStream<'static, eyre::Result<Record>> {
+    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>> {
         self.as_ref()
             .read_stream(stream_id, direction, revision, max_count)
             .await

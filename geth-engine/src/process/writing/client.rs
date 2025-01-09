@@ -3,8 +3,8 @@ use crate::process::{
     ManagerClient, Proc, ProcId, ProcessRawEnv,
 };
 use geth_common::{
-    AppendError, AppendStreamCompleted, ExpectedRevision, Position, Propose, WriteResult,
-    WrongExpectedRevisionError,
+    AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
+    Propose, WriteResult, WrongExpectedRevisionError,
 };
 use tracing::instrument;
 
@@ -70,7 +70,7 @@ impl WriterClient {
 
                     Ok(AppendStreamCompleted::Success(WriteResult {
                         next_expected_version,
-                        position: Position(start),
+                        position: start,
                         next_logical_position: next,
                     }))
                 }
@@ -83,30 +83,58 @@ impl WriterClient {
     }
 
     #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
-    pub async fn get_write_position(&self) -> eyre::Result<u64> {
-        tracing::debug!(
-            "sending write position lookup request to writer process {}",
-            self.target
-        );
-
+    pub async fn delete(
+        &self,
+        stream: String,
+        expected: ExpectedRevision,
+    ) -> eyre::Result<DeleteStreamCompleted> {
+        tracing::debug!("sending delete request to writer process {}", self.target);
         let resp = self
             .inner
-            .request(self.target, WriteRequests::GetWritePosition.into())
+            .request(
+                self.target,
+                WriteRequests::Delete {
+                    ident: stream.clone(),
+                    expected,
+                }
+                .into(),
+            )
             .await?;
 
         if let Ok(resp) = resp.payload.try_into() {
             match resp {
-                WriteResponses::Error => eyre::bail!("internal error when fetching write position"),
-                WriteResponses::WritePosition(p) => {
-                    tracing::debug!("completed successfully");
-                    Ok(p)
+                WriteResponses::Error => {
+                    eyre::bail!("internal error when appending to stream: '{}'", stream);
                 }
-                _ => eyre::bail!(
-                    "unexpected response when fetching write position from the writer process"
+
+                WriteResponses::StreamDeleted => {
+                    Ok(DeleteStreamCompleted::Error(DeleteError::StreamDeleted))
+                }
+
+                WriteResponses::WrongExpectedRevision { expected, current } => Ok(
+                    DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
+                        WrongExpectedRevisionError { expected, current },
+                    )),
                 ),
+
+                WriteResponses::Committed {
+                    start_position: start,
+                    next_position: next,
+                    next_expected_version,
+                } => {
+                    tracing::debug!("completed successfully");
+
+                    Ok(DeleteStreamCompleted::Success(WriteResult {
+                        next_expected_version,
+                        position: start,
+                        next_logical_position: next,
+                    }))
+                }
+
+                _ => eyre::bail!("unexpected response when appending to stream: '{}'", stream),
             }
         } else {
-            eyre::bail!("internal protocol error when getting write position");
+            eyre::bail!("internal protocol error when appending to the writer process");
         }
     }
 }

@@ -1,6 +1,7 @@
 use bytes::Bytes;
 use chrono::{DateTime, TimeZone, Utc};
 use serde::{Deserialize, Serialize};
+use std::any::type_name;
 use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
@@ -162,14 +163,15 @@ impl From<next::protocol::OperationOut> for OperationOut {
     }
 }
 
-impl From<OperationOut> for next::protocol::OperationOut {
-    fn from(value: OperationOut) -> Self {
+impl TryFrom<OperationOut> for next::protocol::OperationOut {
+    type Error = eyre::Report;
+    fn try_from(value: OperationOut) -> eyre::Result<Self> {
         let correlation = Some(value.correlation.into());
         let operation = match value.reply {
             Reply::AppendStreamCompleted(resp) => {
                 operation_out::Operation::AppendCompleted(resp.into())
             }
-            Reply::StreamRead(resp) => operation_out::Operation::StreamRead(resp.into()),
+            Reply::StreamRead(resp) => operation_out::Operation::StreamRead(resp.try_into()?),
             Reply::SubscriptionEvent(resp) => {
                 operation_out::Operation::SubscriptionEvent(resp.into())
             }
@@ -183,10 +185,10 @@ impl From<OperationOut> for next::protocol::OperationOut {
             Reply::ProgramObtained(resp) => operation_out::Operation::ProgramGot(resp.into()),
         };
 
-        Self {
+        Ok(Self {
             correlation,
             operation: Some(operation),
-        }
+        })
     }
 }
 
@@ -528,32 +530,43 @@ impl From<Direction> for i32 {
 
 pub struct WrongDirectionError;
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[repr(i32)]
+pub enum ContentType {
+    Unknown = 0,
+    Json = 1,
+    Binary = 2,
+}
+
+impl TryFrom<i32> for ContentType {
+    type Error = eyre::Report;
+
+    fn try_from(value: i32) -> Result<Self, Self::Error> {
+        match value {
+            0 => Ok(ContentType::Unknown),
+            1 => Ok(ContentType::Json),
+            2 => Ok(ContentType::Binary),
+            x => eyre::bail!("unknown content type: {}", x),
+        }
+    }
+}
+
+impl From<next::protocol::ContentType> for ContentType {
+    fn from(value: next::protocol::ContentType) -> Self {
+        match value {
+            next::protocol::ContentType::Unknown => Self::Unknown,
+            next::protocol::ContentType::Json => Self::Json,
+            next::protocol::ContentType::Binary => Self::Binary,
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct Propose {
     pub id: Uuid,
-    pub r#type: String,
+    pub content_type: ContentType,
+    pub class: String,
     pub data: Bytes,
-}
-
-impl From<Propose> for operation_in::append_stream::Propose {
-    fn from(value: Propose) -> Self {
-        Self {
-            id: Some(value.id.into()),
-            class: value.r#type,
-            payload: value.data,
-            metadata: Default::default(),
-        }
-    }
-}
-
-impl From<operation_in::append_stream::Propose> for Propose {
-    fn from(value: operation_in::append_stream::Propose) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
-            r#type: value.class,
-            data: value.payload,
-        }
-    }
 }
 
 impl Propose {
@@ -565,18 +578,45 @@ impl Propose {
         let id = Uuid::new_v4();
         Ok(Self {
             id,
-            r#type: "application/json".to_string(),
+            content_type: ContentType::Json,
+            class: type_name::<A>().to_string(),
             data,
         })
+    }
+}
+
+impl From<Propose> for operation_in::append_stream::Propose {
+    fn from(value: Propose) -> Self {
+        Self {
+            id: Some(value.id.into()),
+            content_type: value.content_type as i32,
+            class: value.class,
+            payload: value.data,
+            metadata: Default::default(),
+        }
+    }
+}
+
+impl From<operation_in::append_stream::Propose> for Propose {
+    fn from(value: operation_in::append_stream::Propose) -> Self {
+        Self {
+            id: value.id.unwrap().into(),
+            content_type: next::protocol::ContentType::try_from(value.content_type)
+                .map(ContentType::from)
+                .unwrap_or(ContentType::Unknown),
+            class: value.class,
+            data: value.payload,
+        }
     }
 }
 
 #[derive(Debug, Clone)]
 pub struct Record {
     pub id: Uuid,
-    pub r#type: String,
+    pub content_type: ContentType,
+    pub class: String,
     pub stream_name: String,
-    pub position: Position,
+    pub position: u64,
     pub revision: u64,
     pub data: Bytes,
 }
@@ -585,9 +625,12 @@ impl From<next::protocol::RecordedEvent> for Record {
     fn from(value: next::protocol::RecordedEvent) -> Self {
         Self {
             id: value.id.unwrap().into(),
-            r#type: value.class,
+            content_type: next::protocol::ContentType::try_from(value.content_type)
+                .map(ContentType::from)
+                .unwrap_or(ContentType::Unknown),
             stream_name: value.stream_name,
-            position: Position(value.position),
+            class: value.class,
+            position: value.position,
             revision: value.revision,
             data: value.payload,
         }
@@ -598,9 +641,10 @@ impl From<Record> for next::protocol::RecordedEvent {
     fn from(value: Record) -> Self {
         Self {
             id: Some(value.id.into()),
-            class: value.r#type,
+            content_type: value.content_type as i32,
             stream_name: value.stream_name,
-            position: value.position.raw(),
+            class: value.class,
+            position: value.position,
             revision: value.revision,
             payload: value.data,
             metadata: Default::default(),
@@ -872,18 +916,6 @@ impl From<WrongExpectedRevisionError>
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Position(pub u64);
-
-impl Position {
-    pub fn raw(&self) -> u64 {
-        self.0
-    }
-    pub fn end() -> Self {
-        Self(u64::MAX)
-    }
-}
-
 #[derive(Clone, Copy, Debug)]
 pub enum AppendCompleted {
     Success(WriteResult),
@@ -893,7 +925,7 @@ pub enum AppendCompleted {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
 pub struct WriteResult {
     pub next_expected_version: ExpectedRevision,
-    pub position: Position,
+    pub position: u64,
     pub next_logical_position: u64,
 }
 
@@ -901,7 +933,7 @@ impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
-            position: value.position.raw(),
+            position: value.position,
         }
     }
 }
@@ -910,7 +942,7 @@ impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult 
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
-            position: value.position.raw(),
+            position: value.position,
         }
     }
 }
@@ -967,7 +999,7 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
             operation_out::append_stream_completed::AppendResult::WriteResult(r) => {
                 AppendStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
-                    position: Position(r.position),
+                    position: r.position,
                     next_logical_position: 0,
                 })
             }
@@ -1022,10 +1054,31 @@ impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
     }
 }
 
+pub enum ReadStreamCompleted<A> {
+    StreamDeleted,
+    Unexpected(eyre::Report),
+    Success(A),
+}
+
+impl<A> ReadStreamCompleted<A> {
+    pub fn success(self) -> eyre::Result<A> {
+        match self {
+            ReadStreamCompleted::StreamDeleted => eyre::bail!("stream deleted"),
+            ReadStreamCompleted::Unexpected(e) => Err(e),
+            ReadStreamCompleted::Success(a) => Ok(a),
+        }
+    }
+
+    pub fn is_stream_deleted(&self) -> bool {
+        matches!(self, ReadStreamCompleted::StreamDeleted)
+    }
+}
+
 pub enum StreamRead {
     EndOfStream,
     EventAppeared(Record),
-    Error(StreamReadError),
+    StreamDeleted,
+    Unexpected(eyre::Report),
 }
 
 impl From<operation_out::StreamRead> for StreamRead {
@@ -1033,42 +1086,33 @@ impl From<operation_out::StreamRead> for StreamRead {
         match value.read_result.unwrap() {
             operation_out::stream_read::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
             operation_out::stream_read::ReadResult::EventAppeared(e) => {
-                StreamRead::EventAppeared(e.event.unwrap().into())
+                StreamRead::EventAppeared(e.into())
             }
-            operation_out::stream_read::ReadResult::Error(_) => {
-                StreamRead::Error(StreamReadError {})
-            }
+            operation_out::stream_read::ReadResult::StreamDeleted(_) => StreamRead::StreamDeleted,
         }
     }
 }
 
-impl From<StreamRead> for operation_out::StreamRead {
-    fn from(value: StreamRead) -> Self {
+impl TryFrom<StreamRead> for operation_out::StreamRead {
+    type Error = eyre::Report;
+    fn try_from(value: StreamRead) -> eyre::Result<Self> {
         match value {
-            StreamRead::EndOfStream => operation_out::StreamRead {
+            StreamRead::EndOfStream => Ok(operation_out::StreamRead {
                 read_result: Some(operation_out::stream_read::ReadResult::EndOfStream(())),
-            },
-            StreamRead::EventAppeared(e) => operation_out::StreamRead {
+            }),
+
+            StreamRead::EventAppeared(e) => Ok(operation_out::StreamRead {
                 read_result: Some(operation_out::stream_read::ReadResult::EventAppeared(
-                    operation_out::stream_read::EventAppeared {
-                        event: Some(e.into()),
-                    },
+                    e.into(),
                 )),
-            },
-            StreamRead::Error(_) => operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::Error(
-                    operation_out::stream_read::Error {},
-                )),
-            },
+            }),
+
+            StreamRead::StreamDeleted => Ok(operation_out::StreamRead {
+                read_result: Some(operation_out::stream_read::ReadResult::StreamDeleted(())),
+            }),
+
+            StreamRead::Unexpected(e) => Err(e),
         }
-    }
-}
-
-pub struct StreamReadError;
-
-impl Display for StreamReadError {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "StreamReadError")
     }
 }
 
@@ -1166,9 +1210,26 @@ pub enum DeleteStreamCompleted {
     Error(DeleteError),
 }
 
+impl DeleteStreamCompleted {
+    pub fn success(self) -> eyre::Result<WriteResult> {
+        if let Self::Success(r) = self {
+            return Ok(r);
+        }
+
+        eyre::bail!("stream deletion failed")
+    }
+}
+
 pub enum DeleteError {
+    StreamDeleted,
     WrongExpectedRevision(WrongExpectedRevisionError),
     NotLeaderException(EndPoint),
+}
+
+impl DeleteError {
+    pub fn is_stream_deleted(&self) -> bool {
+        matches!(self, DeleteError::StreamDeleted)
+    }
 }
 
 impl Display for DeleteError {
@@ -1181,8 +1242,13 @@ impl Display for DeleteError {
                     e.expected, e.current
                 )
             }
+
             DeleteError::NotLeaderException(e) => {
-                write!(f, "Not leader exception: {}:{}", e.host, e.port)
+                write!(f, "not leader exception: {}:{}", e.host, e.port)
+            }
+
+            DeleteError::StreamDeleted => {
+                write!(f, "stream deleted")
             }
         }
     }
@@ -1194,7 +1260,7 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
             operation_out::delete_stream_completed::Result::WriteResult(r) => {
                 DeleteStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
-                    position: Position(r.position),
+                    position: r.position,
                     next_logical_position: 0,
                 })
             }
@@ -1208,11 +1274,16 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
                         },
                     ))
                 }
+
                 operation_out::delete_stream_completed::error::Error::NotLeader(e) => {
                     DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
                         host: e.leader_host,
                         port: e.leader_port as u16,
                     }))
+                }
+
+                operation_out::delete_stream_completed::error::Error::StreamDeleted(_) => {
+                    DeleteStreamCompleted::Error(DeleteError::StreamDeleted)
                 }
             },
         }
@@ -1237,12 +1308,19 @@ impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
                                     e.into(),
                                 )
                             }
+
                             DeleteError::NotLeaderException(e) => {
                                 operation_out::delete_stream_completed::error::Error::NotLeader(
                                     operation_out::delete_stream_completed::error::NotLeader {
                                         leader_host: e.host,
                                         leader_port: e.port as u32,
                                     },
+                                )
+                            }
+
+                            DeleteError::StreamDeleted => {
+                                operation_out::delete_stream_completed::error::Error::StreamDeleted(
+                                    (),
                                 )
                             }
                         }),
