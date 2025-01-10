@@ -73,6 +73,15 @@ where
             let mut payload_buffer = self.buffer.split_off(ENTRY_PREFIX_SIZE);
 
             entries.write_current_entry(&mut payload_buffer, position);
+
+            if payload_buffer.len() != entry_size {
+                eyre::bail!(
+                    "payload size mismatch: expected {}, got {}",
+                    entry_size,
+                    payload_buffer.len()
+                );
+            }
+
             payload_buffer.put_u32_le(reported_size);
             self.buffer.unsplit(payload_buffer);
             let record = self.buffer.split().freeze();

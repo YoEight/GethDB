@@ -253,6 +253,7 @@ pub enum Responses {
     Subscribe(SubscribeResponses),
     Write(WriteResponses),
     TestSink(TestSinkResponses),
+    FatalError,
 }
 
 #[derive(Debug)]

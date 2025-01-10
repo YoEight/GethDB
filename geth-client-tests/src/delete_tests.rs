@@ -1,5 +1,3 @@
-use std::u64;
-
 use bytes::Bytes;
 use fake::{faker::name::en::Name, Fake};
 use geth_client::GrpcClient;
