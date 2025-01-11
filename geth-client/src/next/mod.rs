@@ -16,6 +16,7 @@ pub mod grpc;
 pub enum Msg {
     Command(Command),
     Event(OperationOut),
+    Disconnected,
 }
 
 #[derive(Clone)]
@@ -48,18 +49,21 @@ pub(crate) async fn connect_to_node(uri: &Uri, mailbox: Mailbox) -> Result<Conne
         while let Some(reply) = stream_response.next().await {
             match reply {
                 Err(e) => {
-                    tracing::error!("Error receiving response: {:?}", e);
-                    break;
+                    tracing::error!("error receiving response: {:?}", e);
+                    // TODO - Needs find a way to handle unexpected errors so we avoid
+                    // stalled operations.
                 }
 
                 Ok(out) => {
                     if mailbox.send(Msg::Event(out.into())).is_err() {
                         tracing::warn!("seems main connection is closed");
-                        break;
+                        return;
                     }
                 }
             }
         }
+
+        let _ = mailbox.send(Msg::Disconnected);
     });
 
     Ok(connection)
@@ -75,6 +79,10 @@ pub(crate) async fn multiplex_loop(mut driver: Driver, mut receiver: UnboundedRe
             }
 
             Msg::Event(event) => driver.handle_event(event),
+
+            Msg::Disconnected => {
+                driver.handle_disconnect();
+            }
         }
     }
 }

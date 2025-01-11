@@ -1,4 +1,4 @@
-use std::{io, u64};
+use std::io;
 
 use geth_common::IteratorIO;
 use geth_mikoshi::InMemoryStorage;
@@ -107,8 +107,10 @@ fn test_in_mem_lsm_mem_table_scan_backward() -> io::Result<()> {
 /// When scanning, it will access to in-mem sstables.
 #[test]
 fn test_in_mem_lsm_sync() -> io::Result<()> {
-    let mut setts = LsmSettings::default();
-    setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
+    let setts = LsmSettings {
+        mem_table_max_size: MEM_TABLE_ENTRY_SIZE,
+        ..Default::default()
+    };
 
     let mut lsm = Lsm::new(setts, InMemoryStorage::new());
 

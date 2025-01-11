@@ -67,12 +67,15 @@ where
             )?
             .get_u32_le() as usize;
 
-        debug_assert_eq!(
-            record_size, post_record_size,
-            "pre and post record size don't match!"
-        );
+        if record_size != post_record_size {
+            eyre::bail!(
+                "pre and post record size don't match! {} != {}",
+                record_size,
+                post_record_size
+            );
+        }
 
-        Ok(LogEntry::get(record_bytes))
+        LogEntry::try_from(record_bytes)
     }
 }
 

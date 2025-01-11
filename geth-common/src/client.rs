@@ -11,6 +11,7 @@ use crate::{
     SubscriptionConfirmation,
 };
 
+#[derive(Debug)]
 pub enum SubscriptionEvent {
     EventAppeared(Record),
     Confirmed(SubscriptionConfirmation),
@@ -18,6 +19,7 @@ pub enum SubscriptionEvent {
     Unsubscribed(UnsubscribeReason),
 }
 
+#[derive(Debug)]
 pub enum UnsubscribeReason {
     User,
     Server,

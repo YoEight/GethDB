@@ -67,8 +67,7 @@ impl PersistentStorage for InMemStorage {
 
         self.inner
             .iter()
-            .find(|e| e.index == entry_id.index && e.term == entry_id.term)
-            .is_some()
+            .any(|e| e.index == entry_id.index && e.term == entry_id.term)
     }
 }
 
@@ -81,7 +80,7 @@ struct InMemIter<'a> {
     init: bool,
 }
 
-impl<'a> IterateEntries for InMemIter<'a> {
+impl IterateEntries for InMemIter<'_> {
     fn next(&mut self) -> std::io::Result<Option<Entry>> {
         if self.count >= self.limit {
             return Ok(None);

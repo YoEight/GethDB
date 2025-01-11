@@ -2,7 +2,7 @@ use bb8::Pool;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
-use messages::Messages;
+use messages::{Messages, Responses};
 use resource::{create_buffer_pool, BufferManager};
 use std::collections::HashMap;
 use std::future::Future;
@@ -79,6 +79,7 @@ enum Topology {
 struct RunningProc {
     id: ProcId,
     proc: Proc,
+    last_received_request: Uuid,
     mailbox: Mailbox,
 }
 
@@ -123,6 +124,7 @@ impl Catalog {
     }
 
     fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
+        tracing::debug!("looking up terminated process {} runtime info...", proc_id);
         if let Some(running) = self.monitor.remove(&proc_id) {
             if let Some(mut topology) = self.inner.get_mut(&running.proc) {
                 match &mut topology {
@@ -132,9 +134,11 @@ impl Catalog {
                 }
             }
 
+            tracing::debug!("process {} runtime info was found", proc_id);
             return Some(running);
         }
 
+        tracing::debug!("no running info was found for process {}", proc_id);
         None
     }
 
@@ -216,9 +220,12 @@ where
                 Item::Mail(mail) => {
                     if let Some(resp) = self.requests.remove(&mail.correlation) {
                         let _ = resp.send(mail);
-                    } else if let Some(proc) = self.catalog.monitor.get(&dest) {
+                    } else if let Some(proc) = self.catalog.monitor.get_mut(&dest) {
                         if let Some(resp) = resp {
                             self.requests.insert(mail.correlation, resp);
+                            proc.last_received_request = mail.correlation;
+                        } else {
+                            proc.last_received_request = Uuid::nil();
                         }
 
                         let _ = proc.mailbox.send(Item::Mail(mail));
@@ -289,6 +296,21 @@ where
                         );
                     } else {
                         tracing::info!("process {:?}:{} terminated", running.proc, id);
+                    }
+
+                    if let Some(resp) = self.requests.remove(&running.last_received_request) {
+                        tracing::warn!(
+                            "process {:?}:{} terminated with pending request",
+                            running.proc,
+                            id
+                        );
+
+                        let _ = resp.send(Mail {
+                            origin: running.id,
+                            correlation: running.last_received_request,
+                            payload: Messages::Responses(Responses::FatalError),
+                            created: Instant::now(),
+                        });
                     }
                 }
 
@@ -693,6 +715,7 @@ where
         id,
         proc,
         mailbox: Mailbox::Raw(proc_sender),
+        last_received_request: Uuid::nil(),
     }
 }
 
@@ -724,5 +747,6 @@ where
         id,
         proc,
         mailbox: Mailbox::Tokio(proc_sender),
+        last_received_request: Uuid::nil(),
     }
 }

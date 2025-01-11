@@ -44,8 +44,14 @@ jobs:
       - name: Build
         run: cargo check --all-targets
 
+      - name: Install cargo-nextest
+        uses: baptiste0928/cargo-install@v3
+        with:
+          crate: cargo-nextest
+          locked: true
+
       - name: Run tests
-        run: cargo test --all-targets
+        run: cargo nextest run --hide-progress-bar
 
   linting:
     needs: build

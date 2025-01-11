@@ -47,9 +47,9 @@ impl LogEntries for ProposeEntries {
 
     fn current_entry_size(&self) -> usize {
         size_of::<u64>() // revision
-                    + size_of::<u16>() // stream name length
-                    + self.ident.len() // stream name
-                    + propose_estimate_size(self.current.as_ref().unwrap())
+            + size_of::<u16>() // stream name length
+            + self.ident.len() // stream name
+            + propose_estimate_size(self.current.as_ref().unwrap())
     }
 
     fn write_current_entry(&mut self, buffer: &mut BytesMut, position: u64) {

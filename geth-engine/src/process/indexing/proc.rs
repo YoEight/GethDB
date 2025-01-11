@@ -48,6 +48,18 @@ where
                 if let Ok(req) = mail.payload.try_into() {
                     match req {
                         IndexRequests::Store { entries } => {
+                            if entries.is_empty() {
+                                tracing::warn!("empty entries vector received");
+
+                                let _ = env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    IndexResponses::Committed.into(),
+                                );
+
+                                continue;
+                            }
+
                             let last = entries.last().copied().unwrap();
                             if let Err(e) = store_entries(&lsm, entries) {
                                 tracing::error!("error when storing index entries: {}", e);

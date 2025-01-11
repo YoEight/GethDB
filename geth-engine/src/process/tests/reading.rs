@@ -2,7 +2,7 @@ use crate::process::reading::ReaderClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
-use geth_common::{Direction, ExpectedRevision, Propose, Record, Revision};
+use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -42,8 +42,7 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
         .success()?;
 
     let mut count = 0;
-    while let Some(entry) = stream.next().await? {
-        let record: Record = entry.clone().into();
+    while let Some(record) = stream.next().await? {
         let foo = record.as_value::<Foo>()?;
         assert_eq!(count, record.revision);
         assert_eq!(stream_name, record.stream_name);

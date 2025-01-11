@@ -7,6 +7,8 @@ mod log_writer;
 pub use log_reader::LogReader;
 pub use log_writer::LogWriter;
 
+pub const LOG_ENTRY_HEADER_SIZE: usize = size_of::<u64>() + size_of::<u8>(); // position and type
+
 pub trait LogEntries {
     fn move_next(&mut self) -> bool;
     fn current_entry_size(&self) -> usize;
@@ -46,6 +48,26 @@ impl LogEntry {
             r#type,
             payload,
         }
+    }
+}
+
+impl TryFrom<Bytes> for LogEntry {
+    type Error = eyre::Report;
+
+    fn try_from(mut src: Bytes) -> eyre::Result<Self> {
+        if src.remaining() < LOG_ENTRY_HEADER_SIZE {
+            eyre::bail!("bytes buffer is too short to contain a valid log entry");
+        }
+
+        let position = src.get_u64_le();
+        let r#type = src.get_u8();
+        let payload = src;
+
+        Ok(Self {
+            position,
+            r#type,
+            payload,
+        })
     }
 }
 

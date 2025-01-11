@@ -1,5 +1,5 @@
+use std::io;
 use std::path::PathBuf;
-use std::{io, u64};
 
 use temp_testdir::TempDir;
 

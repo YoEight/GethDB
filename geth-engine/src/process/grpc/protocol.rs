@@ -200,7 +200,20 @@ async fn execute_operation(
         let correlation = input.correlation;
         match input.operation {
             Operation::AppendStream(params) => {
-                let completed = internal.writer.append(params.stream_name, params.expected_revision, params.events).await?;
+                let outcome = internal.writer.append(params.stream_name, params.expected_revision, params.events).await;
+
+                let completed = match outcome {
+                    Err(e) => {
+                        yield OperationOut {
+                            correlation,
+                            reply: Reply::Error(e.to_string()),
+                        };
+
+                        return;
+                    },
+
+                    Ok(c) => c,
+                };
 
                 yield OperationOut {
                     correlation,

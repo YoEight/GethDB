@@ -6,8 +6,7 @@ use super::messages::{Messages, TestSinkRequests, TestSinkResponses};
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     while let Some(item) = env.queue.recv().await {
         if let Item::Stream(stream) = item {
-            if let Some(TestSinkRequests::StreamFrom { low, high }) = stream.payload.try_into().ok()
-            {
+            if let Ok(TestSinkRequests::StreamFrom { low, high }) = stream.payload.try_into() {
                 for num in low..high {
                     if stream
                         .sender
@@ -57,7 +56,7 @@ pub struct Streaming {
 impl Streaming {
     pub async fn next(&mut self) -> eyre::Result<Option<u64>> {
         if let Some(resp) = self.inner.recv().await {
-            if let Some(TestSinkResponses::Stream(value)) = resp.try_into().ok() {
+            if let Ok(TestSinkResponses::Stream(value)) = resp.try_into() {
                 return Ok(Some(value));
             }
 
