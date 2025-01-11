@@ -16,7 +16,7 @@ pub mod tests {
 
     #[ctor::ctor]
     fn test_init() {
-        let _ = tracing_subscriber::fmt::fmt()
+        tracing_subscriber::fmt::fmt()
             .with_env_filter(EnvFilter::new("geth_engine=debug"))
             // .with_max_level(tracing::Level::DEBUG)
             .with_file(true)

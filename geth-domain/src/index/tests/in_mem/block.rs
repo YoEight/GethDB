@@ -1,4 +1,4 @@
-use std::{io, u64};
+use std::io;
 
 use geth_mikoshi::InMemoryStorage;
 

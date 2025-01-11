@@ -103,7 +103,14 @@ impl Client for GrpcClient {
         if let Some(out) = task.recv().await? {
             match out {
                 Reply::AppendStreamCompleted(resp) => Ok(resp),
-                _ => eyre::bail!("unexpected reply when appending events to '{}'", stream_id),
+                Reply::Error(e) => {
+                    eyre::bail!("server error when writing to stream '{}': {}", stream_id, e)
+                }
+                x => eyre::bail!(
+                    "unexpected reply when appending events to '{}' = {:?}",
+                    stream_id,
+                    x
+                ),
             }
         } else {
             eyre::bail!(

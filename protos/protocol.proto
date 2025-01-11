@@ -137,6 +137,7 @@ message OperationOut {
     ProgramsListed programs_listed = 6;
     ProgramKilled program_killed = 7;
     ProgramObtained program_got = 8;
+    string error = 9;
   }
 
   message AppendStreamCompleted {

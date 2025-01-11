@@ -2,7 +2,7 @@ use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
-use geth_common::{ExpectedRevision, Propose, Record};
+use geth_common::{ExpectedRevision, Propose};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -33,9 +33,8 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
         .success()?;
 
     let mut count = 0;
-    while let Some(entry) = stream.next().await? {
+    while let Some(record) = stream.next().await? {
         tracing::debug!("received entry {}/10", count + 1);
-        let record: Record = entry.clone().into();
         let foo = record.as_value::<Foo>()?;
 
         assert_eq!(count, record.revision);

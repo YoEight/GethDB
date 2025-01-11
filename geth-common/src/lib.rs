@@ -36,7 +36,7 @@ impl From<next::protocol::Ident> for Uuid {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct EndPoint {
     pub host: String,
     pub port: u16,
@@ -113,6 +113,7 @@ impl From<next::protocol::OperationIn> for OperationIn {
     }
 }
 
+#[derive(Debug)]
 pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
     StreamRead(StreamRead),
@@ -121,6 +122,8 @@ pub enum Reply {
     ProgramsListed(ProgramListed),
     ProgramKilled(ProgramKilled),
     ProgramObtained(ProgramObtained),
+    ServerDisconnected,
+    Error(String),
 }
 
 pub struct OperationOut {
@@ -157,6 +160,7 @@ impl From<next::protocol::OperationOut> for OperationOut {
             operation_out::Operation::ProgramKilled(resp) => Reply::ProgramKilled(resp.into()),
 
             operation_out::Operation::ProgramGot(resp) => Reply::ProgramObtained(resp.into()),
+            operation_out::Operation::Error(e) => Reply::Error(e),
         };
 
         Self { correlation, reply }
@@ -165,6 +169,7 @@ impl From<next::protocol::OperationOut> for OperationOut {
 
 impl TryFrom<OperationOut> for next::protocol::OperationOut {
     type Error = eyre::Report;
+
     fn try_from(value: OperationOut) -> eyre::Result<Self> {
         let correlation = Some(value.correlation.into());
         let operation = match value.reply {
@@ -183,6 +188,12 @@ impl TryFrom<OperationOut> for next::protocol::OperationOut {
             Reply::ProgramKilled(resp) => operation_out::Operation::ProgramKilled(resp.into()),
 
             Reply::ProgramObtained(resp) => operation_out::Operation::ProgramGot(resp.into()),
+
+            Reply::ServerDisconnected => {
+                eyre::bail!("not supposed to send server disconnected message to the server");
+            }
+
+            Reply::Error(e) => operation_out::Operation::Error(e),
         };
 
         Ok(Self {
@@ -1074,6 +1085,7 @@ impl<A> ReadStreamCompleted<A> {
     }
 }
 
+#[derive(Debug)]
 pub enum StreamRead {
     EndOfStream,
     EventAppeared(Record),
@@ -1116,6 +1128,7 @@ impl TryFrom<StreamRead> for operation_out::StreamRead {
     }
 }
 
+#[derive(Debug)]
 pub enum SubscriptionConfirmation {
     StreamName(String),
     ProcessId(Uuid),
@@ -1205,6 +1218,7 @@ impl From<operation_out::subscription_event::Error> for SubscriptionError {
     }
 }
 
+#[derive(Debug)]
 pub enum DeleteStreamCompleted {
     Success(WriteResult),
     Error(DeleteError),
@@ -1220,6 +1234,7 @@ impl DeleteStreamCompleted {
     }
 }
 
+#[derive(Debug)]
 pub enum DeleteError {
     StreamDeleted,
     WrongExpectedRevision(WrongExpectedRevisionError),

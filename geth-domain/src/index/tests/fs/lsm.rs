@@ -75,8 +75,10 @@ fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
 /// When scanning, it will access to sstables.
 #[test]
 fn test_fs_lsm_sync() -> io::Result<()> {
-    let mut setts = LsmSettings::default();
-    setts.mem_table_max_size = MEM_TABLE_ENTRY_SIZE;
+    let setts = LsmSettings {
+        mem_table_max_size: MEM_TABLE_ENTRY_SIZE,
+        ..Default::default()
+    };
 
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
@@ -135,8 +137,8 @@ fn test_fs_lsm_serialization() -> io::Result<()> {
 
     assert_eq!(lsm.logical_position, actual.logical_position);
 
-    let actual_table_1 = actual.levels.get(&0).unwrap().front().clone().unwrap();
-    let actual_table_2 = actual.levels.get(&1).unwrap().front().clone().unwrap();
+    let actual_table_1 = actual.levels.get(&0).unwrap().front().unwrap();
+    let actual_table_2 = actual.levels.get(&1).unwrap().front().unwrap();
 
     assert_eq!(table1.id, actual_table_1.id);
     assert_eq!(table1.metas, actual_table_1.metas);

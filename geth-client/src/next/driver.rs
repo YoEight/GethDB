@@ -5,7 +5,7 @@ use eyre::bail;
 use uuid::Uuid;
 
 use geth_common::generated::next::protocol;
-use geth_common::{EndPoint, Operation, OperationIn, OperationOut};
+use geth_common::{EndPoint, Operation, OperationIn, OperationOut, Reply};
 
 use crate::next::{connect_to_node, Command, ConnErr, Connection, Mailbox};
 
@@ -102,6 +102,18 @@ impl Driver {
         }
 
         tracing::warn!("received an event that is not related to any command");
+    }
+
+    pub fn handle_disconnect(&mut self) {
+        tracing::warn!("connection was closed by the server");
+        self.connection = None;
+
+        for (correlation, cmd) in self.registry.drain() {
+            let _ = cmd.resp.send(OperationOut {
+                correlation,
+                reply: Reply::ServerDisconnected,
+            });
+        }
     }
 
     /// We might consider implementing a retry logic here.
