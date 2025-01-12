@@ -228,13 +228,17 @@ where
                             proc.last_received_request = Uuid::nil();
                         }
 
-                        let _ = proc.mailbox.send(Item::Mail(mail));
+                        if !proc.mailbox.send(Item::Mail(mail)) {
+                            self.handle_terminate(dest, None);
+                        }
                     }
                 }
 
                 Item::Stream(stream) => {
                     if let Some(proc) = self.catalog.monitor.get(&dest) {
-                        let _ = proc.mailbox.send(Item::Stream(stream));
+                        if !proc.mailbox.send(Item::Stream(stream)) {
+                            self.handle_terminate(dest, None);
+                        }
                     }
                 }
             },
@@ -285,51 +289,7 @@ where
                 }
             }
 
-            ManagerCommand::ProcTerminated { id, error } => {
-                if let Some(running) = self.catalog.terminate(id) {
-                    if let Some(e) = error {
-                        tracing::error!(
-                            "process {:?}:{} terminated with error {}",
-                            running.proc,
-                            id,
-                            e
-                        );
-                    } else {
-                        tracing::info!("process {:?}:{} terminated", running.proc, id);
-                    }
-
-                    if let Some(resp) = self.requests.remove(&running.last_received_request) {
-                        tracing::warn!(
-                            "process {:?}:{} terminated with pending request",
-                            running.proc,
-                            id
-                        );
-
-                        let _ = resp.send(Mail {
-                            origin: running.id,
-                            correlation: running.last_received_request,
-                            payload: Messages::Responses(Responses::FatalError),
-                            created: Instant::now(),
-                        });
-                    }
-                }
-
-                if self.closing {
-                    self.processes_shutting_down = self
-                        .processes_shutting_down
-                        .checked_sub(1)
-                        .unwrap_or_default();
-
-                    if self.processes_shutting_down == 0 {
-                        tracing::info!("process manager completed shutdown");
-                        for resp in self.close_resp.drain(..) {
-                            let _ = resp.send(());
-                        }
-
-                        self.queue.close();
-                    }
-                }
-            }
+            ManagerCommand::ProcTerminated { id, error } => self.handle_terminate(id, error),
 
             ManagerCommand::Shutdown { resp } => {
                 if !self.closing {
@@ -350,6 +310,52 @@ where
         }
 
         Ok(())
+    }
+
+    fn handle_terminate(&mut self, id: ProcId, error: Option<eyre::Report>) {
+        if let Some(running) = self.catalog.terminate(id) {
+            if let Some(e) = error {
+                tracing::error!(
+                    "process {:?}:{} terminated with error {}",
+                    running.proc,
+                    id,
+                    e
+                );
+            } else {
+                tracing::info!("process {:?}:{} terminated", running.proc, id);
+            }
+
+            if let Some(resp) = self.requests.remove(&running.last_received_request) {
+                tracing::warn!(
+                    "process {:?}:{} terminated with pending request",
+                    running.proc,
+                    id
+                );
+
+                let _ = resp.send(Mail {
+                    origin: running.id,
+                    correlation: running.last_received_request,
+                    payload: Messages::Responses(Responses::FatalError),
+                    created: Instant::now(),
+                });
+            }
+        }
+
+        if self.closing {
+            self.processes_shutting_down = self
+                .processes_shutting_down
+                .checked_sub(1)
+                .unwrap_or_default();
+
+            if self.processes_shutting_down == 0 {
+                tracing::info!("process manager completed shutdown");
+                for resp in self.close_resp.drain(..) {
+                    let _ = resp.send(());
+                }
+
+                self.queue.close();
+            }
+        }
     }
 }
 
