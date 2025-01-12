@@ -10,6 +10,13 @@ pub enum Messages {
     Responses(Responses),
 }
 
+#[cfg(test)]
+impl Messages {
+    pub fn is_fatal_error(&self) -> bool {
+        matches!(self, Messages::Responses(Responses::FatalError))
+    }
+}
+
 impl From<IndexRequests> for Messages {
     fn from(req: IndexRequests) -> Self {
         Messages::Requests(Requests::Index(req))

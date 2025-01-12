@@ -11,6 +11,7 @@ fn test_catalog() -> Catalog {
     Catalog::builder()
         .register(Proc::Echo)
         .register(Proc::Sink)
+        .register(Proc::Panic)
         .build()
 }
 
@@ -87,6 +88,34 @@ async fn test_shutdown_reported_properly() -> eyre::Result<()> {
     manager.shutdown().await?;
 
     assert!(manager.wait_for(Proc::Echo).await.is_err());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_request_returns_when_proc_panicked() -> eyre::Result<()> {
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let proc_id = manager.wait_for(Proc::Panic).await?;
+
+    let resp = manager
+        .request(proc_id, TestSinkResponses::Stream(42).into())
+        .await?;
+
+    assert!(resp.payload.is_fatal_error());
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_stream_returns_when_proc_panicked() -> eyre::Result<()> {
+    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let proc_id = manager.wait_for(Proc::Panic).await?;
+
+    let mut resp = manager
+        .request_stream(proc_id, TestSinkResponses::Stream(42).into())
+        .await?;
+
+    assert!(resp.recv().await.is_none());
 
     Ok(())
 }
