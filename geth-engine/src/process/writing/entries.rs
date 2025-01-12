@@ -72,6 +72,10 @@ impl LogEntries for ProposeEntries {
         propose_serialize(event, buffer);
     }
 
+    fn expected_count(&self) -> usize {
+        self.events.len()
+    }
+
     fn commit(&mut self, entry: LogEntry) {
         let propose = self.current.take().unwrap();
         self.committed.push(Record {

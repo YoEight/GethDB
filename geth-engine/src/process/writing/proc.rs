@@ -93,23 +93,37 @@ where
 
                     let revision = current_revision.next_revision();
                     let mut entries = ProposeEntries::new(ident, revision, events);
-                    let receipt = log_writer.append(&mut entries)?;
-                    env.handle.block_on(index_client.store(entries.indexes))?;
 
-                    env.client.reply(
-                        mail.origin,
-                        mail.correlation,
-                        WriteResponses::Committed {
-                            start_position: receipt.start_position,
-                            next_position: receipt.next_position,
-                            next_expected_version: ExpectedRevision::Revision(entries.revision),
+                    match log_writer.append(&mut entries) {
+                        Err(e) => {
+                            tracing::error!("error when appending to stream: {}", e);
+                            env.client.reply(
+                                mail.origin,
+                                mail.correlation,
+                                WriteResponses::Error.into(),
+                            )?;
                         }
-                        .into(),
-                    )?;
 
-                    env.handle.block_on(sub_client.push(entries.committed))?;
+                        Ok(receipt) => {
+                            env.handle.block_on(index_client.store(entries.indexes))?;
 
-                    tracing::debug!("complete request, waiting for next message");
+                            env.client.reply(
+                                mail.origin,
+                                mail.correlation,
+                                WriteResponses::Committed {
+                                    start_position: receipt.start_position,
+                                    next_position: receipt.next_position,
+                                    next_expected_version: ExpectedRevision::Revision(
+                                        entries.revision,
+                                    ),
+                                }
+                                .into(),
+                            )?;
+
+                            env.handle.block_on(sub_client.push(entries.committed))?;
+                        }
+                    }
+
                     continue;
                 }
 
