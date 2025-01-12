@@ -78,7 +78,7 @@ impl WriterClient {
                 _ => eyre::bail!("unexpected response when appending to stream: '{}'", stream),
             }
         } else {
-            eyre::bail!("internal protocol error when appending to the writer process");
+            eyre::bail!("internal error: writer process is unaivailable");
         }
     }
 
