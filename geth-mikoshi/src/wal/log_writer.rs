@@ -43,6 +43,9 @@ where
         })
     }
 
+    // TODO - Currenly, there is no way to ascertain that a batch of entries is written to the log
+    // successfully. Meaning, if the server was to crash in the middle of writing a batch,
+    // we have no way to know that batch write was successful or incomplete.
     pub fn append<E>(&mut self, entries: &mut E) -> eyre::Result<LogReceipt>
     where
         E: LogEntries,

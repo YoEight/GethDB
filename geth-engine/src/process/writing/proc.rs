@@ -63,6 +63,7 @@ where
                         }
                     };
 
+                    let propose_event_count = events.len();
                     let key = mikoshi_hash(&ident);
                     let current_revision =
                         env.handle.block_on(index_client.latest_revision(key))?;

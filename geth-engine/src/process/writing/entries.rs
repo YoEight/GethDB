@@ -36,12 +36,12 @@ impl Default for ProposeEntries {
 
 impl LogEntries for ProposeEntries {
     fn move_next(&mut self) -> bool {
-        if let Some(event) = self.events.next() {
-            self.current = Some(event);
-            return true;
-        }
-
-        self.current = None;
+        // if let Some(event) = self.events.next() {
+        //     self.current = Some(event);
+        //     return true;
+        // }
+        //
+        // self.current = None;
         false
     }
 

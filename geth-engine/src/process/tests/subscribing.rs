@@ -32,6 +32,8 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
         .await?
         .success()?;
 
+    tracing::debug!("append request went through!");
+
     let mut count = 0;
     while let Some(record) = stream.next().await? {
         tracing::debug!("received entry {}/10", count + 1);
