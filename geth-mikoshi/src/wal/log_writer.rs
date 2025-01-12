@@ -43,9 +43,6 @@ where
         })
     }
 
-    // TODO - Currenly, there is no way to ascertain that a batch of entries is written to the log
-    // successfully. Meaning, if the server was to crash in the middle of writing a batch,
-    // we have no way to know that batch write was successful or incomplete.
     pub fn append<E>(&mut self, entries: &mut E) -> eyre::Result<LogReceipt>
     where
         E: LogEntries,
@@ -53,8 +50,10 @@ where
         let mut position = self.writer;
         let starting_position = position;
         let storage = self.container.storage();
-
         let mut chunk = self.container.ongoing()?;
+        let expected_count = entries.expected_count();
+        let mut count = 0usize;
+
         while entries.move_next() {
             let entry_size = entries.current_entry_size();
             let actual_size = entry_size + ENTRY_META_SIZE;
@@ -96,14 +95,22 @@ where
                 payload,
             };
 
+            count += 1;
             position += actual_size as u64;
             storage.write_to(chunk.file_id(), local_offset, record)?;
             entries.commit(entry);
+        }
 
-            self.writer = position;
+        if count != expected_count {
+            eyre::bail!(
+                "expected {} entries, but only wrote {}",
+                expected_count,
+                count
+            );
         }
 
         flush_writer_chk(storage, self.writer)?;
+        self.writer = position;
 
         Ok(LogReceipt {
             start_position: starting_position,

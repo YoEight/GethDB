@@ -36,12 +36,12 @@ impl Default for ProposeEntries {
 
 impl LogEntries for ProposeEntries {
     fn move_next(&mut self) -> bool {
-        // if let Some(event) = self.events.next() {
-        //     self.current = Some(event);
-        //     return true;
-        // }
-        //
-        // self.current = None;
+        if let Some(event) = self.events.next() {
+            self.current = Some(event);
+            return true;
+        }
+
+        self.current = None;
         false
     }
 
@@ -70,6 +70,10 @@ impl LogEntries for ProposeEntries {
         buffer.put_u16_le(self.ident.len() as u16);
         buffer.extend_from_slice(self.ident.as_bytes());
         propose_serialize(event, buffer);
+    }
+
+    fn expected_count(&self) -> usize {
+        self.events.len()
     }
 
     fn commit(&mut self, entry: LogEntry) {

@@ -9,11 +9,13 @@ use serde::{Deserialize, Serialize};
 struct RawEntries {
     entries: vec::IntoIter<Bytes>,
     current: Option<Bytes>,
+    expected_count: usize,
 }
 
 impl RawEntries {
     fn new(entries: Vec<Bytes>) -> Self {
         Self {
+            expected_count: entries.len(),
             entries: entries.into_iter(),
             current: None,
         }
@@ -36,6 +38,10 @@ impl LogEntries for RawEntries {
 
     fn write_current_entry(&mut self, buffer: &mut BytesMut, _: u64) {
         buffer.extend_from_slice(self.current.as_ref().unwrap());
+    }
+
+    fn expected_count(&self) -> usize {
+        self.expected_count
     }
 }
 

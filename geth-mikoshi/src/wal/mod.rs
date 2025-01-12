@@ -13,6 +13,7 @@ pub trait LogEntries {
     fn move_next(&mut self) -> bool;
     fn current_entry_size(&self) -> usize;
     fn write_current_entry(&mut self, buffer: &mut BytesMut, position: u64);
+    fn expected_count(&self) -> usize;
     fn commit(&mut self, _: LogEntry) {}
 }
 
