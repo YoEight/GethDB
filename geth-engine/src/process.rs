@@ -25,6 +25,8 @@ mod echo;
 pub mod grpc;
 pub mod indexing;
 mod messages;
+#[cfg(test)]
+mod panic;
 pub mod reading;
 mod resource;
 #[cfg(test)]
@@ -69,6 +71,8 @@ pub enum Proc {
     Echo,
     #[cfg(test)]
     Sink,
+    #[cfg(test)]
+    Panic,
 }
 
 enum Topology {
@@ -281,6 +285,9 @@ where
 
                         #[cfg(test)]
                         Proc::Sink => spawn(options, client, proc, sink::run),
+
+                        #[cfg(test)]
+                        Proc::Panic => spawn(options, client, proc, panic::run),
                     };
 
                     let proc_id = running_proc.id;
