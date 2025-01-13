@@ -213,7 +213,7 @@ message OperationOut {
     repeated ProgramSummary programs = 1;
 
     message ProgramSummary {
-      Ident id = 1;
+      uint64 id = 1;
       string name = 2;
       int64 started_at = 3;
     }
