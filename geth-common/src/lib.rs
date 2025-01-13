@@ -1410,7 +1410,7 @@ pub struct ProgramListed {
 
 #[derive(Clone, Debug)]
 pub struct ProgramSummary {
-    pub id: Uuid,
+    pub id: u64,
     pub name: String,
     pub started_at: DateTime<Utc>,
 }
@@ -1418,7 +1418,7 @@ pub struct ProgramSummary {
 impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
     fn from(value: operation_out::programs_listed::ProgramSummary) -> Self {
         Self {
-            id: value.id.unwrap().into(),
+            id: value.id,
             name: value.name,
             started_at: Utc.timestamp_opt(value.started_at, 0).unwrap(),
         }
@@ -1428,7 +1428,7 @@ impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
 impl From<ProgramSummary> for operation_out::programs_listed::ProgramSummary {
     fn from(value: ProgramSummary) -> Self {
         Self {
-            id: Some(value.id.into()),
+            id: value.id,
             name: value.name,
             started_at: value.started_at.timestamp(),
         }

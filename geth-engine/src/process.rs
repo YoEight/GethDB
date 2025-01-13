@@ -1,4 +1,6 @@
 use bb8::Pool;
+use chrono::Utc;
+use geth_common::ProgramSummary;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
@@ -77,7 +79,15 @@ pub enum Proc {
 
 enum Topology {
     Singleton(Option<ProcId>),
-    // Multiple(Vec<ProcId>),
+    Multiple {
+        limit: usize,
+        instances: HashMap<ProcId, Instance>,
+    },
+}
+
+struct Instance {
+    id: ProcId,
+    name: String,
 }
 
 struct RunningProc {
@@ -93,10 +103,55 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProcId>> {
+    fn lookup(&mut self, proc: &Proc, ident: Option<String>) -> eyre::Result<Vec<ProgramSummary>> {
         if let Some(topology) = self.inner.get(proc) {
             return match &topology {
-                Topology::Singleton(prev) => Ok(*prev),
+                Topology::Singleton(prev) => {
+                    if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
+                        Ok(vec![ProgramSummary {
+                            id: run.id,
+                            name: format!("{:?}", proc),
+                            started_at: Utc::now(), // TODO - no use for date times.
+                        }])
+                    } else {
+                        Ok(vec![])
+                    }
+                }
+
+                Topology::Multiple { instances, .. } => {
+                    if let Some(ident) = ident {
+                        for i in instances.values() {
+                            if i.name == ident {
+                                if let Some(run) = self.monitor.get(&i.id) {
+                                    return Ok(vec![ProgramSummary {
+                                        id: run.id,
+                                        name: i.name.clone(),
+                                        started_at: Utc::now(), // TODO - no use for date times.
+                                    }]);
+                                }
+
+                                // self cleaning procedure in case we had a dangling instance.
+                                self.monitor.remove(&i.id);
+                            }
+                        }
+
+                        Ok(vec![])
+                    } else {
+                        let mut procs = Vec::new();
+
+                        for i in instances.values() {
+                            if let Some(run) = self.monitor.get(&i.id) {
+                                procs.push(ProgramSummary {
+                                    id: run.id,
+                                    name: i.name.clone(),
+                                    started_at: Utc::now(), // TODO - no use for date times.
+                                });
+                            }
+                        }
+
+                        Ok(procs)
+                    }
+                }
             };
         }
 
@@ -118,6 +173,17 @@ impl Catalog {
 
                     *prev = Some(running.id);
                 }
+
+                Topology::Multiple { instances, .. } => {
+                    let instance = Instance {
+                        id: running.id,
+                        // TODO - this is not correct as we would like to pass the name from the
+                        // user.
+                        name: format!("{:?}-{:04}", running.proc, running.id),
+                    };
+
+                    instances.insert(running.id, instance);
+                }
             }
 
             self.monitor.insert(running.id, running);
@@ -134,6 +200,10 @@ impl Catalog {
                 match &mut topology {
                     Topology::Singleton(prev) => {
                         *prev = None;
+                    }
+
+                    Topology::Multiple { instances, .. } => {
+                        instances.remove(&proc_id);
                     }
                 }
             }
@@ -216,8 +286,8 @@ where
             // ManagerCommand::Spawn { parent: _, resp: _ } => {
             //     // TODO - might change that command to start.
             // }
-            ManagerCommand::Find { proc, resp } => {
-                let _ = resp.send(self.catalog.lookup(&proc)?);
+            ManagerCommand::Find { proc, resp, ident } => {
+                let _ = resp.send(self.catalog.lookup(&proc, ident)?);
             }
 
             ManagerCommand::Send { dest, item, resp } => match item {
@@ -248,8 +318,9 @@ where
             },
 
             ManagerCommand::WaitFor { proc, resp } => {
-                if let Some(proc_id) = self.catalog.lookup(&proc)? {
-                    let _ = resp.send(proc_id);
+                // TODO - we might consider doing shuffling in the event of multiple instances.
+                if let Some(summary) = self.catalog.lookup(&proc, None)?.pop() {
+                    let _ = resp.send(summary.id);
                 } else {
                     let id = self.gen_proc_id();
                     let runtime = self.runtime.clone();
@@ -384,7 +455,8 @@ pub enum ManagerCommand {
     // },
     Find {
         proc: Proc,
-        resp: oneshot::Sender<Option<ProcId>>,
+        ident: Option<String>,
+        resp: oneshot::Sender<Vec<ProgramSummary>>,
     },
 
     Send {
@@ -440,18 +512,22 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProcId>> {
+    pub async fn find(
+        &self,
+        proc: Proc,
+        ident: Option<String>,
+    ) -> eyre::Result<Vec<ProgramSummary>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::Find { proc, resp })
+            .send(ManagerCommand::Find { proc, resp, ident })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
         }
 
         match receiver.await {
-            Ok(id) => Ok(id),
+            Ok(ps) => Ok(ps),
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
     }
