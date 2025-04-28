@@ -64,10 +64,11 @@ async fn test_streaming() -> eyre::Result<()> {
 async fn test_find_proc() -> eyre::Result<()> {
     let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?;
-    let find_proc_id = manager.find(Proc::Echo, None).await?;
+    let procs = manager.find(Proc::Echo, None).await?;
+    let find_proc_id = procs.first();
 
     assert!(find_proc_id.is_some());
-    assert_eq!(proc_id, find_proc_id.unwrap());
+    assert_eq!(proc_id, find_proc_id.unwrap().id);
 
     Ok(())
 }
