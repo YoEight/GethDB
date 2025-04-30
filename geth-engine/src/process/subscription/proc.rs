@@ -1,5 +1,7 @@
 use crate::names::types::STREAM_DELETED;
-use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
+use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
+use crate::process::subscription::pyro::create_pyro_runtime;
+use crate::process::subscription::SubscriptionClient;
 use crate::process::{Item, ProcessEnv};
 use geth_common::Record;
 use std::collections::HashMap;
@@ -37,6 +39,7 @@ impl Register {
     }
 }
 
+#[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pubsub"))]
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     let mut reg = Register::default();
     while let Some(item) = env.queue.recv().await {
@@ -44,19 +47,49 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
             Item::Stream(stream) => {
                 if let Ok(req) = stream.payload.try_into() {
                     match req {
-                        SubscribeRequests::Subscribe { ident } => {
-                            if stream
-                                .sender
-                                .send(SubscribeResponses::Confirmed.into())
-                                .is_ok()
-                            {
-                                reg.register(ident, stream.sender);
+                        SubscribeRequests::Subscribe(r#type) => match r#type {
+                            SubscriptionType::Stream { ident } => {
+                                if stream
+                                    .sender
+                                    .send(SubscribeResponses::Confirmed.into())
+                                    .is_ok()
+                                {
+                                    reg.register(ident, stream.sender);
+                                    continue;
+                                }
+
+                                tracing::warn!(stream = ident, "subscription wasn't registered because nothing is listening to it");
                             }
-                        }
+
+                            SubscriptionType::Program { name, code } => {
+                                let client =
+                                    SubscriptionClient::new(env.client.id, env.client.clone());
+
+                                let runtime = match create_pyro_runtime(client, &name) {
+                                    Ok(runtime) => runtime,
+                                    Err(e) => {
+                                        tracing::error!(name = name, error = %e, "error when creating a pyro runtime");
+                                        let _ =
+                                            stream.sender.send(SubscribeResponses::Error(e).into());
+                                        continue;
+                                    }
+                                };
+
+                                let process = match runtime.compile(&code) {
+                                    Ok(process) => process,
+                                    Err(e) => {
+                                        tracing::error!(name = name, error = %e, "error when compiling pyro program");
+                                        let _ =
+                                            stream.sender.send(SubscribeResponses::Error(e).into());
+                                        continue;
+                                    }
+                                };
+                            }
+                        },
                         _ => {
                             tracing::warn!(
-                                "unsupported subscription streaming request {}",
-                                stream.correlation
+                                correlation = stream.correlation.to_string(),
+                                "unsupported subscription streaming request",
                             );
                         }
                     }

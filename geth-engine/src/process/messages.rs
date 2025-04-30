@@ -230,8 +230,14 @@ pub enum ReadRequests {
 
 #[derive(Debug)]
 pub enum SubscribeRequests {
-    Subscribe { ident: String },
+    Subscribe(SubscriptionType),
     Push { events: Vec<Record> },
+}
+
+#[derive(Debug)]
+pub enum SubscriptionType {
+    Stream { ident: String },
+    Program { name: String, code: String },
 }
 
 #[derive(Debug)]
@@ -282,7 +288,7 @@ pub enum ReadResponses {
 
 #[derive(Debug)]
 pub enum SubscribeResponses {
-    Error,
+    Error(eyre::Report),
     Confirmed,
     Record(Record),
 }

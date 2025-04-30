@@ -1,4 +1,4 @@
-use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
+use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
 use crate::process::{ManagerClient, Proc, ProcId, ProcessRawEnv};
 use geth_common::Record;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -16,8 +16,8 @@ impl Streaming {
     pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
         if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_into().ok()) {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("error when streaming from the pubsub process");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
                 SubscribeResponses::Record(record) => {
@@ -55,17 +55,17 @@ impl SubscriptionClient {
             .inner
             .request_stream(
                 self.target,
-                SubscribeRequests::Subscribe {
+                SubscribeRequests::Subscribe(SubscriptionType::Stream {
                     ident: stream_name.to_string(),
-                }
+                })
                 .into(),
             )
             .await?;
 
         if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("internal error");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
                 SubscribeResponses::Confirmed => {
@@ -92,8 +92,8 @@ impl SubscriptionClient {
 
         if let Ok(resp) = resp.payload.try_into() {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("internal error");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
                 SubscribeResponses::Confirmed => {
