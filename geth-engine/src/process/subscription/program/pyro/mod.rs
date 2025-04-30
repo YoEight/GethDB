@@ -13,7 +13,9 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 
-use super::SubscriptionClient;
+use crate::process::subscription::SubscriptionClient;
+
+pub mod worker;
 
 struct EventEntry;
 
@@ -31,7 +33,7 @@ impl PyroType for EventRecord {
             .rec()
             .prop::<String>("id")
             .prop::<String>("stream_name")
-            .prop::<String>("event_type")
+            .prop::<String>("class")
             .prop::<i64>("event_revision")
             .prop::<i64>("position")
             .prop::<EventEntry>("payload")
@@ -222,6 +224,10 @@ pub struct PyroRuntime {
 impl PyroRuntime {
     pub fn compile(&self, code: &str) -> eyre::Result<PyroProcess> {
         self.engine.compile(code)
+    }
+
+    pub async fn recv(&mut self) -> Option<RuntimeValue> {
+        self.output.recv().await
     }
 }
 

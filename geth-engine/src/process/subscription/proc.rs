@@ -1,6 +1,5 @@
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
-use crate::process::subscription::pyro::create_pyro_runtime;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::{Item, ProcessEnv};
 use geth_common::Record;
@@ -61,30 +60,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 tracing::warn!(stream = ident, "subscription wasn't registered because nothing is listening to it");
                             }
 
-                            SubscriptionType::Program { name, code } => {
-                                let client =
-                                    SubscriptionClient::new(env.client.id, env.client.clone());
-
-                                let runtime = match create_pyro_runtime(client, &name) {
-                                    Ok(runtime) => runtime,
-                                    Err(e) => {
-                                        tracing::error!(name = name, error = %e, "error when creating a pyro runtime");
-                                        let _ =
-                                            stream.sender.send(SubscribeResponses::Error(e).into());
-                                        continue;
-                                    }
-                                };
-
-                                let process = match runtime.compile(&code) {
-                                    Ok(process) => process,
-                                    Err(e) => {
-                                        tracing::error!(name = name, error = %e, "error when compiling pyro program");
-                                        let _ =
-                                            stream.sender.send(SubscribeResponses::Error(e).into());
-                                        continue;
-                                    }
-                                };
-                            }
+                            SubscriptionType::Program { name, code } => {}
                         },
                         _ => {
                             tracing::warn!(

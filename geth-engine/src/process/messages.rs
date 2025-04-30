@@ -1,6 +1,7 @@
 use geth_common::{Direction, ExpectedRevision, Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::domain::index::CurrentRevision;
 
@@ -165,6 +166,17 @@ impl TryFrom<Messages> for WriteResponses {
     }
 }
 
+impl TryFrom<Messages> for ProgramRequests {
+    type Error = ();
+
+    fn try_from(msg: Messages) -> Result<Self, ()> {
+        match msg {
+            Messages::Requests(Requests::Program(req)) => Ok(req),
+            _ => Err(()),
+        }
+    }
+}
+
 impl TryFrom<Messages> for TestSinkRequests {
     type Error = ();
 
@@ -193,6 +205,7 @@ pub enum Requests {
     Read(ReadRequests),
     Subscribe(SubscribeRequests),
     Write(WriteRequests),
+    Program(ProgramRequests),
     TestSink(TestSinkRequests),
 }
 
@@ -251,6 +264,15 @@ pub enum WriteRequests {
     Delete {
         ident: String,
         expected: ExpectedRevision,
+    },
+}
+
+#[derive(Debug)]
+pub enum ProgramRequests {
+    Start {
+        name: String,
+        code: String,
+        sender: UnboundedSender<Messages>,
     },
 }
 

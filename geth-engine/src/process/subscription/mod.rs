@@ -1,6 +1,6 @@
 mod client;
 mod proc;
-mod pyro;
+mod program;
 
 pub use client::SubscriptionClient;
 pub use proc::run;
