@@ -11,6 +11,7 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
+use subscription::pyro;
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Notify};
@@ -69,6 +70,7 @@ pub enum Proc {
     Indexing,
     PubSub,
     Grpc,
+    PyroWorker,
     #[cfg(test)]
     Echo,
     #[cfg(test)]
@@ -103,54 +105,24 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    fn lookup(&mut self, proc: &Proc, ident: Option<String>) -> eyre::Result<Vec<ProgramSummary>> {
+    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
         if let Some(topology) = self.inner.get(proc) {
             return match &topology {
                 Topology::Singleton(prev) => {
                     if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
-                        Ok(vec![ProgramSummary {
+                        Ok(Some(ProgramSummary {
                             id: run.id,
                             name: format!("{:?}", proc),
                             started_at: Utc::now(), // TODO - no use for date times.
-                        }])
+                        }))
                     } else {
-                        Ok(vec![])
+                        Ok(None)
                     }
                 }
 
-                Topology::Multiple { instances, .. } => {
-                    if let Some(ident) = ident {
-                        for i in instances.values() {
-                            if i.name == ident {
-                                if let Some(run) = self.monitor.get(&i.id) {
-                                    return Ok(vec![ProgramSummary {
-                                        id: run.id,
-                                        name: i.name.clone(),
-                                        started_at: Utc::now(), // TODO - no use for date times.
-                                    }]);
-                                }
-
-                                // self cleaning procedure in case we had a dangling instance.
-                                self.monitor.remove(&i.id);
-                            }
-                        }
-
-                        Ok(vec![])
-                    } else {
-                        let mut procs = Vec::new();
-
-                        for i in instances.values() {
-                            if let Some(run) = self.monitor.get(&i.id) {
-                                procs.push(ProgramSummary {
-                                    id: run.id,
-                                    name: i.name.clone(),
-                                    started_at: Utc::now(), // TODO - no use for date times.
-                                });
-                            }
-                        }
-
-                        Ok(procs)
-                    }
+                Topology::Multiple { .. } => {
+                    // It doesn't really make sense for this topology.
+                    Ok(None)
                 }
             };
         }
@@ -246,6 +218,18 @@ impl CatalogBuilder {
         self
     }
 
+    pub fn register_multiple(mut self, proc: Proc, limit: usize) -> Self {
+        self.inner.insert(
+            proc,
+            Topology::Multiple {
+                limit,
+                instances: Default::default(),
+            },
+        );
+
+        self
+    }
+
     pub fn build(self) -> Catalog {
         Catalog {
             inner: self.inner,
@@ -286,8 +270,8 @@ where
             // ManagerCommand::Spawn { parent: _, resp: _ } => {
             //     // TODO - might change that command to start.
             // }
-            ManagerCommand::Find { proc, resp, ident } => {
-                let _ = resp.send(self.catalog.lookup(&proc, ident)?);
+            ManagerCommand::Find { proc, resp } => {
+                let _ = resp.send(self.catalog.lookup(&proc)?);
             }
 
             ManagerCommand::Send { dest, item, resp } => match item {
@@ -319,7 +303,7 @@ where
 
             ManagerCommand::WaitFor { proc, resp } => {
                 // TODO - we might consider doing shuffling in the event of multiple instances.
-                if let Some(summary) = self.catalog.lookup(&proc, None)?.pop() {
+                if let Some(summary) = self.catalog.lookup(&proc)? {
                     let _ = resp.send(summary.id);
                 } else {
                     let id = self.gen_proc_id();
@@ -345,6 +329,8 @@ where
 
                         Proc::PubSub => spawn(options, client, proc, subscription::run),
                         Proc::Grpc => spawn(options, client, proc, grpc::run),
+
+                        Proc::PyroWorker => spawn(options, client, proc, pyro::worker::run),
 
                         Proc::Root => {
                             let _ = resp.send(0);
@@ -455,8 +441,7 @@ pub enum ManagerCommand {
     // },
     Find {
         proc: Proc,
-        ident: Option<String>,
-        resp: oneshot::Sender<Vec<ProgramSummary>>,
+        resp: oneshot::Sender<Option<ProgramSummary>>,
     },
 
     Send {
@@ -512,15 +497,11 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn find(
-        &self,
-        proc: Proc,
-        ident: Option<String>,
-    ) -> eyre::Result<Vec<ProgramSummary>> {
+    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::Find { proc, resp, ident })
+            .send(ManagerCommand::Find { proc, resp })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
@@ -562,6 +543,7 @@ impl ManagerClient {
         Ok(())
     }
 
+    /// TODO - need to write an implementation where a request doesn't fail if the targetted process has existed.
     pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
         let (resp, receiver) = oneshot::channel();
         if self
@@ -678,6 +660,7 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
         .register(Proc::Reading)
         .register(Proc::PubSub)
         .register(Proc::Grpc)
+        .register_multiple(Proc::PyroWorker, 8)
         .build();
 
     start_process_manager_with_catalog(options, catalog).await

@@ -66,6 +66,12 @@ impl From<WriteResponses> for Messages {
     }
 }
 
+impl From<ProgramRequests> for Messages {
+    fn from(req: ProgramRequests) -> Self {
+        Messages::Requests(Requests::Program(req))
+    }
+}
+
 impl From<ProgramResponses> for Messages {
     fn from(resp: ProgramResponses) -> Self {
         Messages::Responses(Responses::Program(resp))
@@ -376,5 +382,7 @@ pub enum ProgramResponses {
     Stats(ProgramStats),
     List(Vec<ProgramSummary>),
     Get(Option<ProgramSummary>),
+    Error(eyre::Report),
+    Started,
     Stopped,
 }

@@ -2,7 +2,8 @@ use tokio::sync::mpsc::UnboundedSender;
 
 use crate::process::messages::Messages;
 
-mod pyro;
+mod client;
+pub mod pyro;
 
 pub struct ProgramArgs {
     pub name: String,
