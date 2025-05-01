@@ -1,5 +1,12 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{self, AtomicU64},
+        Arc,
+    },
+};
 
+use chrono::{DateTime, Utc};
 use geth_common::Record;
 use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
 use pyro_runtime::{
@@ -9,7 +16,7 @@ use pyro_runtime::{
 use serde_json::Value;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    Mutex,
+    Mutex, RwLock,
 };
 use uuid::Uuid;
 
@@ -117,7 +124,7 @@ fn from_json_to_pyro_runtime_value(value: Value) -> eyre::Result<RuntimeValue> {
     }
 }
 
-fn from_runtime_value_to_json(value: RuntimeValue) -> eyre::Result<Value> {
+pub fn from_runtime_value_to_json(value: RuntimeValue) -> eyre::Result<Value> {
     match value {
         RuntimeValue::Channel(_) => eyre::bail!("Pyro channels can't be converted to JSON"),
         RuntimeValue::Abs(_) => eyre::bail!("Pyro anonymous clients can't be converted to JSON"),
@@ -219,6 +226,9 @@ impl PyroValue for SubServer {
 pub struct PyroRuntime {
     engine: Engine<NominalTyping>,
     output: UnboundedReceiver<RuntimeValue>,
+    subs: Arc<RwLock<Vec<String>>>,
+    pushed_events: Arc<AtomicU64>,
+    started: DateTime<Utc>,
 }
 
 impl PyroRuntime {
@@ -247,6 +257,10 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
 
     let (send_output, recv_output) = unbounded_channel();
     let name_subscribe = name.clone();
+    let subs = Arc::new(RwLock::new(Vec::new()));
+    let pushed_events = Arc::new(AtomicU64::new(0));
+    let subs_subscribe = subs.clone();
+    let pushed_events_subscribe = pushed_events.clone();
     let engine = Engine::with_nominal_typing()
         .stdlib(env)
         .register_type::<EventEntry>("Entry")
@@ -257,6 +271,8 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
 
             let local_client = client.clone();
             let name_subscribe_local = name_subscribe.clone();
+            let subs_subscribe_local = subs_subscribe.clone();
+            let pushed_events_subscribe_local = pushed_events_subscribe.clone();
             tokio::spawn(async move {
                 let mut streaming = local_client
                     .clone()
@@ -283,6 +299,11 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
                     "subscription is confirmed"
                 );
 
+                {
+                    let mut streams = subs_subscribe_local.write().await;
+                    streams.push(stream_name.clone());
+                }
+
                 while let Some(record) = streaming.next().await? {
                     if input.send(EventRecord(record).serialize()?).is_err() {
                         tracing::debug!(
@@ -295,6 +316,8 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
                             "subscription was dropped"
                         );
                     }
+
+                    pushed_events_subscribe_local.fetch_add(1, atomic::Ordering::SeqCst);
                 }
 
                 tracing::debug!(
@@ -316,5 +339,8 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
     Ok(PyroRuntime {
         engine,
         output: recv_output,
+        subs,
+        pushed_events,
+        started: Utc::now(),
     })
 }

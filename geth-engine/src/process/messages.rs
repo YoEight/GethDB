@@ -274,6 +274,14 @@ pub enum ProgramRequests {
         code: String,
         sender: UnboundedSender<Messages>,
     },
+
+    Stats {
+        name: String,
+    },
+
+    Stop {
+        name: String,
+    },
 }
 
 #[derive(Debug)]

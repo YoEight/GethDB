@@ -1,7 +1,16 @@
+use std::u64;
+
+use bytes::Bytes;
+use geth_common::{ContentType, Record};
+use uuid::Uuid;
+
 use crate::process::{
     messages::{ProgramRequests, SubscribeResponses},
     subscription::{
-        program::{pyro::create_pyro_runtime, ProgramArgs},
+        program::{
+            pyro::{create_pyro_runtime, from_runtime_value_to_json},
+            ProgramArgs,
+        },
         SubscriptionClient,
     },
     Item, ProcessEnv,
@@ -59,6 +68,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
     tracing::info!(name = args.name, "ready to do work");
     let mut prog_handle = tokio::spawn(process.run());
+    let mut revision = 0;
 
     loop {
         tokio::select! {
@@ -75,12 +85,49 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
             Some(item) = env.queue.recv() => {
                 if let Item::Mail(mail) = item {
-                    // implement supporting incoming requests like stats.
+                    if let Some(req) = mail.payload.try_into().ok() {
+                        match req {
+                            ProgramRequests::Stop { .. } => {
+                                tracing::info!(name = args.name, "program stopped");
+                                break;
+                            }
+
+                            ProgramRequests::Stats { .. } => todo!(),
+
+                            _ => {
+                                tracing::debug!("ignore program message")
+                            }
+                        }
+                    }
                 }
             }
 
             Some(output) = runtime.recv() => {
                 // let _ = args.output.send(SubscribeResponses::Output(output).into());
+                match from_runtime_value_to_json(output) {
+                    Ok(json) => {
+                        let resp = SubscribeResponses::Record(Record {
+                            id: Uuid::new_v4(),
+                            content_type: ContentType::Json,
+                            class: "event-emitted".to_string(),
+                            stream_name: args.name.clone(),
+                            revision,
+                            data: Bytes::from(serde_json::to_vec(&json)?),
+                            position: u64::MAX,
+                        });
+
+                        revision += 1;
+                        if args.output.send(resp.into()).is_err() {
+                            tracing::warn!("exiting program because nothing is listening");
+                            break;
+                        }
+                    }
+                    Err(e) => {
+                        tracing::error!(error = %e, "error when converting runtime value to JSON");
+                        let _ = args.output.send(SubscribeResponses::Error(e).into());
+                        break;
+                    }
+                }
             }
 
             else => {
