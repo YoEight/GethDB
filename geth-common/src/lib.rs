@@ -1499,7 +1499,7 @@ impl From<ProgramKilled> for operation_out::ProgramKilled {
 
 #[derive(Clone, Debug)]
 pub struct ProgramStats {
-    pub id: Uuid,
+    pub id: u64,
     pub name: String,
     pub source_code: String,
     pub subscriptions: Vec<String>,
@@ -1510,7 +1510,7 @@ pub struct ProgramStats {
 impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
     fn from(value: operation_out::program_obtained::ProgramStats) -> Self {
         Self {
-            id: value.id.unwrap().into(),
+            id: value.id,
             name: value.name,
             source_code: value.source_code,
             subscriptions: value.subscriptions,
@@ -1523,7 +1523,7 @@ impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
 impl From<ProgramStats> for operation_out::program_obtained::ProgramStats {
     fn from(value: ProgramStats) -> Self {
         Self {
-            id: Some(value.id.into()),
+            id: value.id,
             name: value.name,
             source_code: value.source_code,
             subscriptions: value.subscriptions,

@@ -239,7 +239,7 @@ message OperationOut {
     }
 
     message ProgramStats {
-      Ident id = 1;
+      uint64 id = 1;
       string name = 2;
       string source_code = 3;
       repeated string subscriptions = 4;

@@ -1,11 +1,11 @@
 use std::u64;
 
 use bytes::Bytes;
-use geth_common::{ContentType, Record};
+use geth_common::{ContentType, ProgramStats, ProgramSummary, Record};
 use uuid::Uuid;
 
 use crate::process::{
-    messages::{ProgramRequests, SubscribeResponses},
+    messages::{ProgramRequests, ProgramResponses, SubscribeResponses},
     subscription::{
         program::{
             pyro::{create_pyro_runtime, from_runtime_value_to_json},
@@ -67,13 +67,13 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     span.exit();
 
     tracing::info!(name = args.name, "ready to do work");
-    let mut prog_handle = tokio::spawn(process.run());
+    let mut execution = Box::pin(process.run());
     let mut revision = 0;
 
     loop {
         tokio::select! {
-            outcome = &mut prog_handle => {
-                if let Some(e) = outcome.err() {
+            outcome = &mut execution => {
+                if let Err(e) = outcome {
                     tracing::error!(name = args.name, error = %e, "error when running pyro program");
                     let _ = args.output.send(SubscribeResponses::Error(eyre::eyre!("program panicked")).into());
                 } else {
@@ -92,7 +92,24 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 break;
                             }
 
-                            ProgramRequests::Stats { .. } => todo!(),
+                            ProgramRequests::Stats { .. } => {
+                                let _ = env.client.reply(mail.origin, mail.correlation, ProgramResponses::Stats(ProgramStats {
+                                    id: env.client.id,
+                                    name: args.name.clone(),
+                                    source_code: args.code.clone(),
+                                    subscriptions: runtime.subs().await,
+                                    pushed_events: runtime.pushed_events(),
+                                    started: runtime.started(),
+                                }).into());
+                            }
+
+                            ProgramRequests::Get { .. } => {
+                                let _ = env.client.reply(mail.origin, mail.correlation, ProgramResponses::Get(Some(ProgramSummary {
+                                    id:env.client.id,
+                                    name:args.name.clone(),
+                                    started_at:runtime.started(),
+                                })).into());
+                            }
 
                             _ => {
                                 tracing::debug!("ignore program message")
@@ -103,7 +120,6 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
             }
 
             Some(output) = runtime.recv() => {
-                // let _ = args.output.send(SubscribeResponses::Output(output).into());
                 match from_runtime_value_to_json(output) {
                     Ok(json) => {
                         let resp = SubscribeResponses::Record(Record {
@@ -132,7 +148,6 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
             else => {
                 tracing::debug!(name = args.name, "shutting down per server request");
-                prog_handle.abort();
                 break;
             }
         }

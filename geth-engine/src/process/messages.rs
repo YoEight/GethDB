@@ -1,4 +1,4 @@
-use geth_common::{Direction, ExpectedRevision, Propose, Record};
+use geth_common::{Direction, ExpectedRevision, ProgramStats, ProgramSummary, Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedSender;
@@ -63,6 +63,12 @@ impl From<WriteRequests> for Messages {
 impl From<WriteResponses> for Messages {
     fn from(resp: WriteResponses) -> Self {
         Messages::Responses(Responses::Write(resp))
+    }
+}
+
+impl From<ProgramResponses> for Messages {
+    fn from(resp: ProgramResponses) -> Self {
+        Messages::Responses(Responses::Program(resp))
     }
 }
 
@@ -199,6 +205,17 @@ impl TryFrom<Messages> for TestSinkResponses {
     }
 }
 
+impl TryFrom<Messages> for ProgramResponses {
+    type Error = ();
+
+    fn try_from(msg: Messages) -> Result<Self, ()> {
+        match msg {
+            Messages::Responses(Responses::Program(resp)) => Ok(resp),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Requests {
     Index(IndexRequests),
@@ -279,6 +296,12 @@ pub enum ProgramRequests {
         name: String,
     },
 
+    Get {
+        name: String,
+    },
+
+    List,
+
     Stop {
         name: String,
     },
@@ -295,6 +318,7 @@ pub enum Responses {
     Read(ReadResponses),
     Subscribe(SubscribeResponses),
     Write(WriteResponses),
+    Program(ProgramResponses),
     TestSink(TestSinkResponses),
     FatalError,
 }
@@ -345,4 +369,12 @@ pub enum WriteResponses {
 #[derive(Debug)]
 pub enum TestSinkResponses {
     Stream(u64),
+}
+
+#[derive(Debug)]
+pub enum ProgramResponses {
+    Stats(ProgramStats),
+    List(Vec<ProgramSummary>),
+    Get(Option<ProgramSummary>),
+    Stopped,
 }

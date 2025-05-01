@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{self, AtomicU64},
+        atomic::{self, AtomicU64, AtomicUsize},
         Arc,
     },
 };
@@ -227,7 +227,7 @@ pub struct PyroRuntime {
     engine: Engine<NominalTyping>,
     output: UnboundedReceiver<RuntimeValue>,
     subs: Arc<RwLock<Vec<String>>>,
-    pushed_events: Arc<AtomicU64>,
+    pushed_events: Arc<AtomicUsize>,
     started: DateTime<Utc>,
 }
 
@@ -238,6 +238,18 @@ impl PyroRuntime {
 
     pub async fn recv(&mut self) -> Option<RuntimeValue> {
         self.output.recv().await
+    }
+
+    pub async fn subs(&self) -> Vec<String> {
+        self.subs.read().await.clone()
+    }
+
+    pub fn pushed_events(&self) -> usize {
+        self.pushed_events.load(atomic::Ordering::SeqCst)
+    }
+
+    pub fn started(&self) -> DateTime<Utc> {
+        self.started
     }
 }
 
@@ -258,7 +270,7 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
     let (send_output, recv_output) = unbounded_channel();
     let name_subscribe = name.clone();
     let subs = Arc::new(RwLock::new(Vec::new()));
-    let pushed_events = Arc::new(AtomicU64::new(0));
+    let pushed_events = Arc::new(AtomicUsize::new(0));
     let subs_subscribe = subs.clone();
     let pushed_events_subscribe = pushed_events.clone();
     let engine = Engine::with_nominal_typing()
