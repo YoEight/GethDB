@@ -1,6 +1,6 @@
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
-use crate::process::subscription::SubscriptionClient;
+use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
 use crate::process::{Item, ProcessEnv};
 use geth_common::Record;
 use std::collections::HashMap;
@@ -60,7 +60,20 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 tracing::warn!(stream = ident, "subscription wasn't registered because nothing is listening to it");
                             }
 
-                            SubscriptionType::Program { name, code } => {}
+                            SubscriptionType::Program { name, code } => {
+                                let client = ProgramClient::spawn(&env).await?;
+                                match client.start(name, code, stream.sender.clone()).await? {
+                                    ProgramStartResult::Started => {
+                                        // TODO - register program for later use.
+                                    }
+
+                                    ProgramStartResult::Failed(e) => {
+                                        tracing::error!(error = %e, "error when starting program");
+                                        let _ =
+                                            stream.sender.send(SubscribeResponses::Error(e).into());
+                                    }
+                                }
+                            }
                         },
                         _ => {
                             tracing::warn!(

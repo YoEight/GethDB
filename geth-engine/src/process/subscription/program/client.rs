@@ -20,13 +20,12 @@ pub struct ProgramClient {
 }
 
 impl ProgramClient {
-    pub fn new(target: ProcId, inner: ManagerClient) -> Self {
-        Self { target, inner }
-    }
-
-    pub async fn resolve(env: &ProcessEnv) -> eyre::Result<Self> {
+    pub async fn spawn(env: &ProcessEnv) -> eyre::Result<Self> {
         let proc_id = env.client.wait_for(Proc::PyroWorker).await?;
-        Ok(Self::new(proc_id, env.client.clone()))
+        Ok(Self {
+            target: proc_id,
+            inner: env.client.clone(),
+        })
     }
 
     pub async fn start(
@@ -37,7 +36,7 @@ impl ProgramClient {
     ) -> eyre::Result<ProgramStartResult> {
         let mailbox = self
             .inner
-            .request(
+            .request_opt(
                 self.target,
                 ProgramRequests::Start {
                     name,
@@ -47,6 +46,14 @@ impl ProgramClient {
                 .into(),
             )
             .await?;
+
+        let mailbox = if let Some(mailbox) = mailbox {
+            mailbox
+        } else {
+            return Ok(ProgramStartResult::Failed(eyre::eyre!(
+                "could not start a new program"
+            )));
+        };
 
         if let Some(resp) = mailbox.payload.try_into().ok() {
             match resp {

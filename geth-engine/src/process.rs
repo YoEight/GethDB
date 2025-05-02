@@ -543,8 +543,7 @@ impl ManagerClient {
         Ok(())
     }
 
-    /// TODO - need to write an implementation where a request doesn't fail if the targetted process has existed.
-    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
+    pub async fn request_opt(&self, dest: ProcId, payload: Messages) -> eyre::Result<Option<Mail>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -563,9 +562,14 @@ impl ManagerClient {
             eyre::bail!("process manager has shutdown");
         }
 
-        match receiver.await {
-            Ok(mail) => Ok(mail),
-            Err(_) => eyre::bail!("process manager has shutdown"),
+        Ok(receiver.await.ok())
+    }
+
+    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
+        if let Some(mail) = self.request_opt(dest, payload).await? {
+            Ok(mail)
+        } else {
+            eyre::bail!("process manager has shutdown")
         }
     }
 
