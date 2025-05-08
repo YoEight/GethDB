@@ -5,8 +5,14 @@ use crate::process::{Item, ProcessEnv};
 use geth_common::Record;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 const ALL_IDENT: &str = "$all";
+
+pub struct ProgramProcess {
+    client: ProgramClient,
+    name: String,
+}
 
 #[derive(Default)]
 struct Register {
@@ -41,6 +47,8 @@ impl Register {
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pubsub"))]
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     let mut reg = Register::default();
+    let mut programs = HashMap::new();
+
     while let Some(item) = env.queue.recv().await {
         match item {
             Item::Stream(stream) => {
@@ -62,17 +70,34 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
                             SubscriptionType::Program { name, code } => {
                                 let client = ProgramClient::spawn(&env).await?;
-                                match client.start(name, code, stream.sender.clone()).await? {
+                                let id = Uuid::new_v4();
+
+                                tracing::debug!(
+                                    id = %id,
+                                    name = name,
+                                    "program is starting"
+                                );
+
+                                match client
+                                    .start(name.clone(), code, stream.sender.clone())
+                                    .await?
+                                {
                                     ProgramStartResult::Started => {
-                                        // TODO - register program for later use.
+                                        tracing::debug!(
+                                            id = %id,
+                                            name = name,
+                                            "program has started successfully"
+                                        );
+
+                                        programs.insert(id, ProgramProcess { client, name });
                                     }
 
                                     ProgramStartResult::Failed(e) => {
-                                        tracing::error!(error = %e, "error when starting program");
+                                        tracing::error!(id = %id, name = name, error = %e, "error when starting program");
                                         let _ =
                                             stream.sender.send(SubscribeResponses::Error(e).into());
                                     }
-                                }
+                                };
                             }
                         },
                         _ => {
