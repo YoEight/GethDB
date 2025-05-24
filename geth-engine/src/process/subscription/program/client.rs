@@ -130,4 +130,34 @@ impl ProgramClient {
 
         eyre::bail!("protocol error when communicating with the pyro-worker process");
     }
+
+    pub async fn stop(self) -> eyre::Result<()> {
+        let mailbox = self
+            .inner
+            .request_opt(
+                self.target,
+                ProgramRequests::Stop { id: Uuid::nil() }.into(),
+            )
+            .await?;
+
+        let mailbox = if let Some(mailbox) = mailbox {
+            mailbox
+        } else {
+            return Ok(());
+        };
+
+        if let Some(resp) = mailbox.payload.try_into().ok() {
+            match resp {
+                ProgramResponses::Stopped => {
+                    return Ok(());
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pyro-worker process");
+                }
+            }
+        }
+
+        eyre::bail!("protocol error when communicating with the pyro-worker process");
+    }
 }

@@ -89,6 +89,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                         match req {
                             ProgramRequests::Stop { .. } => {
                                 tracing::info!(name = args.name, "program stopped");
+                                let _ = env.client.reply(mail.origin, mail.correlation, ProgramResponses::Stopped.into());
                                 break;
                             }
 

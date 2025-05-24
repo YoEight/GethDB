@@ -202,7 +202,11 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 )?;
                             }
 
-                            ProgramRequests::Stop { id } => todo!(),
+                            ProgramRequests::Stop { id } => {
+                                if let Some(prog) = programs.remove(&id) {
+                                    prog.client.stop().await?;
+                                }
+                            }
 
                             _ => {
                                 tracing::warn!("unsupported program request {}", mail.correlation);
