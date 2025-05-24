@@ -1,4 +1,6 @@
+use geth_common::{ProgramStats, ProgramSummary};
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 use crate::{
     process::{
@@ -69,6 +71,63 @@ impl ProgramClient {
             }
         }
 
-        eyre::bail!("prog process is no longer running")
+        eyre::bail!("protocol error when communicating with the pyro-worker process");
+    }
+
+    pub async fn stats(&self) -> eyre::Result<Option<ProgramStats>> {
+        let mailbox = self
+            .inner
+            .request_opt(
+                self.target,
+                ProgramRequests::Stats { id: Uuid::nil() }.into(),
+            )
+            .await?;
+
+        let mailbox = if let Some(mailbox) = mailbox {
+            mailbox
+        } else {
+            return Ok(None);
+        };
+
+        if let Some(resp) = mailbox.payload.try_into().ok() {
+            match resp {
+                ProgramResponses::Stats(stats) => {
+                    return Ok(Some(stats));
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pyro-worker process");
+                }
+            }
+        }
+
+        eyre::bail!("protocol error when communicating with the pyro-worker process");
+    }
+
+    pub async fn summary(&self) -> eyre::Result<Option<ProgramSummary>> {
+        let mailbox = self
+            .inner
+            .request_opt(self.target, ProgramRequests::Get { id: Uuid::nil() }.into())
+            .await?;
+
+        let mailbox = if let Some(mailbox) = mailbox {
+            mailbox
+        } else {
+            return Ok(None);
+        };
+
+        if let Some(resp) = mailbox.payload.try_into().ok() {
+            match resp {
+                ProgramResponses::Get(summary) => {
+                    return Ok(Some(summary));
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pyro-worker process");
+                }
+            }
+        }
+
+        eyre::bail!("protocol error when communicating with the pyro-worker process");
     }
 }

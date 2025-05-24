@@ -2,6 +2,7 @@ use geth_common::{Direction, ExpectedRevision, ProgramStats, ProgramSummary, Pro
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 use crate::domain::index::CurrentRevision;
 
@@ -87,6 +88,12 @@ impl From<TestSinkRequests> for Messages {
 impl From<TestSinkResponses> for Messages {
     fn from(resp: TestSinkResponses) -> Self {
         Messages::Responses(Responses::TestSink(resp))
+    }
+}
+
+impl From<RequestError> for Messages {
+    fn from(err: RequestError) -> Self {
+        Messages::Responses(Responses::Error(err))
     }
 }
 
@@ -267,6 +274,7 @@ pub enum ReadRequests {
 #[derive(Debug)]
 pub enum SubscribeRequests {
     Subscribe(SubscriptionType),
+    Program(ProgramRequests),
     Push { events: Vec<Record> },
 }
 
@@ -299,17 +307,17 @@ pub enum ProgramRequests {
     },
 
     Stats {
-        name: String,
+        id: Uuid,
     },
 
     Get {
-        name: String,
+        id: Uuid,
     },
 
     List,
 
     Stop {
-        name: String,
+        id: Uuid,
     },
 }
 
@@ -326,7 +334,13 @@ pub enum Responses {
     Write(WriteResponses),
     Program(ProgramResponses),
     TestSink(TestSinkResponses),
+    Error(RequestError),
     FatalError,
+}
+
+#[derive(Debug)]
+pub enum RequestError {
+    NotFound,
 }
 
 #[derive(Debug)]
@@ -349,6 +363,7 @@ pub enum ReadResponses {
 #[derive(Debug)]
 pub enum SubscribeResponses {
     Error(eyre::Report),
+    Programs(ProgramResponses),
     Confirmed,
     Record(Record),
 }
@@ -381,7 +396,7 @@ pub enum TestSinkResponses {
 pub enum ProgramResponses {
     Stats(ProgramStats),
     List(Vec<ProgramSummary>),
-    Get(Option<ProgramSummary>),
+    Get(ProgramSummary),
     Error(eyre::Report),
     Started,
     Stopped,

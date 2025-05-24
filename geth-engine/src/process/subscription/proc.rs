@@ -1,10 +1,15 @@
 use crate::names::types::STREAM_DELETED;
-use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
+use crate::process::messages::{
+    Messages, ProgramRequests, ProgramResponses, RequestError, Responses, SubscribeRequests,
+    SubscribeResponses, SubscriptionType,
+};
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
 use crate::process::{Item, ProcessEnv};
+use eyre::Context;
 use geth_common::Record;
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::Instrument;
 use uuid::Uuid;
 
 const ALL_IDENT: &str = "$all";
@@ -132,6 +137,77 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 reg.publish(event);
                             }
                         }
+
+                        SubscribeRequests::Program(req) => match req {
+                            ProgramRequests::Stats { id } => {
+                                if let Some(prog) = programs.get(&id) {
+                                    if let Some(stats) = prog.client.stats().await? {
+                                        env.client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            SubscribeResponses::Programs(ProgramResponses::Stats(
+                                                stats,
+                                            ))
+                                            .into(),
+                                        )?;
+
+                                        continue;
+                                    }
+
+                                    env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        RequestError::NotFound.into(),
+                                    )?;
+                                }
+                            }
+
+                            ProgramRequests::Get { id } => {
+                                if let Some(prog) = programs.get(&id) {
+                                    if let Some(summary) = prog.client.summary().await? {
+                                        env.client.reply(
+                                            mail.origin,
+                                            mail.correlation,
+                                            SubscribeResponses::Programs(ProgramResponses::Get(
+                                                summary,
+                                            ))
+                                            .into(),
+                                        )?;
+
+                                        continue;
+                                    }
+
+                                    env.client.reply(
+                                        mail.origin,
+                                        mail.correlation,
+                                        RequestError::NotFound.into(),
+                                    )?;
+                                }
+                            }
+
+                            ProgramRequests::List => {
+                                let mut summaries = Vec::with_capacity(programs.len());
+
+                                for prog in programs.values() {
+                                    if let Some(summary) = prog.client.summary().await? {
+                                        summaries.push(summary);
+                                    }
+                                }
+
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    SubscribeResponses::Programs(ProgramResponses::List(summaries))
+                                        .into(),
+                                )?;
+                            }
+
+                            ProgramRequests::Stop { id } => todo!(),
+
+                            _ => {
+                                tracing::warn!("unsupported program request {}", mail.correlation);
+                            }
+                        },
 
                         _ => {
                             tracing::warn!("unsupported subscription request {}", mail.correlation);
