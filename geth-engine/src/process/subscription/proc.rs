@@ -4,7 +4,8 @@ use crate::process::messages::{
     SubscribeResponses, SubscriptionType,
 };
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
-use crate::process::{Item, ProcessEnv};
+use crate::process::{Item, ProcessEnv, SpawnResult};
+use crate::Proc;
 use eyre::Context;
 use geth_common::Record;
 use std::collections::HashMap;
@@ -74,7 +75,18 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                             }
 
                             SubscriptionType::Program { name, code } => {
-                                let client = ProgramClient::spawn(&env).await?;
+                                let result = env.client.wait_for(Proc::PyroWorker).await?;
+                                let client = match result.must_succeed() {
+                                    Err(e) => {
+                                        let _ =
+                                            stream.sender.send(SubscribeResponses::Error(e).into());
+
+                                        continue;
+                                    }
+
+                                    Ok(id) => ProgramClient::new(id, env.client.clone()),
+                                };
+
                                 let id = Uuid::new_v4();
 
                                 tracing::debug!(

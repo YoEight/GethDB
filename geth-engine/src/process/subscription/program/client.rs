@@ -22,12 +22,8 @@ pub struct ProgramClient {
 }
 
 impl ProgramClient {
-    pub async fn spawn(env: &ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for(Proc::PyroWorker).await?;
-        Ok(Self {
-            target: proc_id,
-            inner: env.client.clone(),
-        })
+    pub fn new(target: ProcId, inner: ManagerClient) -> Self {
+        Self { target, inner }
     }
 
     pub async fn start(

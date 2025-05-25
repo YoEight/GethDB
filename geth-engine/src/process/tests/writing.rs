@@ -16,10 +16,10 @@ struct Foo {
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let reader_id = manager.wait_for(Proc::Reading).await?;
+    let proc_id = manager.wait_for(Proc::Indexing).await?.must_succeed()?;
+    let reader_id = manager.wait_for(Proc::Reading).await?.must_succeed()?;
     let mut index_client = IndexClient::new(proc_id, manager.clone());
-    let writer_id = manager.wait_for(Proc::Writing).await?;
+    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
     let reader_client = ReaderClient::new(reader_id, manager.clone());
     let mut expected = vec![];

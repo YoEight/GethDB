@@ -36,9 +36,9 @@ struct Internal {
 }
 
 async fn resolve_internal(mgr: ManagerClient) -> eyre::Result<Internal> {
-    let writer_id = mgr.wait_for(Proc::Writing).await?;
-    let reader_id = mgr.wait_for(Proc::Reading).await?;
-    let sub_id = mgr.wait_for(Proc::PubSub).await?;
+    let writer_id = mgr.wait_for(Proc::Writing).await?.must_succeed()?;
+    let reader_id = mgr.wait_for(Proc::Reading).await?.must_succeed()?;
+    let sub_id = mgr.wait_for(Proc::PubSub).await?.must_succeed()?;
 
     Ok(Internal {
         writer: WriterClient::new(writer_id, mgr.clone()),

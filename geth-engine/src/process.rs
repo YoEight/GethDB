@@ -1,12 +1,14 @@
 use bb8::Pool;
 use chrono::Utc;
+use eyre::Error;
+use geth_common::generated::next::protocol::operation_out::subscription_event::confirmation;
 use geth_common::ProgramSummary;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
 use messages::{Messages, Responses};
 use resource::{create_buffer_pool, BufferManager};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread;
@@ -83,7 +85,7 @@ enum Topology {
     Singleton(Option<ProcId>),
     Multiple {
         limit: usize,
-        instances: HashMap<ProcId, Instance>,
+        instances: HashSet<ProcId>,
     },
 }
 
@@ -128,41 +130,6 @@ impl Catalog {
         }
 
         eyre::bail!("process {:?} is not registered", proc);
-    }
-
-    fn report(&mut self, running: RunningProc) -> eyre::Result<()> {
-        let proc = running.proc;
-        if let Some(mut topology) = self.inner.get_mut(&running.proc) {
-            match &mut topology {
-                Topology::Singleton(prev) => {
-                    if let Some(prev) = prev.as_ref() {
-                        eyre::bail!(
-                            "a {:?} process is already running on {:04}",
-                            running.proc,
-                            prev
-                        );
-                    }
-
-                    *prev = Some(running.id);
-                }
-
-                Topology::Multiple { instances, .. } => {
-                    let instance = Instance {
-                        id: running.id,
-                        // TODO - this is not correct as we would like to pass the name from the
-                        // user.
-                        name: format!("{:?}-{:04}", running.proc, running.id),
-                    };
-
-                    instances.insert(running.id, instance);
-                }
-            }
-
-            self.monitor.insert(running.id, running);
-            return Ok(());
-        }
-
-        eyre::bail!("process {:?} is not registered in the catalog", proc);
     }
 
     fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
@@ -302,55 +269,82 @@ where
             },
 
             ManagerCommand::WaitFor { proc, resp } => {
-                // TODO - we might consider doing shuffling in the event of multiple instances.
-                if let Some(summary) = self.catalog.lookup(&proc)? {
-                    let _ = resp.send(summary.id);
+                let id = if let Some(topology) = self.catalog.inner.get_mut(&proc) {
+                    match topology {
+                        Topology::Singleton(prev) => {
+                            if let Some(id) = prev.as_ref() {
+                                let _ = resp.send(SpawnResult::Success(*id));
+                                return Ok(());
+                            } else {
+                                let id = self.proc_id_gen;
+                                self.proc_id_gen += 1;
+                                *prev = Some(id);
+                                id
+                            }
+                        }
+
+                        Topology::Multiple { limit, instances } => {
+                            if instances.len() + 1 > *limit {
+                                let _ = resp.send(SpawnResult::Failure {
+                                    proc,
+                                    error: SpawnError::LimitReached,
+                                });
+                                return Ok(());
+                            }
+
+                            let id = self.proc_id_gen;
+                            self.proc_id_gen += 1;
+
+                            instances.insert(id);
+                            id
+                        }
+                    }
                 } else {
-                    let id = self.gen_proc_id();
-                    let runtime = self.runtime.clone();
-                    let mut client = self.client.clone();
-                    let options = self.options.clone();
+                    eyre::bail!("process {:?} is not registered", proc);
+                };
 
-                    client.id = id;
-                    client.origin_proc = proc;
+                let runtime = self.runtime.clone();
+                let mut client = self.client.clone();
+                let options = self.options.clone();
 
-                    let running_proc = match proc {
-                        Proc::Writing => {
-                            spawn_raw(client, runtime, Handle::current(), proc, writing::run)
-                        }
+                client.id = id;
+                client.origin_proc = proc;
 
-                        Proc::Reading => {
-                            spawn_raw(client, runtime, Handle::current(), proc, reading::run)
-                        }
+                let running_proc = match proc {
+                    Proc::Writing => {
+                        spawn_raw(client, runtime, Handle::current(), proc, writing::run)
+                    }
 
-                        Proc::Indexing => {
-                            spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
-                        }
+                    Proc::Reading => {
+                        spawn_raw(client, runtime, Handle::current(), proc, reading::run)
+                    }
 
-                        Proc::PubSub => spawn(options, client, proc, subscription::run),
-                        Proc::Grpc => spawn(options, client, proc, grpc::run),
+                    Proc::Indexing => {
+                        spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
+                    }
 
-                        Proc::PyroWorker => spawn(options, client, proc, pyro::worker::run),
+                    Proc::PubSub => spawn(options, client, proc, subscription::run),
+                    Proc::Grpc => spawn(options, client, proc, grpc::run),
 
-                        Proc::Root => {
-                            let _ = resp.send(0);
-                            return Ok(());
-                        }
+                    Proc::PyroWorker => spawn(options, client, proc, pyro::worker::run),
 
-                        #[cfg(test)]
-                        Proc::Echo => spawn(options, client, proc, echo::run),
+                    Proc::Root => {
+                        let _ = resp.send(SpawnResult::Success(0));
+                        return Ok(());
+                    }
 
-                        #[cfg(test)]
-                        Proc::Sink => spawn(options, client, proc, sink::run),
+                    #[cfg(test)]
+                    Proc::Echo => spawn(options, client, proc, echo::run),
 
-                        #[cfg(test)]
-                        Proc::Panic => spawn(options, client, proc, panic::run),
-                    };
+                    #[cfg(test)]
+                    Proc::Sink => spawn(options, client, proc, sink::run),
 
-                    let proc_id = running_proc.id;
-                    self.catalog.report(running_proc)?;
-                    let _ = resp.send(proc_id);
-                }
+                    #[cfg(test)]
+                    Proc::Panic => spawn(options, client, proc, panic::run),
+                };
+
+                self.catalog.monitor.insert(id, running_proc);
+                let _ = resp.send(SpawnResult::Success(id));
             }
 
             ManagerCommand::ProcTerminated { id, error } => self.handle_terminate(id, error),
@@ -434,6 +428,34 @@ pub enum Item {
     Stream(Stream),
 }
 
+pub enum SpawnResult {
+    Success(ProcId),
+    Failure { proc: Proc, error: SpawnError },
+}
+
+impl SpawnResult {
+    pub fn ok(&self) -> Option<ProcId> {
+        match self {
+            SpawnResult::Success(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn must_succeed(self) -> eyre::Result<ProcId> {
+        match self {
+            SpawnResult::Success(id) => Ok(id),
+            SpawnResult::Failure { proc, error } => match error {
+                SpawnError::LimitReached => eyre::bail!("process {:?} limit reached", proc),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnError {
+    LimitReached,
+}
+
 pub enum ManagerCommand {
     // Spawn {
     //     parent: Option<ProcId>,
@@ -452,7 +474,7 @@ pub enum ManagerCommand {
 
     WaitFor {
         proc: Proc,
-        resp: oneshot::Sender<ProcId>,
+        resp: oneshot::Sender<SpawnResult>,
     },
 
     ProcTerminated {
@@ -620,7 +642,7 @@ impl ManagerClient {
     }
 
     #[instrument(skip(self), fields(origin = ?self.origin_proc))]
-    pub async fn wait_for(&self, proc: Proc) -> eyre::Result<ProcId> {
+    pub async fn wait_for(&self, proc: Proc) -> eyre::Result<SpawnResult> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -633,10 +655,12 @@ impl ManagerClient {
         tracing::debug!("waiting for process {:?} to be available...", proc,);
 
         match receiver.await {
-            Ok(id) => {
-                tracing::debug!("process {:?} resolved to be {}", proc, id);
+            Ok(res) => {
+                if let Some(id) = res.ok() {
+                    tracing::info!(proc = ?proc, id = %id, "process resolved");
+                }
 
-                Ok(id)
+                Ok(res)
             }
             Err(_) => eyre::bail!("process manager has shutdown"),
         }

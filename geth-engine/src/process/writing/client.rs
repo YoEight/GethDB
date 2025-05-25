@@ -20,7 +20,10 @@ impl WriterClient {
     }
 
     pub fn from(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for(Proc::Writing))?;
+        let proc_id = env
+            .handle
+            .block_on(env.client.wait_for(Proc::Writing))?
+            .must_succeed()?;
         Ok(Self::new(proc_id, env.client.clone()))
     }
 

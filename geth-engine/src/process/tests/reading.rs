@@ -14,8 +14,8 @@ struct Foo {
 #[tokio::test]
 async fn test_reader_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_id = manager.wait_for(Proc::Writing).await?;
-    let reader_id = manager.wait_for(Proc::Reading).await?;
+    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
+    let reader_id = manager.wait_for(Proc::Reading).await?.must_succeed()?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
     let reader_client = ReaderClient::new(reader_id, manager.clone());
     let mut expected = vec![];

@@ -15,8 +15,8 @@ pub struct LocalClient {
 
 impl LocalClient {
     pub async fn new(client: ManagerClient) -> eyre::Result<Self> {
-        let writer_id = client.wait_for(Proc::Writing).await?;
-        let reader_id = client.wait_for(Proc::Reading).await?;
+        let writer_id = client.wait_for(Proc::Writing).await?.must_succeed()?;
+        let reader_id = client.wait_for(Proc::Reading).await?.must_succeed()?;
 
         Ok(Self {
             writer: WriterClient::new(writer_id, client.clone()),

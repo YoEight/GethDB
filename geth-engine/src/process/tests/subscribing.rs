@@ -14,8 +14,8 @@ struct Foo {
 #[tokio::test]
 async fn test_pubsub_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_id = manager.wait_for(Proc::Writing).await?;
-    let pubsub_id = manager.wait_for(Proc::PubSub).await?;
+    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
+    let pubsub_id = manager.wait_for(Proc::PubSub).await?.must_succeed()?;
     let writer_client = WriterClient::new(writer_id, manager.clone());
     let sub_client = SubscriptionClient::new(pubsub_id, manager.clone());
     let mut expected = vec![];
