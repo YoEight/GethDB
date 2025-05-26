@@ -1,5 +1,6 @@
 mod indexing;
 mod interactions;
+mod programs;
 mod reading;
 mod subscribing;
 mod writing;

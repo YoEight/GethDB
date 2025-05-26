@@ -288,7 +288,7 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
             tokio::spawn(async move {
                 let mut streaming = local_client
                     .clone()
-                    .subscribe(stream_name.as_str())
+                    .subscribe_to_stream(stream_name.as_str())
                     .await
                     .inspect_err(|e| {
                         tracing::error!(

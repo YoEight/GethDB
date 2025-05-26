@@ -58,13 +58,45 @@ impl SubscriptionClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    pub async fn subscribe(&self, stream_name: &str) -> eyre::Result<Streaming> {
+    pub async fn subscribe_to_stream(&self, stream_name: &str) -> eyre::Result<Streaming> {
         let mut mailbox = self
             .inner
             .request_stream(
                 self.target,
                 SubscribeRequests::Subscribe(SubscriptionType::Stream {
                     ident: stream_name.to_string(),
+                })
+                .into(),
+            )
+            .await?;
+
+        if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Confirmed => {
+                    return Ok(Streaming::from(mailbox));
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub process is no longer running")
+    }
+
+    pub async fn subscribe_to_program(&self, name: &str, code: &str) -> eyre::Result<Streaming> {
+        let mut mailbox = self
+            .inner
+            .request_stream(
+                self.target,
+                SubscribeRequests::Subscribe(SubscriptionType::Program {
+                    name: name.to_string(),
+                    code: code.to_string(),
                 })
                 .into(),
             )

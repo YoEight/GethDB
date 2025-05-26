@@ -32,6 +32,13 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                     code,
                     output: sender,
                 });
+
+                env.client.reply(
+                    message.origin,
+                    message.correlation,
+                    ProgramResponses::Started.into(),
+                )?;
+
                 break;
             }
         }

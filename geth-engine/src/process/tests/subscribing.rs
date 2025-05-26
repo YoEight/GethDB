@@ -21,7 +21,7 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
     let mut expected = vec![];
     let stream_name = Uuid::new_v4().to_string();
 
-    let mut stream = sub_client.subscribe(&stream_name).await?;
+    let mut stream = sub_client.subscribe_to_stream(&stream_name).await?;
 
     for i in 0..10 {
         expected.push(Propose::from_value(&Foo { baz: i + 10 })?);

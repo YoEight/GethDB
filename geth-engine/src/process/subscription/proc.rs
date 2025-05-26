@@ -106,7 +106,17 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                             "program has started successfully"
                                         );
 
-                                        programs.insert(id, ProgramProcess { client, name });
+                                        if stream
+                                            .sender
+                                            .send(SubscribeResponses::Confirmed.into())
+                                            .is_ok()
+                                        {
+                                            programs.insert(id, ProgramProcess { client, name });
+                                            continue;
+                                        }
+
+                                        client.stop().await?;
+                                        tracing::warn!(id = %id,  name = name, "program wasn't registered because nothing is listening to it");
                                     }
 
                                     ProgramStartResult::Failed(e) => {

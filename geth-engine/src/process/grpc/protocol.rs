@@ -318,7 +318,7 @@ async fn execute_operation(
                 let mut position = 0u64;
                 let mut catching_up = true;
                 let mut history = Vec::<Record>::new();
-                let mut sub_stream = internal.sub.subscribe(&params.stream_name).await?;
+                let mut sub_stream = internal.sub.subscribe_to_stream(&params.stream_name).await?;
                 let mut read_stream = match internal
                     .reader
                     .read(&params.stream_name, params.start, Direction::Forward, usize::MAX)
