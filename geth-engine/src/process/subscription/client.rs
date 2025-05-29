@@ -1,6 +1,9 @@
-use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses, SubscriptionType};
+use crate::process::messages::{
+    Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
+    SubscriptionType,
+};
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
-use geth_common::Record;
+use geth_common::{ProgramSummary, Record};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
@@ -110,6 +113,34 @@ impl SubscriptionClient {
 
                 SubscribeResponses::Confirmed => {
                     return Ok(Streaming::from(mailbox));
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub process is no longer running")
+    }
+
+    pub async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::List).into(),
+            )
+            .await?;
+
+        if let Some(resp) = mailbox.payload.try_into().ok() {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::List(list)) => {
+                    return Ok(list);
                 }
 
                 _ => {

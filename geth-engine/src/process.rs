@@ -13,14 +13,14 @@ use std::future::Future;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
-use subscription::pyro;
+use subscription::{pyro, SubscriptionClient};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Notify};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::Options;
+use crate::{Options, WriterClient};
 
 #[cfg(test)]
 mod tests;
@@ -664,6 +664,16 @@ impl ManagerClient {
             }
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
+    }
+
+    pub async fn new_writer_client(&self) -> eyre::Result<WriterClient> {
+        let id = self.wait_for(Proc::Writing).await?.must_succeed()?;
+        Ok(WriterClient::new(id, self.clone()))
+    }
+
+    pub async fn new_subscription_client(&self) -> eyre::Result<SubscriptionClient> {
+        let id = self.wait_for(Proc::PubSub).await?.must_succeed()?;
+        Ok(SubscriptionClient::new(id, self.clone()))
     }
 
     pub async fn shutdown(&self) -> eyre::Result<()> {

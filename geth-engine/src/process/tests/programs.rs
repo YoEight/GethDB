@@ -22,11 +22,8 @@ pub struct PyroRecord<A> {
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::PubSub).await?.must_succeed()?;
-    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
-
-    let client = SubscriptionClient::new(proc_id, manager.clone());
-    let writer = WriterClient::new(writer_id, manager.clone());
+    let client = manager.new_subscription_client().await?;
+    let writer = manager.new_writer_client().await?;
 
     let mut expected = vec![];
 
@@ -65,6 +62,22 @@ pub async fn test_program_created() -> eyre::Result<()> {
     }
 
     assert_eq!(count, expected.len());
+
+    Ok(())
+}
+
+#[tokio::test]
+pub async fn test_program_list() -> eyre::Result<()> {
+    let manager = start_process_manager(Options::in_mem()).await?;
+    let client = manager.new_subscription_client().await?;
+
+    let mut _ignored = client
+        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
+    let programs = client.list_programs().await?;
+    assert_eq!(programs.len(), 1);
+    assert_eq!(programs[0].name, "echo");
 
     Ok(())
 }
