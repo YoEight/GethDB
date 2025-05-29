@@ -1,15 +1,70 @@
-use crate::{process::subscription::SubscriptionClient, start_process_manager, Options, Proc};
+use std::any::type_name;
+
+use geth_common::{ExpectedRevision, Propose};
+use serde::{Deserialize, Serialize};
+use uuid::Uuid;
+
+use crate::{
+    process::{subscription::SubscriptionClient, tests::Foo},
+    start_process_manager, Options, Proc, WriterClient,
+};
+
+#[derive(Serialize, Deserialize)]
+pub struct PyroRecord<A> {
+    pub class: String,
+    pub event_revision: u64,
+    pub id: Uuid,
+    pub position: u64,
+    pub stream_name: String,
+    pub payload: A,
+}
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let proc_id = manager.wait_for(Proc::PubSub).await?.must_succeed()?;
+    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
 
     let client = SubscriptionClient::new(proc_id, manager.clone());
+    let writer = WriterClient::new(writer_id, manager.clone());
 
+    let mut expected = vec![];
+
+    for i in 0..10 {
+        expected.push(Propose::from_value(&Foo { baz: i + 10 })?);
+    }
+
+    let stream_name = "foobar";
     let mut streaming = client
         .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
-    todo!("check that the program is echoing like it's supposed to");
+    writer
+        .append(
+            stream_name.to_string(),
+            ExpectedRevision::Any,
+            expected.clone(),
+        )
+        .await?;
+
+    let mut count = 0usize;
+
+    while let Some(event) = streaming.next().await? {
+        let actual = event.as_value::<PyroRecord<Foo>>()?;
+
+        assert_eq!(actual.class, type_name::<Foo>());
+        assert_eq!(actual.stream_name.as_str(), stream_name);
+        assert_eq!(actual.event_revision, count as u64);
+        assert_eq!(actual.payload.baz, (count as u32) + 10);
+
+        count += 1;
+
+        if count >= expected.len() {
+            break;
+        }
+    }
+
+    assert_eq!(count, expected.len());
+
+    Ok(())
 }

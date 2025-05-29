@@ -1,17 +1,12 @@
 use crate::process::indexing::IndexClient;
 use crate::process::reading::{record_try_from, ReaderClient};
+use crate::process::tests::Foo;
 use crate::process::writing::WriterClient;
 use crate::process::{start_process_manager, Proc};
 use crate::Options;
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
-use serde::{Deserialize, Serialize};
 use uuid::Uuid;
-
-#[derive(Serialize, Deserialize)]
-struct Foo {
-    baz: u32,
-}
 
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
