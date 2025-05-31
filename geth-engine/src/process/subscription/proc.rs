@@ -213,6 +213,12 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 if let Some(prog) = programs.remove(&id) {
                                     prog.client.stop().await?;
                                 }
+
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    SubscribeResponses::Programs(ProgramResponses::Stopped).into(),
+                                )?;
                             }
 
                             _ => {

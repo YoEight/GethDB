@@ -104,3 +104,52 @@ pub async fn test_program_stats() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+pub async fn test_program_stop() -> eyre::Result<()> {
+    let manager = start_process_manager(Options::in_mem()).await?;
+    let client = manager.new_subscription_client().await?;
+    let writer = manager.new_writer_client().await?;
+
+    let mut expected = vec![];
+
+    for i in 0..10 {
+        expected.push(Propose::from_value(&Foo { baz: i + 10 })?);
+    }
+
+    let stream_name = "foobar";
+    let mut streaming = client
+        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
+    writer
+        .append(
+            stream_name.to_string(),
+            ExpectedRevision::Any,
+            expected.clone(),
+        )
+        .await?;
+
+    let mut count = 0usize;
+
+    while streaming.next().await?.is_some() {
+        count += 1;
+
+        if count >= expected.len() {
+            break;
+        }
+    }
+
+    assert_eq!(count, expected.len());
+
+    let programs = client.list_programs().await?;
+    client.program_stop(programs[0].id).await?;
+
+    let result = client.program_stats(programs[0].id).await?;
+    assert!(result.is_none());
+
+    let result = streaming.next().await?;
+    assert!(result.is_none());
+
+    Ok(())
+}

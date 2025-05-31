@@ -184,6 +184,34 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
+    pub async fn program_stop(&self, id: ProcId) -> eyre::Result<()> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::Stop { id }).into(),
+            )
+            .await?;
+
+        if let Ok(resp) = mailbox.payload.try_into() {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::Stopped) => {
+                    return Ok(());
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub process is no longer running")
+    }
+
     #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc))]
     pub async fn push(&self, events: Vec<Record>) -> eyre::Result<()> {
         tracing::debug!("sending push request to pubsub process {}", self.target);
