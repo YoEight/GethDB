@@ -2,7 +2,6 @@ use geth_common::{Direction, ExpectedRevision, ProgramStats, ProgramSummary, Pro
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::domain::index::CurrentRevision;
 

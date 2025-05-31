@@ -1,24 +1,21 @@
 use std::u64;
 
 use bytes::Bytes;
-use geth_common::{ContentType, ProgramStats, ProgramSummary, Record};
+use geth_common::{ContentType, ProgramStats, Record};
 use uuid::Uuid;
 
 use crate::process::{
     messages::{ProgramRequests, ProgramResponses, SubscribeResponses},
-    subscription::{
-        program::{
-            pyro::{create_pyro_runtime, from_runtime_value_to_json},
-            ProgramArgs,
-        },
-        SubscriptionClient,
+    subscription::program::{
+        pyro::{create_pyro_runtime, from_runtime_value_to_json},
+        ProgramArgs,
     },
     Item, ProcessEnv,
 };
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pyro-worker"))]
 pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
-    let sub_client = SubscriptionClient::resolve(&env).await?;
+    let sub_client = env.client.new_subscription_client().await?;
     let mut args = None;
 
     tracing::debug!("computation unit allocated, waiting for program instructions");

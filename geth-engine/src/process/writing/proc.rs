@@ -20,7 +20,7 @@ where
     let pool = env.client.pool.clone();
     let mut buffer = env.handle.block_on(pool.get()).unwrap();
     let mut log_writer = LogWriter::load(runtime.container().clone(), buffer.split())?;
-    let mut index_client = IndexClient::resolve_raw(&env)?;
+    let index_client = IndexClient::resolve_raw(&env)?;
     let sub_client = SubscriptionClient::resolve_raw(&env)?;
     std::mem::drop(buffer);
 

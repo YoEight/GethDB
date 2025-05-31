@@ -1,7 +1,5 @@
 use bb8::Pool;
 use chrono::Utc;
-use eyre::Error;
-use geth_common::generated::next::protocol::operation_out::subscription_event::confirmation;
 use geth_common::ProgramSummary;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
@@ -20,7 +18,7 @@ use tokio::sync::{oneshot, Notify};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::{Options, WriterClient};
+use crate::{IndexClient, Options, ReaderClient, WriterClient};
 
 #[cfg(test)]
 mod tests;
@@ -87,11 +85,6 @@ enum Topology {
         limit: usize,
         instances: HashSet<ProcId>,
     },
-}
-
-struct Instance {
-    id: ProcId,
-    name: String,
 }
 
 struct RunningProc {
@@ -222,12 +215,6 @@ impl<S> Manager<S>
 where
     S: Storage + Send + Sync + 'static,
 {
-    fn gen_proc_id(&mut self) -> ProcId {
-        let id = self.proc_id_gen;
-        self.proc_id_gen += 1;
-        id
-    }
-
     fn handle(&mut self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.closing && !cmd.is_shutdown_related() {
             return Ok(());
@@ -674,6 +661,16 @@ impl ManagerClient {
     pub async fn new_subscription_client(&self) -> eyre::Result<SubscriptionClient> {
         let id = self.wait_for(Proc::PubSub).await?.must_succeed()?;
         Ok(SubscriptionClient::new(id, self.clone()))
+    }
+
+    pub async fn new_index_client(&self) -> eyre::Result<IndexClient> {
+        let id = self.wait_for(Proc::Indexing).await?.must_succeed()?;
+        Ok(IndexClient::new(id, self.clone()))
+    }
+
+    pub async fn new_reader_client(&self) -> eyre::Result<ReaderClient> {
+        let id = self.wait_for(Proc::Reading).await?.must_succeed()?;
+        Ok(ReaderClient::new(id, self.clone()))
     }
 
     pub async fn shutdown(&self) -> eyre::Result<()> {

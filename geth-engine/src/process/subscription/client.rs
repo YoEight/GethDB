@@ -6,7 +6,6 @@ use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
 use geth_common::{ProgramStats, ProgramSummary, Record};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
-use uuid::Uuid;
 
 pub struct Streaming {
     inner: UnboundedReceiver<Messages>,

@@ -1,13 +1,12 @@
-use geth_common::{ProgramStats, ProgramSummary};
+use geth_common::ProgramStats;
 use tokio::sync::mpsc::UnboundedSender;
-use uuid::Uuid;
 
 use crate::{
     process::{
         messages::{Messages, ProgramRequests, ProgramResponses},
-        ProcId, ProcessEnv,
+        ProcId,
     },
-    ManagerClient, Proc,
+    ManagerClient,
 };
 
 pub enum ProgramStartResult {

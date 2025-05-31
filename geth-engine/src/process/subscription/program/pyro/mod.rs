@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{self, AtomicU64, AtomicUsize},
+        atomic::{self, AtomicUsize},
         Arc,
     },
 };

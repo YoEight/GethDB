@@ -1,18 +1,15 @@
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
-    Messages, ProgramRequests, ProgramResponses, RequestError, Responses, SubscribeRequests,
-    SubscribeResponses, SubscriptionType,
+    Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
+    SubscriptionType,
 };
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
-use crate::process::{Item, ProcessEnv, SpawnResult};
+use crate::process::{Item, ProcessEnv};
 use crate::Proc;
 use chrono::{DateTime, Utc};
-use eyre::Context;
 use geth_common::{ProgramSummary, Record};
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
-use tracing::Instrument;
-use uuid::Uuid;
 
 const ALL_IDENT: &str = "$all";
 

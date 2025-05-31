@@ -1,6 +1,4 @@
-use crate::process::subscription::SubscriptionClient;
-use crate::process::writing::WriterClient;
-use crate::process::{start_process_manager, Proc};
+use crate::process::start_process_manager;
 use crate::Options;
 use geth_common::{ExpectedRevision, Propose};
 use serde::{Deserialize, Serialize};
@@ -14,10 +12,8 @@ struct Foo {
 #[tokio::test]
 async fn test_pubsub_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
-    let pubsub_id = manager.wait_for(Proc::PubSub).await?.must_succeed()?;
-    let writer_client = WriterClient::new(writer_id, manager.clone());
-    let sub_client = SubscriptionClient::new(pubsub_id, manager.clone());
+    let writer_client = manager.new_writer_client().await?;
+    let sub_client = manager.new_subscription_client().await?;
     let mut expected = vec![];
     let stream_name = Uuid::new_v4().to_string();
 

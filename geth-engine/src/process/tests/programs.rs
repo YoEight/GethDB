@@ -4,10 +4,7 @@ use geth_common::{ExpectedRevision, Propose};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-use crate::{
-    process::{subscription::SubscriptionClient, tests::Foo},
-    start_process_manager, Options, Proc, WriterClient,
-};
+use crate::{process::tests::Foo, start_process_manager, Options};
 
 #[derive(Serialize, Deserialize)]
 pub struct PyroRecord<A> {

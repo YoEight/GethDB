@@ -1,8 +1,6 @@
-use crate::process::indexing::IndexClient;
-use crate::process::reading::{record_try_from, ReaderClient};
+use crate::process::reading::record_try_from;
+use crate::process::start_process_manager;
 use crate::process::tests::Foo;
-use crate::process::writing::WriterClient;
-use crate::process::{start_process_manager, Proc};
 use crate::Options;
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -11,12 +9,9 @@ use uuid::Uuid;
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::Indexing).await?.must_succeed()?;
-    let reader_id = manager.wait_for(Proc::Reading).await?.must_succeed()?;
-    let mut index_client = IndexClient::new(proc_id, manager.clone());
-    let writer_id = manager.wait_for(Proc::Writing).await?.must_succeed()?;
-    let writer_client = WriterClient::new(writer_id, manager.clone());
-    let reader_client = ReaderClient::new(reader_id, manager.clone());
+    let index_client = manager.new_index_client().await?;
+    let writer_client = manager.new_writer_client().await?;
+    let reader_client = manager.new_reader_client().await?;
     let mut expected = vec![];
 
     for i in 0..10 {
