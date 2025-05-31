@@ -3,9 +3,10 @@ use crate::process::messages::{
     SubscriptionType,
 };
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
-use geth_common::{ProgramSummary, Record};
+use geth_common::{ProgramStats, ProgramSummary, Record};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
+use uuid::Uuid;
 
 pub struct Streaming {
     inner: UnboundedReceiver<Messages>,
@@ -141,6 +142,38 @@ impl SubscriptionClient {
 
                 SubscribeResponses::Programs(ProgramResponses::List(list)) => {
                     return Ok(list);
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub sent an unexpected response")
+    }
+
+    pub async fn program_stats(&self, id: ProcId) -> eyre::Result<Option<ProgramStats>> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::Stats { id: id }).into(),
+            )
+            .await?;
+
+        if let Some(resp) = mailbox.payload.try_into().ok() {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::Stats(resp)) => {
+                    return Ok(Some(resp));
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::NotFound) => {
+                    return Ok(None);
                 }
 
                 _ => {

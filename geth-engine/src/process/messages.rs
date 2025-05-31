@@ -6,6 +6,8 @@ use uuid::Uuid;
 
 use crate::domain::index::CurrentRevision;
 
+use super::ProcId;
+
 #[derive(Debug)]
 pub enum Messages {
     Requests(Requests),
@@ -307,17 +309,13 @@ pub enum ProgramRequests {
     },
 
     Stats {
-        id: Uuid,
-    },
-
-    Get {
-        id: Uuid,
+        id: ProcId,
     },
 
     List,
 
     Stop {
-        id: Uuid,
+        id: ProcId,
     },
 }
 
@@ -395,8 +393,9 @@ pub enum TestSinkResponses {
 #[derive(Debug)]
 pub enum ProgramResponses {
     Stats(ProgramStats),
+    Summary(ProgramSummary),
     List(Vec<ProgramSummary>),
-    Get(ProgramSummary),
+    NotFound,
     Error(eyre::Report),
     Started,
     Stopped,

@@ -6,8 +6,9 @@ use crate::process::messages::{
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
 use crate::process::{Item, ProcessEnv, SpawnResult};
 use crate::Proc;
+use chrono::{DateTime, Utc};
 use eyre::Context;
-use geth_common::Record;
+use geth_common::{ProgramSummary, Record};
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 use tracing::Instrument;
@@ -18,6 +19,7 @@ const ALL_IDENT: &str = "$all";
 pub struct ProgramProcess {
     client: ProgramClient,
     name: String,
+    started_at: DateTime<Utc>,
 }
 
 #[derive(Default)]
@@ -76,7 +78,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
                             SubscriptionType::Program { name, code } => {
                                 let result = env.client.wait_for(Proc::PyroWorker).await?;
-                                let client = match result.must_succeed() {
+                                let id = match result.must_succeed() {
                                     Err(e) => {
                                         let _ =
                                             stream.sender.send(SubscribeResponses::Error(e).into());
@@ -84,10 +86,10 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                         continue;
                                     }
 
-                                    Ok(id) => ProgramClient::new(id, env.client.clone()),
+                                    Ok(id) => id,
                                 };
 
-                                let id = Uuid::new_v4();
+                                let client = ProgramClient::new(id, env.client.clone());
 
                                 tracing::debug!(
                                     id = %id,
@@ -111,7 +113,14 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                             .send(SubscribeResponses::Confirmed.into())
                                             .is_ok()
                                         {
-                                            programs.insert(id, ProgramProcess { client, name });
+                                            programs.insert(
+                                                id,
+                                                ProgramProcess {
+                                                    client,
+                                                    name,
+                                                    started_at: Utc::now(),
+                                                },
+                                            );
                                             continue;
                                         }
 
@@ -175,45 +184,24 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
                                         continue;
                                     }
-
-                                    env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        RequestError::NotFound.into(),
-                                    )?;
                                 }
-                            }
 
-                            ProgramRequests::Get { id } => {
-                                if let Some(prog) = programs.get(&id) {
-                                    if let Some(summary) = prog.client.summary().await? {
-                                        env.client.reply(
-                                            mail.origin,
-                                            mail.correlation,
-                                            SubscribeResponses::Programs(ProgramResponses::Get(
-                                                summary,
-                                            ))
-                                            .into(),
-                                        )?;
-
-                                        continue;
-                                    }
-
-                                    env.client.reply(
-                                        mail.origin,
-                                        mail.correlation,
-                                        RequestError::NotFound.into(),
-                                    )?;
-                                }
+                                env.client.reply(
+                                    mail.origin,
+                                    mail.correlation,
+                                    SubscribeResponses::Programs(ProgramResponses::NotFound).into(),
+                                )?;
                             }
 
                             ProgramRequests::List => {
                                 let mut summaries = Vec::with_capacity(programs.len());
 
                                 for prog in programs.values() {
-                                    if let Some(summary) = prog.client.summary().await? {
-                                        summaries.push(summary);
-                                    }
+                                    summaries.push(ProgramSummary {
+                                        id: prog.client.id(),
+                                        name: prog.name.clone(),
+                                        started_at: prog.started_at,
+                                    });
                                 }
 
                                 env.client.reply(

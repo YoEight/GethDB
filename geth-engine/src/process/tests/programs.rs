@@ -81,3 +81,29 @@ pub async fn test_program_list() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+pub async fn test_program_stats() -> eyre::Result<()> {
+    let manager = start_process_manager(Options::in_mem()).await?;
+    let client = manager.new_subscription_client().await?;
+
+    let mut _ignored = client
+        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
+    let programs = client.list_programs().await?;
+    let program = client.program_stats(programs[0].id).await?;
+    assert!(program.is_some());
+
+    let program = program.unwrap();
+    assert_eq!(program.id, programs[0].id);
+    assert_eq!(program.name, programs[0].name);
+    assert_eq!(program.name, "echo");
+    assert_eq!(
+        program.source_code,
+        include_str!("./resources/programs/echo.pyro")
+    );
+    assert_eq!(program.subscriptions, vec!["foobar".to_string()]);
+
+    Ok(())
+}

@@ -111,14 +111,6 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 }).into());
                             }
 
-                            ProgramRequests::Get { .. } => {
-                                let _ = env.client.reply(mail.origin, mail.correlation, ProgramResponses::Get(ProgramSummary {
-                                    id:env.client.id,
-                                    name:args.name.clone(),
-                                    started_at:runtime.started(),
-                                }).into());
-                            }
-
                             _ => {
                                 tracing::debug!("ignore program message")
                             }
