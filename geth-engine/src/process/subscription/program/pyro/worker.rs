@@ -1,5 +1,3 @@
-use std::u64;
-
 use bytes::Bytes;
 use geth_common::{ContentType, ProgramStats, Record};
 use uuid::Uuid;
@@ -21,9 +19,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     tracing::debug!("computation unit allocated, waiting for program instructions");
     while let Some(item) = env.queue.recv().await {
         if let Item::Mail(message) = item {
-            if let Some(ProgramRequests::Start { name, code, sender }) =
-                message.payload.try_into().ok()
-            {
+            if let Ok(ProgramRequests::Start { name, code, sender }) = message.payload.try_into() {
                 args = Some(ProgramArgs {
                     name,
                     code,
@@ -89,7 +85,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
             Some(item) = env.queue.recv() => {
                 if let Item::Mail(mail) = item {
-                    if let Some(req) = mail.payload.try_into().ok() {
+                    if let Ok(req) = mail.payload.try_into() {
                         match req {
                             ProgramRequests::Stop { .. } => {
                                 tracing::info!(name = args.name, "program stopped");

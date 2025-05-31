@@ -253,10 +253,10 @@ impl PyroRuntime {
     }
 }
 
-pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::Result<PyroRuntime> {
+pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Result<PyroRuntime> {
     let (stdout_handle, mut stdout_recv) = unbounded_channel();
     let env = Env { stdout_handle };
-    let name_stdout = name.clone();
+    let name_stdout = name.to_string();
     tokio::spawn(async move {
         while let Some(value) = stdout_recv.recv().await {
             tracing::info!(
@@ -268,7 +268,7 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &String) -> eyre::R
     });
 
     let (send_output, recv_output) = unbounded_channel();
-    let name_subscribe = name.clone();
+    let name_subscribe = name.to_string();
     let subs = Arc::new(RwLock::new(Vec::new()));
     let pushed_events = Arc::new(AtomicUsize::new(0));
     let subs_subscribe = subs.clone();

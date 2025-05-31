@@ -133,7 +133,7 @@ impl SubscriptionClient {
             )
             .await?;
 
-        if let Some(resp) = mailbox.payload.try_into().ok() {
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
                 SubscribeResponses::Error(e) => {
                     return Err(e);
@@ -157,11 +157,11 @@ impl SubscriptionClient {
             .inner
             .request(
                 self.target,
-                SubscribeRequests::Program(ProgramRequests::Stats { id: id }).into(),
+                SubscribeRequests::Program(ProgramRequests::Stats { id }).into(),
             )
             .await?;
 
-        if let Some(resp) = mailbox.payload.try_into().ok() {
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
                 SubscribeResponses::Error(e) => {
                     return Err(e);

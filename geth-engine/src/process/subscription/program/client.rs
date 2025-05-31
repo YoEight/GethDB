@@ -56,7 +56,7 @@ impl ProgramClient {
             )));
         };
 
-        if let Some(resp) = mailbox.payload.try_into().ok() {
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
                 ProgramResponses::Started => {
                     return Ok(ProgramStartResult::Started);
@@ -85,7 +85,7 @@ impl ProgramClient {
             return Ok(None);
         };
 
-        if let Some(resp) = mailbox.payload.try_into().ok() {
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
                 ProgramResponses::Stats(stats) => {
                     return Ok(Some(stats));
@@ -112,7 +112,7 @@ impl ProgramClient {
             return Ok(());
         };
 
-        if let Some(resp) = mailbox.payload.try_into().ok() {
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
                 ProgramResponses::Stopped => {
                     return Ok(());
