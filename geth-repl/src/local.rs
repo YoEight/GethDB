@@ -5,7 +5,6 @@ use geth_common::{
     SubscriptionEvent,
 };
 use geth_engine::{ManagerClient, Proc, ReaderClient, WriterClient};
-use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct LocalClient {
@@ -97,11 +96,11 @@ impl Client for LocalClient {
         eyre::bail!("not implemented")
     }
 
-    async fn get_program(&self, _id: Uuid) -> eyre::Result<ProgramObtained> {
+    async fn get_program(&self, _id: u64) -> eyre::Result<ProgramObtained> {
         eyre::bail!("not implemented")
     }
 
-    async fn kill_program(&self, _id: Uuid) -> eyre::Result<ProgramKilled> {
+    async fn kill_program(&self, _id: u64) -> eyre::Result<ProgramKilled> {
         eyre::bail!("not implemented")
     }
 }

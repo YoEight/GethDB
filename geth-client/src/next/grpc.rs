@@ -7,10 +7,10 @@ use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgram, KillProgram, ListPrograms, Operation, ProgramKilled,
-    ProgramObtained, ProgramSummary, Propose, ReadStream, ReadStreamCompleted, Record, Reply,
-    Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionEvent,
-    UnsubscribeReason,
+    EndPoint, ExpectedRevision, GetProgramStats, KillProgram, ListPrograms, Operation,
+    ProgramKilled, ProgramObtained, ProgramSummary, Propose, ReadStream, ReadStreamCompleted,
+    Record, Reply, Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream,
+    SubscriptionEvent, UnsubscribeReason,
 };
 
 use crate::next::driver::Driver;
@@ -265,10 +265,10 @@ impl Client for GrpcClient {
         eyre::bail!("unexpected code path when listing programs");
     }
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
+    async fn get_program(&self, id: u64) -> eyre::Result<ProgramObtained> {
         let mut task = self
             .mailbox
-            .send_operation(Operation::GetProgram(GetProgram { id }))
+            .send_operation(Operation::GetProgramStats(GetProgramStats { id }))
             .await?;
 
         if let Some(event) = task.recv().await? {
@@ -281,7 +281,7 @@ impl Client for GrpcClient {
         eyre::bail!("unexpected code path when getting program {}", id);
     }
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
+    async fn kill_program(&self, id: u64) -> eyre::Result<ProgramKilled> {
         let mut task = self
             .mailbox
             .send_operation(Operation::KillProgram(KillProgram { id }))

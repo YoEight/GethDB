@@ -456,11 +456,11 @@ async fn list_programmable_subscriptions(state: &mut OnlineState) {
 }
 
 async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
-    let id = match id.parse::<Uuid>() {
+    let id = match id.parse::<u64>() {
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
+                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
                 e
             );
 
@@ -474,11 +474,11 @@ async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
 }
 
 async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String) {
-    let id = match id.parse::<Uuid>() {
+    let id = match id.parse::<u64>() {
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
+                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
                 e
             );
 

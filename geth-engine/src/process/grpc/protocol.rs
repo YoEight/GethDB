@@ -8,8 +8,9 @@ use tonic::{Request, Response, Status, Streaming};
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
-    Direction, Operation, OperationIn, OperationOut, ReadStreamCompleted, Record, Reply,
-    StreamRead, Subscribe, SubscriptionEvent, UnsubscribeReason,
+    Direction, GetProgramError, Operation, OperationIn, OperationOut, ProgramKilled, ProgramListed,
+    ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscriptionEvent,
+    UnsubscribeReason,
 };
 
 use crate::process::grpc::local::LocalStorage;
@@ -434,28 +435,31 @@ async fn execute_operation(
             }
 
             Operation::ListPrograms(_) => {
-                not_implemented()?;
-                // let programs = client.list_programs().await?;
-                // yield OperationOut {
-                //     correlation,
-                //     reply: Reply::ProgramsListed(ProgramListed { programs }),
-                // };
+                let programs = internal.sub.list_programs().await?;
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramsListed(ProgramListed { programs }),
+                };
             }
 
-            Operation::GetProgram(_) => {
-                not_implemented()?;
-                // yield OperationOut {
-                //     correlation,
-                //     reply: Reply::ProgramObtained(client.get_program(params.id).await?),
-                // };
+            Operation::GetProgramStats(params) => {
+                let result = match internal.sub.program_stats(params.id).await? {
+                    Some(stats) => ProgramObtained::Success(stats),
+                    None => ProgramObtained::Error(GetProgramError::NotExists),
+                };
+
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramObtained(result),
+                };
             }
 
-            Operation::KillProgram(_) => {
-                not_implemented()?;
-                // yield OperationOut {
-                //     correlation,
-                //     reply: Reply::ProgramKilled(client.kill_program(params.id).await?),
-                // };
+            Operation::KillProgram(params) => {
+                internal.sub.program_stop(params.id).await?;
+                yield OperationOut {
+                    correlation,
+                    reply: Reply::ProgramKilled(ProgramKilled::Success),
+                };
             }
 
             Operation::Unsubscribe => {

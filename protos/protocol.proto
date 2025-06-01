@@ -39,7 +39,7 @@ message OperationIn {
     Subscribe subscribe = 5;
     ListPrograms list_programs = 6;
     KillProgram kill_program = 7;
-    GetProgram get_program = 8;
+    GetProgramStats get_program_stats = 8;
     google.protobuf.Empty unsubscribe = 9;
   }
 
@@ -118,11 +118,11 @@ message OperationIn {
   }
 
   message KillProgram {
-    Ident id = 1;
+    uint64 id = 1;
   }
 
-  message GetProgram {
-    Ident id = 1;
+  message GetProgramStats {
+    uint64 id = 1;
   }
 }
 

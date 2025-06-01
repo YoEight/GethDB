@@ -61,7 +61,7 @@ pub enum Operation {
     ReadStream(ReadStream),
     Subscribe(Subscribe),
     ListPrograms(ListPrograms),
-    GetProgram(GetProgram),
+    GetProgramStats(GetProgramStats),
     KillProgram(KillProgram),
     Unsubscribe,
 }
@@ -74,7 +74,7 @@ impl From<Operation> for operation_in::Operation {
             Operation::ReadStream(req) => operation_in::Operation::ReadStream(req.into()),
             Operation::Subscribe(req) => operation_in::Operation::Subscribe(req.into()),
             Operation::ListPrograms(req) => operation_in::Operation::ListPrograms(req.into()),
-            Operation::GetProgram(req) => operation_in::Operation::GetProgram(req.into()),
+            Operation::GetProgramStats(req) => operation_in::Operation::GetProgramStats(req.into()),
             Operation::KillProgram(req) => operation_in::Operation::KillProgram(req.into()),
             Operation::Unsubscribe => operation_in::Operation::Unsubscribe(()),
         }
@@ -101,7 +101,7 @@ impl From<next::protocol::OperationIn> for OperationIn {
             operation_in::Operation::ReadStream(req) => Operation::ReadStream(req.into()),
             operation_in::Operation::Subscribe(req) => Operation::Subscribe(req.into()),
             operation_in::Operation::ListPrograms(req) => Operation::ListPrograms(req.into()),
-            operation_in::Operation::GetProgram(req) => Operation::GetProgram(req.into()),
+            operation_in::Operation::GetProgramStats(req) => Operation::GetProgramStats(req.into()),
             operation_in::Operation::KillProgram(req) => Operation::KillProgram(req.into()),
             operation_in::Operation::Unsubscribe(_) => Operation::Unsubscribe,
         };
@@ -1362,44 +1362,36 @@ impl From<operation_in::ListPrograms> for ListPrograms {
 }
 
 #[derive(Clone, Debug)]
-pub struct GetProgram {
-    pub id: Uuid,
+pub struct GetProgramStats {
+    pub id: u64,
 }
 
-impl From<GetProgram> for operation_in::GetProgram {
-    fn from(value: GetProgram) -> Self {
-        Self {
-            id: Some(value.id.into()),
-        }
+impl From<GetProgramStats> for operation_in::GetProgramStats {
+    fn from(value: GetProgramStats) -> Self {
+        Self { id: value.id }
     }
 }
 
-impl From<operation_in::GetProgram> for GetProgram {
-    fn from(value: operation_in::GetProgram) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
-        }
+impl From<operation_in::GetProgramStats> for GetProgramStats {
+    fn from(value: operation_in::GetProgramStats) -> Self {
+        Self { id: value.id }
     }
 }
 
 #[derive(Clone, Debug)]
 pub struct KillProgram {
-    pub id: Uuid,
+    pub id: u64,
 }
 
 impl From<KillProgram> for operation_in::KillProgram {
     fn from(value: KillProgram) -> Self {
-        Self {
-            id: Some(value.id.into()),
-        }
+        Self { id: value.id }
     }
 }
 
 impl From<operation_in::KillProgram> for KillProgram {
     fn from(value: operation_in::KillProgram) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
-        }
+        Self { id: value.id }
     }
 }
 

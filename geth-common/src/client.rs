@@ -3,7 +3,6 @@
 use std::sync::Arc;
 
 use futures::stream::BoxStream;
-use uuid::Uuid;
 
 use crate::{
     AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramKilled,
@@ -62,9 +61,9 @@ pub trait Client {
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>>;
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained>;
+    async fn get_program(&self, id: u64) -> eyre::Result<ProgramObtained>;
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled>;
+    async fn kill_program(&self, id: u64) -> eyre::Result<ProgramKilled>;
 }
 
 #[async_trait::async_trait]
@@ -125,11 +124,11 @@ where
         self.as_ref().list_programs().await
     }
 
-    async fn get_program(&self, id: Uuid) -> eyre::Result<ProgramObtained> {
+    async fn get_program(&self, id: u64) -> eyre::Result<ProgramObtained> {
         self.as_ref().get_program(id).await
     }
 
-    async fn kill_program(&self, id: Uuid) -> eyre::Result<ProgramKilled> {
+    async fn kill_program(&self, id: u64) -> eyre::Result<ProgramKilled> {
         self.as_ref().kill_program(id).await
     }
 }
