@@ -2,7 +2,7 @@ mod client;
 mod proc;
 
 use bytes::Buf;
-pub use client::ReaderClient;
+pub use client::{ReaderClient, Streaming};
 use geth_common::{ContentType, Record};
 use geth_mikoshi::wal::LogEntry;
 pub use proc::run;

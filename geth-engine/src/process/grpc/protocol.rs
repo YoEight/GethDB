@@ -1,16 +1,17 @@
 use futures::{pin_mut, Stream, StreamExt};
+use geth_mikoshi::hashing::mikoshi_hash;
 use tokio::select;
 use tokio::sync::mpsc;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
-use tonic::{Request, Response, Status, Streaming};
+use tonic::{Request, Response, Status};
 
 use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
     Direction, GetProgramError, Operation, OperationIn, OperationOut, ProgramKilled, ProgramListed,
-    ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscriptionEvent,
-    UnsubscribeReason,
+    ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscribeToStream,
+    SubscriptionEvent, UnsubscribeReason,
 };
 
 use crate::process::grpc::local::LocalStorage;
@@ -18,6 +19,7 @@ use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{ManagerClient, Proc};
+use crate::IndexClient;
 
 pub struct ProtocolImpl {
     client: ManagerClient,
@@ -34,17 +36,15 @@ struct Internal {
     writer: WriterClient,
     reader: ReaderClient,
     sub: SubscriptionClient,
+    index: IndexClient,
 }
 
 async fn resolve_internal(mgr: ManagerClient) -> eyre::Result<Internal> {
-    let writer_id = mgr.wait_for(Proc::Writing).await?.must_succeed()?;
-    let reader_id = mgr.wait_for(Proc::Reading).await?.must_succeed()?;
-    let sub_id = mgr.wait_for(Proc::PubSub).await?.must_succeed()?;
-
     Ok(Internal {
-        writer: WriterClient::new(writer_id, mgr.clone()),
-        reader: ReaderClient::new(reader_id, mgr.clone()),
-        sub: SubscriptionClient::new(sub_id, mgr),
+        writer: mgr.new_writer_client().await?,
+        reader: mgr.new_reader_client().await?,
+        sub: mgr.new_subscription_client().await?,
+        index: mgr.new_index_client().await?,
     })
 }
 
@@ -305,9 +305,23 @@ async fn execute_operation(
 
             Operation::Subscribe(subscribe) => {
                 let token = local_storage.new_cancellation_token(correlation).await;
-                let params = match subscribe {
+                match subscribe {
                     Subscribe::ToStream(params) => {
-                        params
+                        let mut catchup = if let Some(catchup) = CatchupSubscription::init(&internal, params).await? {
+                            catchup
+                        } else {
+                            yield OperationOut {
+                                correlation,
+                                reply: Reply::StreamRead(StreamRead::StreamDeleted),
+                            };
+
+                            local_storage.complete(&correlation).await;
+                            return;
+                        };
+
+                        while let Some(out) = catchup.next().await? {
+                            yield out;
+                        }
                     }
 
                     Subscribe::ToProgram(_) => {
@@ -315,123 +329,6 @@ async fn execute_operation(
                         // client.subscribe_to_process(&params.name, &params.source).await
                     }
                 };
-
-                let mut position = 0u64;
-                let mut catching_up = true;
-                let mut history = Vec::<Record>::new();
-                let mut sub_stream = internal.sub.subscribe_to_stream(&params.stream_name).await?;
-                let mut read_stream = match internal
-                    .reader
-                    .read(&params.stream_name, params.start, Direction::Forward, usize::MAX)
-                    .await?
-                    {
-                        ReadStreamCompleted::StreamDeleted => {
-                            yield OperationOut {
-                                correlation,
-                                // FIXME - report a proper stream deleted error.
-                                reply: Reply::StreamRead(StreamRead::StreamDeleted),
-                            };
-
-                            local_storage.complete(&correlation).await;
-                            return;
-                        }
-
-                        ReadStreamCompleted::Unexpected(e) => {
-                            unexpected_error(e)?;
-                            return;
-                        }
-
-                        ReadStreamCompleted::Success(stream) => stream,
-                    };
-
-                loop {
-                    select! {
-                        outcome = read_stream.next() => {
-                            match outcome {
-                                Err(e) => {
-                                    tracing::error!(target = correlation.to_string(), "{}", e);
-                                    yield OperationOut {
-                                        correlation,
-                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-                                    };
-
-                                    local_storage.complete(&correlation).await;
-                                    break;
-                                }
-
-                                Ok(entry) => {
-                                    if let Some(record) = entry {
-                                        position = record.position;
-                                        yield OperationOut {
-                                            correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
-                                        };
-                                    } else {
-                                        catching_up = false;
-
-                                        for record in history.drain(..) {
-                                            position = record.position;
-                                            yield OperationOut {
-                                                correlation,
-                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
-                                            };
-                                        }
-                                    }
-                                }
-                            }
-                        }
-
-                        outcome = sub_stream.next() => {
-                            match outcome {
-                                Err(e) => {
-                                    tracing::error!(target = correlation.to_string(), "{}", e);
-                                    yield OperationOut {
-                                        correlation,
-                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-                                    };
-
-                                    local_storage.complete(&correlation).await;
-                                    break;
-                                }
-
-                                Ok(record) => {
-                                    if let Some(record) = record {
-                                        if record.position <= position {
-                                            continue;
-                                        }
-
-                                        if catching_up {
-                                            history.push(record);
-                                            continue;
-                                        }
-
-                                        position = record.position;
-                                        yield OperationOut {
-                                            correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
-                                        };
-                                    } else {
-                                        yield OperationOut {
-                                            correlation,
-                                            reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-                                        };
-
-                                        local_storage.complete(&correlation).await;
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-
-                        _ = token.notified() => {
-                            yield OperationOut {
-                                correlation,
-                                reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
-                            };
-                            break;
-                        },
-                    }
-                }
             }
 
             Operation::ListPrograms(_) => {
@@ -468,3 +365,201 @@ async fn execute_operation(
         };
     }
 }
+
+struct CatchupSubscription {
+    params: SubscribeToStream,
+    position: u64,
+    catching_up: bool,
+    history: Vec<Record>,
+    end_revision: u64,
+    read_stream: crate::process::reading::Streaming,
+    sub_stream: crate::process::subscription::Streaming,
+}
+
+impl CatchupSubscription {
+    async fn init(internal: &Internal, params: SubscribeToStream) -> eyre::Result<Option<Self>> {
+        let sub_stream = internal
+            .sub
+            .subscribe_to_stream(&params.stream_name)
+            .await?;
+
+        let mut read_stream = match internal
+            .reader
+            .read(
+                &params.stream_name,
+                params.start,
+                Direction::Forward,
+                usize::MAX,
+            )
+            .await?
+        {
+            ReadStreamCompleted::StreamDeleted => {
+                return Ok(None);
+            }
+
+            ReadStreamCompleted::Unexpected(e) => {
+                return Err(e);
+            }
+
+            ReadStreamCompleted::Success(stream) => stream,
+        };
+
+        let current_revision = internal
+            .index
+            .latest_revision(mikoshi_hash(&params.stream_name))
+            .await?;
+
+        if current_revision.is_deleted() {
+            return Ok(None);
+        }
+
+        let mut end_revision = 0;
+
+        if let Some(revision) = current_revision.revision() {
+            end_revision = revision;
+        } else {
+            read_stream = crate::process::reading::Streaming::empty();
+        }
+
+        Ok(Some(Self {
+            params,
+            position: 0,
+            catching_up: false,
+            history: vec![],
+            end_revision,
+            read_stream,
+            sub_stream,
+        }))
+    }
+
+    async fn next(&mut self) -> eyre::Result<Option<OperationOut>> {
+        todo!()
+    }
+}
+
+// async fn catchup_subscription<A>(params: SubscribeToStream) -> eyre::Result<A> {
+//     let mut position = 0u64;
+//     let mut catching_up = true;
+//     let mut history = Vec::<Record>::new();
+//     let mut sub_stream = internal
+//         .sub
+//         .subscribe_to_stream(&params.stream_name)
+//         .await?;
+//     let mut read_stream = match internal
+//         .reader
+//         .read(
+//             &params.stream_name,
+//             params.start,
+//             Direction::Forward,
+//             usize::MAX,
+//         )
+//         .await?
+//     {
+//         ReadStreamCompleted::StreamDeleted => {
+//             yield OperationOut {
+//                 correlation,
+//                 // FIXME - report a proper stream deleted error.
+//                 reply: Reply::StreamRead(StreamRead::StreamDeleted),
+//             };
+
+//             local_storage.complete(&correlation).await;
+//             return;
+//         }
+
+//         ReadStreamCompleted::Unexpected(e) => {
+//             unexpected_error(e)?;
+//             return;
+//         }
+
+//         ReadStreamCompleted::Success(stream) => stream,
+//     };
+
+//     loop {
+//         select! {
+//             outcome = read_stream.next() => {
+//                 match outcome {
+//                     Err(e) => {
+//                         tracing::error!(target = correlation.to_string(), "{}", e);
+//                         yield OperationOut {
+//                             correlation,
+//                             reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+//                         };
+
+//                         local_storage.complete(&correlation).await;
+//                         break;
+//                     }
+
+//                     Ok(entry) => {
+//                         if let Some(record) = entry {
+//                             position = record.position;
+//                             yield OperationOut {
+//                                 correlation,
+//                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
+//                             };
+//                         } else {
+//                             catching_up = false;
+
+//                             for record in history.drain(..) {
+//                                 position = record.position;
+//                                 yield OperationOut {
+//                                     correlation,
+//                                     reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
+//                                 };
+//                             }
+//                         }
+//                     }
+//                 }
+//             }
+
+//             outcome = sub_stream.next() => {
+//                 match outcome {
+//                     Err(e) => {
+//                         tracing::error!(target = correlation.to_string(), "{}", e);
+//                         yield OperationOut {
+//                             correlation,
+//                             reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+//                         };
+
+//                         local_storage.complete(&correlation).await;
+//                         break;
+//                     }
+
+//                     Ok(record) => {
+//                         if let Some(record) = record {
+//                             if record.position <= position {
+//                                 continue;
+//                             }
+
+//                             if catching_up {
+//                                 history.push(record);
+//                                 continue;
+//                             }
+
+//                             position = record.position;
+//                             yield OperationOut {
+//                                 correlation,
+//                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(record)),
+//                             };
+//                         } else {
+//                             yield OperationOut {
+//                                 correlation,
+//                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+//                             };
+
+//                             local_storage.complete(&correlation).await;
+//                             break;
+//                         }
+//                     }
+//                 }
+//             }
+
+//             _ = token.notified() => {
+//                 yield OperationOut {
+//                     correlation,
+//                     reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
+//                 };
+//                 break;
+//             },
+//         }
+//     }
+// }

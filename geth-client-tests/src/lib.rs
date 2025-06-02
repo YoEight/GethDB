@@ -5,6 +5,9 @@ mod append_read_tests;
 mod delete_tests;
 
 #[cfg(test)]
+mod program_tests;
+
+#[cfg(test)]
 pub mod tests {
     use fake::{Dummy, Fake};
     use serde::{Deserialize, Serialize};
@@ -40,7 +43,7 @@ pub mod tests {
         }
     }
 
-    #[derive(Serialize, Deserialize, Dummy)]
+    #[derive(Serialize, Deserialize, Dummy, Clone, PartialEq, Eq, Debug)]
     pub struct Toto {
         pub key: String,
         pub value: u64,
