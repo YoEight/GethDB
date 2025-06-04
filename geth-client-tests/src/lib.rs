@@ -20,7 +20,7 @@ pub mod tests {
     #[ctor::ctor]
     fn test_init() {
         tracing_subscriber::fmt::fmt()
-            .with_env_filter(EnvFilter::new("geth_engine=debug"))
+            .with_env_filter(EnvFilter::new("geth_engine=debug,geth_client_tests=debug"))
             // .with_max_level(tracing::Level::DEBUG)
             .with_file(true)
             .with_line_number(true)

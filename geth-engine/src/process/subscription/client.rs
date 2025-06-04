@@ -28,6 +28,7 @@ impl Streaming {
                     return Err(e);
                 }
 
+                SubscribeResponses::Confirmed(_) => {}
                 SubscribeResponses::Record(record) => {
                     return Ok(Some(record));
                 }

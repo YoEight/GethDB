@@ -18,7 +18,6 @@ use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     Mutex, RwLock,
 };
-use uuid::Uuid;
 
 use crate::process::{subscription::SubscriptionClient, ProcId};
 
@@ -313,14 +312,11 @@ pub fn create_pyro_runtime(
                         );
                     })?;
 
-                let id = Uuid::new_v4();
                 tracing::debug!(
                     name = name_subscribe_local,
                     proc_id = proc_id,
                     target = "subscription",
-                    target = "subscription",
                     kind = "pyro",
-                    id = id.to_string(),
                     stream_name = stream_name,
                     "subscription is confirmed"
                 );
@@ -330,28 +326,54 @@ pub fn create_pyro_runtime(
                     streams.push(stream_name.clone());
                 }
 
-                while let Some(record) = streaming.next().await? {
-                    if input.send(EventRecord(record).serialize()?).is_err() {
-                        tracing::debug!(
-                            name = name_subscribe_local,
-                            target = "subscription",
-                            proc_id = proc_id,
-                            kind = "pyro",
-                            id = id.to_string(),
-                            stream_name = stream_name,
-                            reason = "unsubscribe",
-                            "subscription was dropped"
-                        );
-                    }
+                loop {
+                    match streaming.next().await {
+                        Err(e) => {
+                            tracing::error!(
+                                name = name_subscribe_local,
+                                target = "subscription",
+                                proc_id = proc_id,
+                                kind = "pyro",
+                                stream_name = stream_name,
+                                reason = "error",
+                                error = %e,
+                                "unexpected subscription error"
+                            );
 
-                    pushed_events_subscribe_local.fetch_add(1, atomic::Ordering::SeqCst);
+                            break;
+                        }
+
+                        Ok(outcome) => {
+                            if let Some(record) = outcome {
+                                if input.send(EventRecord(record).serialize()?).is_err() {
+                                    tracing::debug!(
+                                        name = name_subscribe_local,
+                                        target = "subscription",
+                                        proc_id = proc_id,
+                                        kind = "pyro",
+                                        stream_name = stream_name,
+                                        reason = "unsubscribe",
+                                        "subscription was dropped"
+                                    );
+
+                                    break;
+                                }
+
+                                pushed_events_subscribe_local
+                                    .fetch_add(1, atomic::Ordering::SeqCst);
+                            } else {
+                                tracing::error!("WTF!!!");
+                                break;
+                            }
+                        }
+                    }
                 }
 
                 tracing::debug!(
                     process = name_subscribe_local,
                     target = "subscription",
                     kind = "pyro",
-                    id = id.to_string(),
+                    proc_id = proc_id,
                     stream_name = stream_name,
                     "subscription has completed"
                 );
