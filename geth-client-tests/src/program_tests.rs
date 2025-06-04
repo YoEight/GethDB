@@ -42,9 +42,9 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
         match event {
             geth_common::SubscriptionEvent::EventAppeared(record) => {
                 let expected = expecteds.get(count).unwrap();
-                let actual = record.as_value::<Toto>()?;
+                let actual = record.as_pyro_value::<Toto>()?;
 
-                assert_eq!(expected, &actual);
+                assert_eq!(expected, &actual.payload);
                 count += 1;
             }
 

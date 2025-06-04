@@ -8,12 +8,17 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
 pub struct Streaming {
+    id: ProcId,
     inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub fn from(inner: UnboundedReceiver<Messages>) -> Self {
-        Self { inner }
+    pub fn from(id: ProcId, inner: UnboundedReceiver<Messages>) -> Self {
+        Self { id, inner }
+    }
+
+    pub fn id(&self) -> ProcId {
+        self.id
     }
 
     pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
@@ -79,8 +84,8 @@ impl SubscriptionClient {
                     return Err(e);
                 }
 
-                SubscribeResponses::Confirmed => {
-                    return Ok(Streaming::from(mailbox));
+                SubscribeResponses::Confirmed(_) => {
+                    return Ok(Streaming::from(0, mailbox));
                 }
 
                 _ => {
@@ -111,8 +116,8 @@ impl SubscriptionClient {
                     return Err(e);
                 }
 
-                SubscribeResponses::Confirmed => {
-                    return Ok(Streaming::from(mailbox));
+                SubscribeResponses::Confirmed(proc_id) => {
+                    return Ok(Streaming::from(proc_id.unwrap_or_default(), mailbox));
                 }
 
                 _ => {
@@ -227,7 +232,7 @@ impl SubscriptionClient {
                     return Err(e);
                 }
 
-                SubscribeResponses::Confirmed => {
+                SubscribeResponses::Pushed => {
                     tracing::debug!("push request confirmed by the pubsub process");
                     return Ok(());
                 }

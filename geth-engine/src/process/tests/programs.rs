@@ -1,20 +1,8 @@
 use std::any::type_name;
 
-use geth_common::{ExpectedRevision, Propose};
-use serde::{Deserialize, Serialize};
-use uuid::Uuid;
+use geth_common::{ExpectedRevision, Propose, PyroRecord};
 
 use crate::{process::tests::Foo, start_process_manager, Options};
-
-#[derive(Serialize, Deserialize)]
-pub struct PyroRecord<A> {
-    pub class: String,
-    pub event_revision: u64,
-    pub id: Uuid,
-    pub position: u64,
-    pub stream_name: String,
-    pub payload: A,
-}
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {

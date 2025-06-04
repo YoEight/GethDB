@@ -670,6 +670,23 @@ impl Record {
         let value = serde_json::from_slice(&self.data)?;
         Ok(value)
     }
+
+    pub fn as_pyro_value<'a, A>(&'a self) -> eyre::Result<PyroRecord<A>>
+    where
+        A: Deserialize<'a>,
+    {
+        self.as_value::<PyroRecord<A>>()
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct PyroRecord<A> {
+    pub class: String,
+    pub event_revision: u64,
+    pub id: Uuid,
+    pub position: u64,
+    pub stream_name: String,
+    pub payload: A,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Ord, PartialOrd)]
@@ -1131,7 +1148,7 @@ impl TryFrom<StreamRead> for operation_out::StreamRead {
 #[derive(Debug)]
 pub enum SubscriptionConfirmation {
     StreamName(String),
-    ProcessId(Uuid),
+    ProcessId(u64),
 }
 
 pub struct SubscriptionError {}

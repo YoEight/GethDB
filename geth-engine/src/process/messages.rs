@@ -361,7 +361,8 @@ pub enum ReadResponses {
 pub enum SubscribeResponses {
     Error(eyre::Report),
     Programs(ProgramResponses),
-    Confirmed,
+    Confirmed(Option<ProcId>),
+    Pushed,
     Record(Record),
 }
 

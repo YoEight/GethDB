@@ -63,7 +63,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                             SubscriptionType::Stream { ident } => {
                                 if stream
                                     .sender
-                                    .send(SubscribeResponses::Confirmed.into())
+                                    .send(SubscribeResponses::Confirmed(None).into())
                                     .is_ok()
                                 {
                                     reg.register(ident, stream.sender);
@@ -107,7 +107,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
                                         if stream
                                             .sender
-                                            .send(SubscribeResponses::Confirmed.into())
+                                            .send(SubscribeResponses::Confirmed(Some(id)).into())
                                             .is_ok()
                                         {
                                             programs.insert(
@@ -158,7 +158,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                             env.client.reply(
                                 mail.origin,
                                 mail.correlation,
-                                SubscribeResponses::Confirmed.into(),
+                                SubscribeResponses::Pushed.into(),
                             )?;
 
                             for event in events {

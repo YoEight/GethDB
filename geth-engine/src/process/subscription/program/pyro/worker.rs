@@ -45,7 +45,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
     };
 
     let span = tracing::debug_span!("create-runtime", name = args.name).entered();
-    let mut runtime = match create_pyro_runtime(sub_client, &args.name) {
+    let mut runtime = match create_pyro_runtime(sub_client, env.client.id, &args.name) {
         Ok(runtime) => runtime,
         Err(e) => {
             tracing::error!(error = %e, "error when creating a pyro runtime");

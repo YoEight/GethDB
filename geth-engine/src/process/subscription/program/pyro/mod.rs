@@ -20,7 +20,7 @@ use tokio::sync::{
 };
 use uuid::Uuid;
 
-use crate::process::subscription::SubscriptionClient;
+use crate::process::{subscription::SubscriptionClient, ProcId};
 
 pub mod worker;
 
@@ -253,7 +253,11 @@ impl PyroRuntime {
     }
 }
 
-pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Result<PyroRuntime> {
+pub fn create_pyro_runtime(
+    client: SubscriptionClient,
+    proc_id: ProcId,
+    name: &str,
+) -> eyre::Result<PyroRuntime> {
     let (stdout_handle, mut stdout_recv) = unbounded_channel();
     let env = Env { stdout_handle };
     let name_stdout = name.to_string();
@@ -279,6 +283,13 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Resu
         .register_type::<EventRecord>("EventRecord")
         .register_value("output", ProgramOutput(send_output))
         .register_function("subscribe", move |stream_name: String| {
+            tracing::debug!(
+                name = name_subscribe,
+                proc_id = proc_id,
+                stream_name = stream_name,
+                "program emitted a subscription request"
+            );
+
             let (input, recv) = unbounded_channel();
 
             let local_client = client.clone();
@@ -292,7 +303,8 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Resu
                     .await
                     .inspect_err(|e| {
                         tracing::error!(
-                            process = name_subscribe_local,
+                            name = name_subscribe_local,
+                            proc_id = proc_id,
                             target = "subscription",
                             kind = "pyro",
                             error = %e,
@@ -303,7 +315,9 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Resu
 
                 let id = Uuid::new_v4();
                 tracing::debug!(
-                    process = name_subscribe_local,
+                    name = name_subscribe_local,
+                    proc_id = proc_id,
+                    target = "subscription",
                     target = "subscription",
                     kind = "pyro",
                     id = id.to_string(),
@@ -319,8 +333,9 @@ pub fn create_pyro_runtime(client: SubscriptionClient, name: &str) -> eyre::Resu
                 while let Some(record) = streaming.next().await? {
                     if input.send(EventRecord(record).serialize()?).is_err() {
                         tracing::debug!(
-                            process = name_subscribe_local,
+                            name = name_subscribe_local,
                             target = "subscription",
+                            proc_id = proc_id,
                             kind = "pyro",
                             id = id.to_string(),
                             stream_name = stream_name,

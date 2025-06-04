@@ -196,7 +196,7 @@ message OperationOut {
     message Confirmation {
       oneof kind {
         string stream_name = 1;
-        Ident process_id = 2;
+        uint64 process_id = 2;
       }
     }
 
