@@ -13,7 +13,7 @@ use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
     Direction, GetProgramError, Operation, OperationIn, OperationOut, ProgramKilled, ProgramListed,
     ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscribeToStream,
-    SubscriptionEvent, UnsubscribeReason,
+    SubscriptionConfirmation, SubscriptionEvent, UnsubscribeReason,
 };
 use uuid::Uuid;
 
@@ -320,6 +320,11 @@ async fn execute_operation(
 
                             local_storage.complete(&correlation).await;
                             return;
+                        };
+
+                        yield OperationOut {
+                            correlation,
+                            reply: Reply::SubscriptionEvent(SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(catchup.params.stream_name.to_string()))),
                         };
 
                         loop {
