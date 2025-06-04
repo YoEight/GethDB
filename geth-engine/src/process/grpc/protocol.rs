@@ -1,3 +1,5 @@
+use std::collections::VecDeque;
+
 use futures::{pin_mut, Stream, StreamExt};
 use geth_mikoshi::hashing::mikoshi_hash;
 use tokio::select;
@@ -13,6 +15,7 @@ use geth_common::{
     ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscribeToStream,
     SubscriptionEvent, UnsubscribeReason,
 };
+use uuid::Uuid;
 
 use crate::process::grpc::local::LocalStorage;
 use crate::process::reading::ReaderClient;
@@ -56,7 +59,7 @@ impl Protocol for ProtocolImpl {
 
     async fn multiplex(
         &self,
-        request: Request<Streaming<protocol::OperationIn>>,
+        request: Request<tonic::Streaming<protocol::OperationIn>>,
     ) -> Result<Response<Self::MultiplexStream>, Status> {
         let (tx, rx) = mpsc::unbounded_channel();
 
@@ -77,7 +80,7 @@ enum Msg {
 }
 
 struct Pipeline {
-    input: Streaming<protocol::OperationIn>,
+    input: tonic::Streaming<protocol::OperationIn>,
     output: UnboundedReceiver<eyre::Result<OperationOut>>,
 }
 
@@ -123,7 +126,7 @@ impl Pipeline {
 async fn multiplex(
     internal: Internal,
     downstream: Downstream,
-    input: Streaming<protocol::OperationIn>,
+    input: tonic::Streaming<protocol::OperationIn>,
 ) {
     let local_storage = LocalStorage::new();
     let (tx, out_rx) = mpsc::unbounded_channel();
@@ -307,7 +310,7 @@ async fn execute_operation(
                 let token = local_storage.new_cancellation_token(correlation).await;
                 match subscribe {
                     Subscribe::ToStream(params) => {
-                        let mut catchup = if let Some(catchup) = CatchupSubscription::init(&internal, params).await? {
+                        let mut catchup = if let Some(catchup) = CatchupSubscription::init(&internal, correlation, params).await? {
                             catchup
                         } else {
                             yield OperationOut {
@@ -319,9 +322,44 @@ async fn execute_operation(
                             return;
                         };
 
-                        while let Some(out) = catchup.next().await? {
-                            yield out;
+                        loop {
+                            select! {
+                                outcome = catchup.next() => {
+                                    match outcome {
+                                        Err(e) => {
+                                            tracing::error!(error = %e, stream = catchup.params.stream_name, "unexpected error when running catchup subscription");
+
+                                            yield OperationOut {
+                                                correlation,
+                                                reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                                            };
+
+                                            break;
+                                        }
+
+                                        Ok(out) => {
+                                            if let Some(out) = out {
+                                                yield out;
+                                                continue;
+                                            } else {
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+
+                                _ = token.notified() => {
+                                    yield OperationOut {
+                                        correlation,
+                                        reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
+                                    };
+
+                                    break;
+                                }
+                            }
                         }
+
+                        local_storage.complete(&correlation).await;
                     }
 
                     Subscribe::ToProgram(_) => {
@@ -370,14 +408,20 @@ struct CatchupSubscription {
     params: SubscribeToStream,
     position: u64,
     catching_up: bool,
-    history: Vec<Record>,
+    history: VecDeque<Record>,
     end_revision: u64,
+    done: bool,
+    correlation: Uuid,
     read_stream: crate::process::reading::Streaming,
     sub_stream: crate::process::subscription::Streaming,
 }
 
 impl CatchupSubscription {
-    async fn init(internal: &Internal, params: SubscribeToStream) -> eyre::Result<Option<Self>> {
+    async fn init(
+        internal: &Internal,
+        correlation: Uuid,
+        params: SubscribeToStream,
+    ) -> eyre::Result<Option<Self>> {
         let sub_stream = internal
             .sub
             .subscribe_to_stream(&params.stream_name)
@@ -425,15 +469,84 @@ impl CatchupSubscription {
             params,
             position: 0,
             catching_up: false,
-            history: vec![],
+            history: VecDeque::new(),
+            done: false,
+            correlation,
             end_revision,
             read_stream,
             sub_stream,
         }))
     }
 
+    // CAUTION: a situation where an user is reading very far away from the head of the stream and while that stream is actively being writen on could lead
+    // to uncheck memory usage as everything will be stored in the history buffer.
+    //
+    // TODO: Implement a mechanism to limit the size of the history buffer by implementing a backpressure mechanism.
     async fn next(&mut self) -> eyre::Result<Option<OperationOut>> {
-        todo!()
+        if self.done {
+            return Ok(None);
+        }
+
+        if self.catching_up {
+            loop {
+                select! {
+                    outcome = self.read_stream.next() => {
+                        match outcome {
+                            Err(e) => return Err(e),
+                            Ok(outcome) => if let Some(event) = outcome {
+                                return Ok(Some(OperationOut {
+                                    correlation: self.correlation,
+                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(event)),
+                                }));
+                            } else {
+                                self.catching_up = false;
+                                return Ok(Some(OperationOut {
+                                    correlation: self.correlation,
+                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::CaughtUp),
+                                }));
+                            }
+                        }
+                    }
+
+                    outcome = self.sub_stream.next() => {
+                        match outcome {
+                            Err(e) => return Err(e),
+                            Ok(outcome) => if let Some(event) = outcome {
+                                if event.revision <= self.end_revision {
+                                    continue;
+                                }
+
+                                self.history.push_back(event);
+                            } else {
+                                self.done = true;
+                                return Ok(Some(OperationOut {
+                                    correlation: self.correlation,
+                                    reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
+                                }));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if let Some(event) = self.history.pop_front() {
+            return Ok(Some(OperationOut {
+                correlation: self.correlation,
+                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(event)),
+            }));
+        }
+
+        if let Some(event) = self.sub_stream.next().await? {
+            return Ok(Some(OperationOut {
+                correlation: self.correlation,
+                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(event)),
+            }));
+        }
+
+        self.done = true;
+
+        Ok(None)
     }
 }
 
