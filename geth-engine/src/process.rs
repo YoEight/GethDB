@@ -18,6 +18,7 @@ use tokio::sync::{oneshot, Notify};
 use tracing::instrument;
 use uuid::Uuid;
 
+use crate::process::messages::Notifications;
 use crate::{IndexClient, Options, ReaderClient, WriterClient};
 
 #[cfg(test)]
@@ -92,6 +93,7 @@ struct RunningProc {
     proc: Proc,
     last_received_request: Uuid,
     mailbox: Mailbox,
+    dependents: Vec<ProcId>,
 }
 
 pub struct Catalog {
@@ -255,11 +257,21 @@ where
                 }
             },
 
-            ManagerCommand::WaitFor { proc, resp } => {
+            ManagerCommand::WaitFor { origin, proc, resp } => {
                 let id = if let Some(topology) = self.catalog.inner.get_mut(&proc) {
                     match topology {
                         Topology::Singleton(prev) => {
                             if let Some(id) = prev.as_ref() {
+                                // no need to track if the process that started this new process is the manager itself.
+                                if origin != 0 {
+                                    if let Some(running) = self.catalog.monitor.get_mut(&id) {
+                                        running.dependents.push(origin);
+                                    } else {
+                                        tracing::error!(id = id, proc = ?proc, "running process was expected but is not found");
+                                        panic!();
+                                    }
+                                }
+
                                 let _ = resp.send(SpawnResult::Success(*id));
                                 return Ok(());
                             } else {
@@ -297,7 +309,7 @@ where
                 client.id = id;
                 client.origin_proc = proc;
 
-                let running_proc = match proc {
+                let mut running_proc = match proc {
                     Proc::Writing => {
                         spawn_raw(client, runtime, Handle::current(), proc, writing::run)
                     }
@@ -330,6 +342,11 @@ where
                     Proc::Panic => spawn(options, client, proc, panic::run),
                 };
 
+                // no need to track if the process that started this new process is the manager itself.
+                if origin != 0 {
+                    running_proc.dependents.push(origin);
+                }
+
                 self.catalog.monitor.insert(id, running_proc);
                 let _ = resp.send(SpawnResult::Success(id));
             }
@@ -361,20 +378,20 @@ where
         if let Some(running) = self.catalog.terminate(id) {
             if let Some(e) = error {
                 tracing::error!(
-                    "process {:?}:{} terminated with error {}",
-                    running.proc,
-                    id,
-                    e
+                    error = %e,
+                    id = id,
+                    proc = ?running.proc,
+                    "process terminated with error",
                 );
             } else {
-                tracing::info!("process {:?}:{} terminated", running.proc, id);
+                tracing::info!(id = id, proc = ?running.proc,"process terminated");
             }
 
             if let Some(resp) = self.requests.remove(&running.last_received_request) {
                 tracing::warn!(
-                    "process {:?}:{} terminated with pending request",
-                    running.proc,
-                    id
+                    id = id,
+                    proc = ?running.proc,
+                    "process terminated with pending request",
                 );
 
                 let _ = resp.send(Mail {
@@ -383,6 +400,23 @@ where
                     payload: Messages::Responses(Responses::FatalError),
                     created: Instant::now(),
                 });
+            }
+
+            for dependent in running.dependents {
+                if let Some(running) = self.catalog.monitor.get(&dependent) {
+                    if !self.closing
+                        && !running.mailbox.send(Item::Mail(Mail {
+                            origin: 0,
+                            correlation: Uuid::nil(),
+                            payload: Notifications::ProcessTerminated(id).into(),
+                            created: Instant::now(),
+                        }))
+                    {
+                        // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
+                        // I could rewrite `handle_terminate` to avoid recursion.
+                        tracing::warn!(id = dependent, proc = ?running.proc, "process seems to be terminated");
+                    }
+                }
             }
         }
 
@@ -460,6 +494,7 @@ pub enum ManagerCommand {
     },
 
     WaitFor {
+        origin: ProcId,
         proc: Proc,
         resp: oneshot::Sender<SpawnResult>,
     },
@@ -633,13 +668,17 @@ impl ManagerClient {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::WaitFor { proc, resp })
+            .send(ManagerCommand::WaitFor {
+                origin: self.id,
+                proc,
+                resp,
+            })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
         }
 
-        tracing::debug!("waiting for process {:?} to be available...", proc,);
+        tracing::debug!(proc = ?proc, "waiting for process to be available...");
 
         match receiver.await {
             Ok(res) => {
@@ -823,6 +862,7 @@ where
         proc,
         mailbox: Mailbox::Raw(proc_sender),
         last_received_request: Uuid::nil(),
+        dependents: Vec::new(),
     }
 }
 
@@ -855,5 +895,6 @@ where
         proc,
         mailbox: Mailbox::Tokio(proc_sender),
         last_received_request: Uuid::nil(),
+        dependents: Vec::new(),
     }
 }

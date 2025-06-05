@@ -1,7 +1,7 @@
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
-    Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
-    SubscriptionType,
+    Messages, Notifications, ProgramRequests, ProgramResponses, SubscribeRequests,
+    SubscribeResponses, SubscriptionType,
 };
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
 use crate::process::{Item, ProcessEnv};
@@ -16,6 +16,7 @@ const ALL_IDENT: &str = "$all";
 pub struct ProgramProcess {
     client: ProgramClient,
     name: String,
+    sender: UnboundedSender<Messages>,
     started_at: DateTime<Utc>,
 }
 
@@ -77,6 +78,8 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 let result = env.client.wait_for(Proc::PyroWorker).await?;
                                 let id = match result.must_succeed() {
                                     Err(e) => {
+                                        tracing::error!(error = %e, "error when spawning a pyro worker");
+
                                         let _ =
                                             stream.sender.send(SubscribeResponses::Error(e).into());
 
@@ -110,14 +113,18 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                             .send(SubscribeResponses::Confirmed(Some(id)).into())
                                             .is_ok()
                                         {
+                                            tracing::debug!(id = %id, name = name, "program was registered successfully");
+
                                             programs.insert(
                                                 id,
                                                 ProgramProcess {
                                                     client,
                                                     name,
+                                                    sender: stream.sender,
                                                     started_at: Utc::now(),
                                                 },
                                             );
+
                                             continue;
                                         }
 
@@ -151,6 +158,17 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
             }
 
             Item::Mail(mail) => {
+                if let Messages::Notifications(Notifications::ProcessTerminated(proc_id)) =
+                    &mail.payload
+                {
+                    if let Some(prog) = programs.remove(&proc_id) {
+                        tracing::info!(id = proc_id, name = prog.name, "program terminated");
+                        let _ = prog.sender.send(SubscribeResponses::Unsubscribed.into());
+                    }
+
+                    continue;
+                }
+
                 if let Ok(req) = mail.payload.try_into() {
                     match req {
                         SubscribeRequests::Push { events } => {

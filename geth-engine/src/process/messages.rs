@@ -11,6 +11,7 @@ use super::ProcId;
 pub enum Messages {
     Requests(Requests),
     Responses(Responses),
+    Notifications(Notifications),
 }
 
 #[cfg(test)]
@@ -95,6 +96,12 @@ impl From<TestSinkResponses> for Messages {
 impl From<RequestError> for Messages {
     fn from(err: RequestError) -> Self {
         Messages::Responses(Responses::Error(err))
+    }
+}
+
+impl From<Notifications> for Messages {
+    fn from(notif: Notifications) -> Self {
+        Messages::Notifications(notif)
     }
 }
 
@@ -336,6 +343,11 @@ pub enum Responses {
 }
 
 #[derive(Debug)]
+pub enum Notifications {
+    ProcessTerminated(ProcId),
+}
+
+#[derive(Debug)]
 pub enum RequestError {
     NotFound,
 }
@@ -364,6 +376,7 @@ pub enum SubscribeResponses {
     Confirmed(Option<ProcId>),
     Pushed,
     Record(Record),
+    Unsubscribed,
 }
 
 #[derive(Debug)]

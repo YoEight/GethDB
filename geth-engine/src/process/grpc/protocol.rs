@@ -412,12 +412,6 @@ async fn execute_operation(
                         }
 
                         local_storage.complete(&correlation).await;
-                        while let Some(event) = stream.next().await? {
-                            yield OperationOut {
-                                correlation,
-                                reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(event)),
-                            };
-                        }
                     }
                 };
             }

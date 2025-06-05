@@ -33,6 +33,15 @@ impl Streaming {
                     return Ok(Some(record));
                 }
 
+                SubscribeResponses::Unsubscribed => {
+                    self.inner.close();
+
+                    // should be already empty but best to be sure.
+                    while self.inner.recv().await.is_some() {}
+
+                    return Ok(None);
+                }
+
                 _ => {
                     eyre::bail!("unexpected message when streaming from the pubsub process");
                 }
