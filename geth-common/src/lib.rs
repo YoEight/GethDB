@@ -9,29 +9,26 @@ use uuid::Uuid;
 pub use client::{Client, SubscriptionEvent, UnsubscribeReason};
 pub use io::{IteratorIO, IteratorIOExt};
 
-use crate::generated::next;
-use crate::generated::next::protocol::{operation_in, operation_out};
-
 mod client;
 mod io;
 
+use crate::generated::protocol;
+
 pub mod generated {
-    pub mod next {
-        pub mod protocol {
-            include!(concat!(env!("OUT_DIR"), "/geth.rs"));
-        }
+    pub mod protocol {
+        include!(concat!(env!("OUT_DIR"), "/geth.rs"));
     }
 }
 
-impl From<Uuid> for next::protocol::Ident {
+impl From<Uuid> for protocol::Ident {
     fn from(value: Uuid) -> Self {
         let (most, least) = value.as_u64_pair();
         Self { most, least }
     }
 }
 
-impl From<next::protocol::Ident> for Uuid {
-    fn from(value: next::protocol::Ident) -> Self {
+impl From<protocol::Ident> for Uuid {
+    fn from(value: protocol::Ident) -> Self {
         Uuid::from_u64_pair(value.most, value.least)
     }
 }
@@ -66,53 +63,6 @@ pub enum Operation {
     Unsubscribe,
 }
 
-impl From<Operation> for operation_in::Operation {
-    fn from(operation: Operation) -> Self {
-        match operation {
-            Operation::AppendStream(req) => operation_in::Operation::AppendStream(req.into()),
-            Operation::DeleteStream(req) => operation_in::Operation::DeleteStream(req.into()),
-            Operation::ReadStream(req) => operation_in::Operation::ReadStream(req.into()),
-            Operation::Subscribe(req) => operation_in::Operation::Subscribe(req.into()),
-            Operation::ListPrograms(req) => operation_in::Operation::ListPrograms(req.into()),
-            Operation::GetProgramStats(req) => operation_in::Operation::GetProgramStats(req.into()),
-            Operation::KillProgram(req) => operation_in::Operation::KillProgram(req.into()),
-            Operation::Unsubscribe => operation_in::Operation::Unsubscribe(()),
-        }
-    }
-}
-impl From<OperationIn> for next::protocol::OperationIn {
-    fn from(operation: OperationIn) -> Self {
-        let correlation = Some(operation.correlation.into());
-        let operation = Some(operation.operation.into());
-
-        Self {
-            correlation,
-            operation,
-        }
-    }
-}
-
-impl From<next::protocol::OperationIn> for OperationIn {
-    fn from(operation: next::protocol::OperationIn) -> Self {
-        let correlation = operation.correlation.unwrap().into();
-        let operation = match operation.operation.unwrap() {
-            operation_in::Operation::AppendStream(req) => Operation::AppendStream(req.into()),
-            operation_in::Operation::DeleteStream(req) => Operation::DeleteStream(req.into()),
-            operation_in::Operation::ReadStream(req) => Operation::ReadStream(req.into()),
-            operation_in::Operation::Subscribe(req) => Operation::Subscribe(req.into()),
-            operation_in::Operation::ListPrograms(req) => Operation::ListPrograms(req.into()),
-            operation_in::Operation::GetProgramStats(req) => Operation::GetProgramStats(req.into()),
-            operation_in::Operation::KillProgram(req) => Operation::KillProgram(req.into()),
-            operation_in::Operation::Unsubscribe(_) => Operation::Unsubscribe,
-        };
-
-        Self {
-            correlation,
-            operation,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
@@ -141,68 +91,6 @@ impl OperationOut {
     }
 }
 
-impl From<next::protocol::OperationOut> for OperationOut {
-    fn from(value: next::protocol::OperationOut) -> Self {
-        let correlation = value.correlation.unwrap().into();
-        let reply = match value.operation.unwrap() {
-            operation_out::Operation::AppendCompleted(resp) => {
-                Reply::AppendStreamCompleted(resp.into())
-            }
-            operation_out::Operation::StreamRead(resp) => Reply::StreamRead(resp.into()),
-            operation_out::Operation::SubscriptionEvent(resp) => {
-                Reply::SubscriptionEvent(resp.into())
-            }
-            operation_out::Operation::DeleteCompleted(resp) => {
-                Reply::DeleteStreamCompleted(resp.into())
-            }
-            operation_out::Operation::ProgramsListed(resp) => Reply::ProgramsListed(resp.into()),
-
-            operation_out::Operation::ProgramKilled(resp) => Reply::ProgramKilled(resp.into()),
-
-            operation_out::Operation::ProgramGot(resp) => Reply::ProgramObtained(resp.into()),
-            operation_out::Operation::Error(e) => Reply::Error(e),
-        };
-
-        Self { correlation, reply }
-    }
-}
-
-impl TryFrom<OperationOut> for next::protocol::OperationOut {
-    type Error = eyre::Report;
-
-    fn try_from(value: OperationOut) -> eyre::Result<Self> {
-        let correlation = Some(value.correlation.into());
-        let operation = match value.reply {
-            Reply::AppendStreamCompleted(resp) => {
-                operation_out::Operation::AppendCompleted(resp.into())
-            }
-            Reply::StreamRead(resp) => operation_out::Operation::StreamRead(resp.try_into()?),
-            Reply::SubscriptionEvent(resp) => {
-                operation_out::Operation::SubscriptionEvent(resp.into())
-            }
-            Reply::DeleteStreamCompleted(resp) => {
-                operation_out::Operation::DeleteCompleted(resp.into())
-            }
-            Reply::ProgramsListed(resp) => operation_out::Operation::ProgramsListed(resp.into()),
-
-            Reply::ProgramKilled(resp) => operation_out::Operation::ProgramKilled(resp.into()),
-
-            Reply::ProgramObtained(resp) => operation_out::Operation::ProgramGot(resp.into()),
-
-            Reply::ServerDisconnected => {
-                eyre::bail!("not supposed to send server disconnected message to the server");
-            }
-
-            Reply::Error(e) => operation_out::Operation::Error(e),
-        };
-
-        Ok(Self {
-            correlation,
-            operation: Some(operation),
-        })
-    }
-}
-
 #[derive(Clone)]
 pub struct AppendStream {
     pub stream_name: String,
@@ -210,7 +98,7 @@ pub struct AppendStream {
     pub expected_revision: ExpectedRevision,
 }
 
-impl From<AppendStream> for operation_in::AppendStream {
+impl From<AppendStream> for protocol::AppendStreamRequest {
     fn from(value: AppendStream) -> Self {
         Self {
             stream_name: value.stream_name,
@@ -220,19 +108,13 @@ impl From<AppendStream> for operation_in::AppendStream {
     }
 }
 
-impl From<operation_in::AppendStream> for AppendStream {
-    fn from(value: operation_in::AppendStream) -> Self {
+impl From<protocol::AppendStreamRequest> for AppendStream {
+    fn from(value: protocol::AppendStreamRequest) -> Self {
         Self {
             stream_name: value.stream_name,
             events: value.events.into_iter().map(|p| p.into()).collect(),
             expected_revision: value.expected_revision.unwrap().into(),
         }
-    }
-}
-
-impl From<AppendStream> for operation_in::Operation {
-    fn from(value: AppendStream) -> Self {
-        operation_in::Operation::AppendStream(value.into())
     }
 }
 
@@ -242,7 +124,7 @@ pub struct DeleteStream {
     pub expected_revision: ExpectedRevision,
 }
 
-impl From<DeleteStream> for operation_in::DeleteStream {
+impl From<DeleteStream> for protocol::DeleteStreamRequest {
     fn from(value: DeleteStream) -> Self {
         Self {
             stream_name: value.stream_name,
@@ -251,14 +133,8 @@ impl From<DeleteStream> for operation_in::DeleteStream {
     }
 }
 
-impl From<DeleteStream> for operation_in::Operation {
-    fn from(value: DeleteStream) -> Self {
-        operation_in::Operation::DeleteStream(value.into())
-    }
-}
-
-impl From<operation_in::DeleteStream> for DeleteStream {
-    fn from(value: operation_in::DeleteStream) -> Self {
+impl From<protocol::DeleteStreamRequest> for DeleteStream {
+    fn from(value: protocol::DeleteStreamRequest) -> Self {
         Self {
             stream_name: value.stream_name,
             expected_revision: value.expected_revision.unwrap().into(),
@@ -274,7 +150,7 @@ pub struct ReadStream {
     pub max_count: u64,
 }
 
-impl From<ReadStream> for operation_in::ReadStream {
+impl From<ReadStream> for protocol::ReadStreamRequest {
     fn from(value: ReadStream) -> Self {
         Self {
             stream_name: value.stream_name,
@@ -285,14 +161,8 @@ impl From<ReadStream> for operation_in::ReadStream {
     }
 }
 
-impl From<ReadStream> for operation_in::Operation {
-    fn from(value: ReadStream) -> Self {
-        operation_in::Operation::ReadStream(value.into())
-    }
-}
-
-impl From<operation_in::ReadStream> for ReadStream {
-    fn from(value: operation_in::ReadStream) -> Self {
+impl From<protocol::ReadStreamRequest> for ReadStream {
+    fn from(value: protocol::ReadStreamRequest) -> Self {
         Self {
             stream_name: value.stream_name,
             direction: value.direction.unwrap().into(),
@@ -308,32 +178,26 @@ pub enum Subscribe {
     ToStream(SubscribeToStream),
 }
 
-impl From<Subscribe> for operation_in::Subscribe {
+impl From<Subscribe> for protocol::SubscribeRequest {
     fn from(value: Subscribe) -> Self {
         match value {
-            Subscribe::ToProgram(v) => operation_in::Subscribe {
-                to: Some(operation_in::subscribe::To::Program(v.into())),
+            Subscribe::ToProgram(v) => protocol::SubscribeRequest {
+                to: Some(protocol::subscribe_request::To::Program(v.into())),
             },
 
-            Subscribe::ToStream(v) => operation_in::Subscribe {
-                to: Some(operation_in::subscribe::To::Stream(v.into())),
+            Subscribe::ToStream(v) => protocol::SubscribeRequest {
+                to: Some(protocol::subscribe_request::To::Stream(v.into())),
             },
         }
     }
 }
 
-impl From<operation_in::Subscribe> for Subscribe {
-    fn from(value: operation_in::Subscribe) -> Self {
+impl From<protocol::SubscribeRequest> for Subscribe {
+    fn from(value: protocol::SubscribeRequest) -> Self {
         match value.to.unwrap() {
-            operation_in::subscribe::To::Program(v) => Subscribe::ToProgram(v.into()),
-            operation_in::subscribe::To::Stream(v) => Subscribe::ToStream(v.into()),
+            protocol::subscribe_request::To::Program(v) => Subscribe::ToProgram(v.into()),
+            protocol::subscribe_request::To::Stream(v) => Subscribe::ToStream(v.into()),
         }
-    }
-}
-
-impl From<Subscribe> for operation_in::Operation {
-    fn from(value: Subscribe) -> Self {
-        operation_in::Operation::Subscribe(value.into())
     }
 }
 
@@ -343,7 +207,7 @@ pub struct SubscribeToProgram {
     pub source: String,
 }
 
-impl From<SubscribeToProgram> for operation_in::subscribe::Program {
+impl From<SubscribeToProgram> for protocol::subscribe_request::Program {
     fn from(value: SubscribeToProgram) -> Self {
         Self {
             name: value.name,
@@ -352,8 +216,8 @@ impl From<SubscribeToProgram> for operation_in::subscribe::Program {
     }
 }
 
-impl From<operation_in::subscribe::Program> for SubscribeToProgram {
-    fn from(value: operation_in::subscribe::Program) -> Self {
+impl From<protocol::subscribe_request::Program> for SubscribeToProgram {
+    fn from(value: protocol::subscribe_request::Program) -> Self {
         Self {
             name: value.name,
             source: value.source,
@@ -367,7 +231,7 @@ pub struct SubscribeToStream {
     pub start: Revision<u64>,
 }
 
-impl From<SubscribeToStream> for operation_in::subscribe::Stream {
+impl From<SubscribeToStream> for protocol::subscribe_request::Stream {
     fn from(value: SubscribeToStream) -> Self {
         Self {
             stream_name: value.stream_name,
@@ -376,8 +240,8 @@ impl From<SubscribeToStream> for operation_in::subscribe::Stream {
     }
 }
 
-impl From<operation_in::subscribe::Stream> for SubscribeToStream {
-    fn from(value: operation_in::subscribe::Stream) -> Self {
+impl From<protocol::subscribe_request::Stream> for SubscribeToStream {
+    fn from(value: protocol::subscribe_request::Stream) -> Self {
         Self {
             stream_name: value.stream_name,
             start: value.start.unwrap().into(),
@@ -410,74 +274,74 @@ impl Revision<u64> {
     }
 }
 
-impl From<Revision<u64>> for operation_in::read_stream::Start {
+impl From<Revision<u64>> for protocol::read_stream_request::Start {
     fn from(value: Revision<u64>) -> Self {
         match value {
-            Revision::Start => operation_in::read_stream::Start::Beginning(()),
-            Revision::End => operation_in::read_stream::Start::End(()),
-            Revision::Revision(r) => operation_in::read_stream::Start::Revision(r),
+            Revision::Start => protocol::read_stream_request::Start::Beginning(()),
+            Revision::End => protocol::read_stream_request::Start::End(()),
+            Revision::Revision(r) => protocol::read_stream_request::Start::Revision(r),
         }
     }
 }
 
-impl From<operation_in::read_stream::Start> for Revision<u64> {
-    fn from(value: operation_in::read_stream::Start) -> Self {
+impl From<protocol::read_stream_request::Start> for Revision<u64> {
+    fn from(value: protocol::read_stream_request::Start) -> Self {
         match value {
-            operation_in::read_stream::Start::Beginning(_) => Revision::Start,
-            operation_in::read_stream::Start::End(_) => Revision::End,
-            operation_in::read_stream::Start::Revision(r) => Revision::Revision(r),
+            protocol::read_stream_request::Start::Beginning(_) => Revision::Start,
+            protocol::read_stream_request::Start::End(_) => Revision::End,
+            protocol::read_stream_request::Start::Revision(r) => Revision::Revision(r),
         }
     }
 }
 
-impl From<operation_in::subscribe::stream::Start> for Revision<u64> {
-    fn from(value: operation_in::subscribe::stream::Start) -> Self {
+impl From<protocol::subscribe_request::stream::Start> for Revision<u64> {
+    fn from(value: protocol::subscribe_request::stream::Start) -> Self {
         match value {
-            operation_in::subscribe::stream::Start::Beginning(_) => Revision::Start,
-            operation_in::subscribe::stream::Start::End(_) => Revision::End,
-            operation_in::subscribe::stream::Start::Revision(r) => Revision::Revision(r),
+            protocol::subscribe_request::stream::Start::Beginning(_) => Revision::Start,
+            protocol::subscribe_request::stream::Start::End(_) => Revision::End,
+            protocol::subscribe_request::stream::Start::Revision(r) => Revision::Revision(r),
         }
     }
 }
 
-impl From<Revision<u64>> for operation_in::subscribe::stream::Start {
+impl From<Revision<u64>> for protocol::subscribe_request::stream::Start {
     fn from(value: Revision<u64>) -> Self {
         match value {
-            Revision::Start => operation_in::subscribe::stream::Start::Beginning(()),
-            Revision::End => operation_in::subscribe::stream::Start::End(()),
-            Revision::Revision(r) => operation_in::subscribe::stream::Start::Revision(r),
+            Revision::Start => protocol::subscribe_request::stream::Start::Beginning(()),
+            Revision::End => protocol::subscribe_request::stream::Start::End(()),
+            Revision::Revision(r) => protocol::subscribe_request::stream::Start::Revision(r),
         }
     }
 }
 
-impl From<operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision>
+impl From<protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision>
     for ExpectedRevision
 {
     fn from(
-        value: operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision,
+        value: protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision,
     ) -> Self {
         match value {
-            operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+            protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision::NotExists(
                 _,
             ) => ExpectedRevision::NoStream,
-            operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+            protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision::Revision(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
     }
 }
 
-impl From<operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision>
+impl From<protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision>
     for ExpectedRevision
 {
     fn from(
-        value: operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision,
+        value: protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision,
     ) -> Self {
         match value {
-            operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(
+            protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision::NotExists(
                 _,
             ) => ExpectedRevision::NoStream,
-            operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(
+            protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision::Revision(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -500,20 +364,20 @@ pub enum Direction {
     Backward,
 }
 
-impl From<Direction> for operation_in::read_stream::Direction {
+impl From<Direction> for protocol::read_stream_request::Direction {
     fn from(value: Direction) -> Self {
         match value {
-            Direction::Forward => operation_in::read_stream::Direction::Forwards(()),
-            Direction::Backward => operation_in::read_stream::Direction::Backwards(()),
+            Direction::Forward => protocol::read_stream_request::Direction::Forwards(()),
+            Direction::Backward => protocol::read_stream_request::Direction::Backwards(()),
         }
     }
 }
 
-impl From<operation_in::read_stream::Direction> for Direction {
-    fn from(value: operation_in::read_stream::Direction) -> Self {
+impl From<protocol::read_stream_request::Direction> for Direction {
+    fn from(value: protocol::read_stream_request::Direction) -> Self {
         match value {
-            operation_in::read_stream::Direction::Forwards(_) => Direction::Forward,
-            operation_in::read_stream::Direction::Backwards(_) => Direction::Backward,
+            protocol::read_stream_request::Direction::Forwards(_) => Direction::Forward,
+            protocol::read_stream_request::Direction::Backwards(_) => Direction::Backward,
         }
     }
 }
@@ -562,12 +426,12 @@ impl TryFrom<i32> for ContentType {
     }
 }
 
-impl From<next::protocol::ContentType> for ContentType {
-    fn from(value: next::protocol::ContentType) -> Self {
+impl From<protocol::ContentType> for ContentType {
+    fn from(value: protocol::ContentType) -> Self {
         match value {
-            next::protocol::ContentType::Unknown => Self::Unknown,
-            next::protocol::ContentType::Json => Self::Json,
-            next::protocol::ContentType::Binary => Self::Binary,
+            protocol::ContentType::Unknown => Self::Unknown,
+            protocol::ContentType::Json => Self::Json,
+            protocol::ContentType::Binary => Self::Binary,
         }
     }
 }
@@ -596,7 +460,7 @@ impl Propose {
     }
 }
 
-impl From<Propose> for operation_in::append_stream::Propose {
+impl From<Propose> for protocol::append_stream_request::Propose {
     fn from(value: Propose) -> Self {
         Self {
             id: Some(value.id.into()),
@@ -608,11 +472,11 @@ impl From<Propose> for operation_in::append_stream::Propose {
     }
 }
 
-impl From<operation_in::append_stream::Propose> for Propose {
-    fn from(value: operation_in::append_stream::Propose) -> Self {
+impl From<protocol::append_stream_request::Propose> for Propose {
+    fn from(value: protocol::append_stream_request::Propose) -> Self {
         Self {
             id: value.id.unwrap().into(),
-            content_type: next::protocol::ContentType::try_from(value.content_type)
+            content_type: protocol::ContentType::try_from(value.content_type)
                 .map(ContentType::from)
                 .unwrap_or(ContentType::Unknown),
             class: value.class,
@@ -632,11 +496,11 @@ pub struct Record {
     pub data: Bytes,
 }
 
-impl From<next::protocol::RecordedEvent> for Record {
-    fn from(value: next::protocol::RecordedEvent) -> Self {
+impl From<protocol::RecordedEvent> for Record {
+    fn from(value: protocol::RecordedEvent) -> Self {
         Self {
             id: value.id.unwrap().into(),
-            content_type: next::protocol::ContentType::try_from(value.content_type)
+            content_type: protocol::ContentType::try_from(value.content_type)
                 .map(ContentType::from)
                 .unwrap_or(ContentType::Unknown),
             stream_name: value.stream_name,
@@ -648,7 +512,7 @@ impl From<next::protocol::RecordedEvent> for Record {
     }
 }
 
-impl From<Record> for next::protocol::RecordedEvent {
+impl From<Record> for protocol::RecordedEvent {
     fn from(value: Record) -> Self {
         Self {
             id: Some(value.id.into()),
@@ -719,33 +583,33 @@ impl Display for ExpectedRevision {
     }
 }
 
-impl From<ExpectedRevision> for operation_in::append_stream::ExpectedRevision {
+impl From<ExpectedRevision> for protocol::append_stream_request::ExpectedRevision {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(r) => {
-                operation_in::append_stream::ExpectedRevision::Revision(r)
+                protocol::append_stream_request::ExpectedRevision::Revision(r)
             }
             ExpectedRevision::NoStream => {
-                operation_in::append_stream::ExpectedRevision::NoStream(())
+                protocol::append_stream_request::ExpectedRevision::NoStream(())
             }
-            ExpectedRevision::Any => operation_in::append_stream::ExpectedRevision::Any(()),
+            ExpectedRevision::Any => protocol::append_stream_request::ExpectedRevision::Any(()),
             ExpectedRevision::StreamExists => {
-                operation_in::append_stream::ExpectedRevision::StreamExists(())
+                protocol::append_stream_request::ExpectedRevision::StreamExists(())
             }
         }
     }
 }
 
 impl From<ExpectedRevision>
-    for operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision
+    for protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
+                protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision::Revision(v)
             }
             ExpectedRevision::NoStream => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
+                protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision::NotExists(())
             }
             _ => unreachable!(),
         }
@@ -753,15 +617,15 @@ impl From<ExpectedRevision>
 }
 
 impl From<ExpectedRevision>
-    for operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision
+    for protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::Revision(v)
+                protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision::Revision(v)
             }
             ExpectedRevision::NoStream => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::CurrentRevision::NotExists(())
+                protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision::NotExists(())
             }
             _ => unreachable!(),
         }
@@ -769,138 +633,138 @@ impl From<ExpectedRevision>
 }
 
 impl From<ExpectedRevision>
-    for operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision
+    for protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
+                protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::Expected(v)
             }
             ExpectedRevision::NoStream => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
+                protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::NoStream(())
             }
             ExpectedRevision::Any => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
+                protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::Any(())
             }
             ExpectedRevision::StreamExists => {
-                operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
+                protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
             }
         }
     }
 }
 
 impl From<ExpectedRevision>
-    for operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision
+    for protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(v) => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(v)
+                protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::Expected(v)
             }
             ExpectedRevision::NoStream => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(())
+                protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::NoStream(())
             }
             ExpectedRevision::Any => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(())
+                protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::Any(())
             }
             ExpectedRevision::StreamExists => {
-                operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
+                protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::StreamExists(())
             }
         }
     }
 }
 
-impl From<operation_in::append_stream::ExpectedRevision> for ExpectedRevision {
-    fn from(value: operation_in::append_stream::ExpectedRevision) -> Self {
+impl From<protocol::append_stream_request::ExpectedRevision> for ExpectedRevision {
+    fn from(value: protocol::append_stream_request::ExpectedRevision) -> Self {
         match value {
-            operation_in::append_stream::ExpectedRevision::Revision(r) => {
+            protocol::append_stream_request::ExpectedRevision::Revision(r) => {
                 ExpectedRevision::Revision(r)
             }
-            operation_in::append_stream::ExpectedRevision::NoStream(_) => {
+            protocol::append_stream_request::ExpectedRevision::NoStream(_) => {
                 ExpectedRevision::NoStream
             }
-            operation_in::append_stream::ExpectedRevision::Any(_) => ExpectedRevision::Any,
-            operation_in::append_stream::ExpectedRevision::StreamExists(_) => {
+            protocol::append_stream_request::ExpectedRevision::Any(_) => ExpectedRevision::Any,
+            protocol::append_stream_request::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
         }
     }
 }
 
-impl From<operation_in::delete_stream::ExpectedRevision> for ExpectedRevision {
-    fn from(value: operation_in::delete_stream::ExpectedRevision) -> Self {
+impl From<protocol::delete_stream_request::ExpectedRevision> for ExpectedRevision {
+    fn from(value: protocol::delete_stream_request::ExpectedRevision) -> Self {
         match value {
-            operation_in::delete_stream::ExpectedRevision::Revision(r) => {
+            protocol::delete_stream_request::ExpectedRevision::Revision(r) => {
                 ExpectedRevision::Revision(r)
             }
-            operation_in::delete_stream::ExpectedRevision::NoStream(_) => {
+            protocol::delete_stream_request::ExpectedRevision::NoStream(_) => {
                 ExpectedRevision::NoStream
             }
-            operation_in::delete_stream::ExpectedRevision::Any(_) => ExpectedRevision::Any,
-            operation_in::delete_stream::ExpectedRevision::StreamExists(_) => {
+            protocol::delete_stream_request::ExpectedRevision::Any(_) => ExpectedRevision::Any,
+            protocol::delete_stream_request::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
         }
     }
 }
 
-impl From<ExpectedRevision> for operation_in::delete_stream::ExpectedRevision {
+impl From<ExpectedRevision> for protocol::delete_stream_request::ExpectedRevision {
     fn from(value: ExpectedRevision) -> Self {
         match value {
             ExpectedRevision::Revision(r) => {
-                operation_in::delete_stream::ExpectedRevision::Revision(r)
+                protocol::delete_stream_request::ExpectedRevision::Revision(r)
             }
             ExpectedRevision::NoStream => {
-                operation_in::delete_stream::ExpectedRevision::NoStream(())
+                protocol::delete_stream_request::ExpectedRevision::NoStream(())
             }
-            ExpectedRevision::Any => operation_in::delete_stream::ExpectedRevision::Any(()),
+            ExpectedRevision::Any => protocol::delete_stream_request::ExpectedRevision::Any(()),
             ExpectedRevision::StreamExists => {
-                operation_in::delete_stream::ExpectedRevision::StreamExists(())
+                protocol::delete_stream_request::ExpectedRevision::StreamExists(())
             }
         }
     }
 }
 
-impl From<operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+impl From<protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision>
     for ExpectedRevision
 {
     fn from(
-        value: operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+        value: protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision,
     ) -> Self {
         match value {
-            operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+            protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
                 ExpectedRevision::Any
             }
-            operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+            protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
-            operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+            protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::NoStream(
                 _,
             ) => ExpectedRevision::NoStream,
-            operation_out::append_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+            protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision::Expected(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
     }
 }
 
-impl From<operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision>
+impl From<protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision>
     for ExpectedRevision
 {
     fn from(
-        value: operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision,
+        value: protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision,
     ) -> Self {
         match value {
-            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
+            protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::Any(_) => {
                 ExpectedRevision::Any
             }
-            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
+            protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::StreamExists(_) => {
                 ExpectedRevision::StreamExists
             }
-            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::NoStream(
+            protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::NoStream(
                 _,
             ) => ExpectedRevision::NoStream,
-            operation_out::delete_stream_completed::error::wrong_expected_revision::ExpectedRevision::Expected(
+            protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision::Expected(
                 v,
             ) => ExpectedRevision::Revision(v),
         }
@@ -923,7 +787,7 @@ impl Display for WrongExpectedRevisionError {
 }
 
 impl From<WrongExpectedRevisionError>
-    for operation_out::append_stream_completed::error::WrongExpectedRevision
+    for protocol::append_stream_response::error::WrongExpectedRevision
 {
     fn from(value: WrongExpectedRevisionError) -> Self {
         Self {
@@ -934,7 +798,7 @@ impl From<WrongExpectedRevisionError>
 }
 
 impl From<WrongExpectedRevisionError>
-    for operation_out::delete_stream_completed::error::WrongExpectedRevision
+    for protocol::delete_stream_response::error::WrongExpectedRevision
 {
     fn from(value: WrongExpectedRevisionError) -> Self {
         Self {
@@ -957,7 +821,7 @@ pub struct WriteResult {
     pub next_logical_position: u64,
 }
 
-impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
+impl From<WriteResult> for protocol::append_stream_response::WriteResult {
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
@@ -966,7 +830,7 @@ impl From<WriteResult> for operation_out::append_stream_completed::WriteResult {
     }
 }
 
-impl From<WriteResult> for operation_out::delete_stream_completed::DeleteResult {
+impl From<WriteResult> for protocol::delete_stream_response::DeleteResult {
     fn from(value: WriteResult) -> Self {
         Self {
             next_revision: value.next_expected_version.raw() as u64,
@@ -1021,10 +885,10 @@ impl Display for AppendError {
     }
 }
 
-impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
-    fn from(value: operation_out::AppendStreamCompleted) -> Self {
+impl From<protocol::AppendStreamResponse> for AppendStreamCompleted {
+    fn from(value: protocol::AppendStreamResponse) -> Self {
         match value.append_result.unwrap() {
-            operation_out::append_stream_completed::AppendResult::WriteResult(r) => {
+            protocol::append_stream_response::AppendResult::WriteResult(r) => {
                 AppendStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: r.position,
@@ -1032,47 +896,43 @@ impl From<operation_out::AppendStreamCompleted> for AppendStreamCompleted {
                 })
             }
 
-            operation_out::append_stream_completed::AppendResult::Error(e) => {
-                match e.error.unwrap() {
-                    operation_out::append_stream_completed::error::Error::WrongRevision(e) => {
-                        AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
-                            WrongExpectedRevisionError {
-                                expected: e.expected_revision.unwrap().into(),
-                                current: e.current_revision.unwrap().into(),
-                            },
-                        ))
-                    }
-                    operation_out::append_stream_completed::error::Error::StreamDeleted(_) => {
-                        AppendStreamCompleted::Error(AppendError::StreamDeleted)
-                    }
+            protocol::append_stream_response::AppendResult::Error(e) => match e.error.unwrap() {
+                protocol::append_stream_response::error::Error::WrongRevision(e) => {
+                    AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
+                        WrongExpectedRevisionError {
+                            expected: e.expected_revision.unwrap().into(),
+                            current: e.current_revision.unwrap().into(),
+                        },
+                    ))
                 }
-            }
+                protocol::append_stream_response::error::Error::StreamDeleted(_) => {
+                    AppendStreamCompleted::Error(AppendError::StreamDeleted)
+                }
+            },
         }
     }
 }
 
-impl From<AppendStreamCompleted> for operation_out::AppendStreamCompleted {
+impl From<AppendStreamCompleted> for protocol::AppendStreamResponse {
     fn from(value: AppendStreamCompleted) -> Self {
         match value {
-            AppendStreamCompleted::Success(w) => operation_out::AppendStreamCompleted {
-                append_result: Some(
-                    operation_out::append_stream_completed::AppendResult::WriteResult(w.into()),
-                ),
+            AppendStreamCompleted::Success(w) => protocol::AppendStreamResponse {
+                append_result: Some(protocol::append_stream_response::AppendResult::WriteResult(
+                    w.into(),
+                )),
             },
 
-            AppendStreamCompleted::Error(e) => operation_out::AppendStreamCompleted {
-                append_result: Some(operation_out::append_stream_completed::AppendResult::Error(
-                    operation_out::append_stream_completed::Error {
+            AppendStreamCompleted::Error(e) => protocol::AppendStreamResponse {
+                append_result: Some(protocol::append_stream_response::AppendResult::Error(
+                    protocol::append_stream_response::Error {
                         error: Some(match e {
                             AppendError::WrongExpectedRevision(e) => {
-                                operation_out::append_stream_completed::error::Error::WrongRevision(
+                                protocol::append_stream_response::error::Error::WrongRevision(
                                     e.into(),
                                 )
                             }
                             AppendError::StreamDeleted => {
-                                operation_out::append_stream_completed::error::Error::StreamDeleted(
-                                    (),
-                                )
+                                protocol::append_stream_response::error::Error::StreamDeleted(())
                             }
                         }),
                     },
@@ -1110,34 +970,36 @@ pub enum StreamRead {
     Unexpected(eyre::Report),
 }
 
-impl From<operation_out::StreamRead> for StreamRead {
-    fn from(value: operation_out::StreamRead) -> Self {
+impl From<protocol::ReadStreamResponse> for StreamRead {
+    fn from(value: protocol::ReadStreamResponse) -> Self {
         match value.read_result.unwrap() {
-            operation_out::stream_read::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
-            operation_out::stream_read::ReadResult::EventAppeared(e) => {
+            protocol::read_stream_response::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
+            protocol::read_stream_response::ReadResult::EventAppeared(e) => {
                 StreamRead::EventAppeared(e.into())
             }
-            operation_out::stream_read::ReadResult::StreamDeleted(_) => StreamRead::StreamDeleted,
+            protocol::read_stream_response::ReadResult::StreamDeleted(_) => {
+                StreamRead::StreamDeleted
+            }
         }
     }
 }
 
-impl TryFrom<StreamRead> for operation_out::StreamRead {
+impl TryFrom<StreamRead> for protocol::ReadStreamResponse {
     type Error = eyre::Report;
     fn try_from(value: StreamRead) -> eyre::Result<Self> {
         match value {
-            StreamRead::EndOfStream => Ok(operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::EndOfStream(())),
+            StreamRead::EndOfStream => Ok(protocol::ReadStreamResponse {
+                read_result: Some(protocol::read_stream_response::ReadResult::EndOfStream(())),
             }),
 
-            StreamRead::EventAppeared(e) => Ok(operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::EventAppeared(
+            StreamRead::EventAppeared(e) => Ok(protocol::ReadStreamResponse {
+                read_result: Some(protocol::read_stream_response::ReadResult::EventAppeared(
                     e.into(),
                 )),
             }),
 
-            StreamRead::StreamDeleted => Ok(operation_out::StreamRead {
-                read_result: Some(operation_out::stream_read::ReadResult::StreamDeleted(())),
+            StreamRead::StreamDeleted => Ok(protocol::ReadStreamResponse {
+                read_result: Some(protocol::read_stream_response::ReadResult::StreamDeleted(())),
             }),
 
             StreamRead::Unexpected(e) => Err(e),
@@ -1159,48 +1021,46 @@ impl Display for SubscriptionError {
     }
 }
 
-impl From<operation_out::SubscriptionEvent> for SubscriptionEvent {
-    fn from(value: operation_out::SubscriptionEvent) -> Self {
+impl From<protocol::SubscribeResponse> for SubscriptionEvent {
+    fn from(value: protocol::SubscribeResponse) -> Self {
         match value.event.unwrap() {
-            operation_out::subscription_event::Event::Confirmation(c) => match c.kind.unwrap() {
-                operation_out::subscription_event::confirmation::Kind::StreamName(s) => {
+            protocol::subscribe_response::Event::Confirmation(c) => match c.kind.unwrap() {
+                protocol::subscribe_response::confirmation::Kind::StreamName(s) => {
                     SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(s))
                 }
-                operation_out::subscription_event::confirmation::Kind::ProcessId(p) => {
+                protocol::subscribe_response::confirmation::Kind::ProcessId(p) => {
                     SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p.into()))
                 }
             },
-            operation_out::subscription_event::Event::EventAppeared(e) => {
+            protocol::subscribe_response::Event::EventAppeared(e) => {
                 SubscriptionEvent::EventAppeared(e.event.unwrap().into())
             }
-            operation_out::subscription_event::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
-            operation_out::subscription_event::Event::Error(_) => {
+            protocol::subscribe_response::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
+            protocol::subscribe_response::Event::Error(_) => {
                 SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)
             }
         }
     }
 }
 
-impl From<SubscriptionEvent> for operation_out::SubscriptionEvent {
+impl From<SubscriptionEvent> for protocol::SubscribeResponse {
     fn from(value: SubscriptionEvent) -> Self {
         match value {
             SubscriptionEvent::Confirmed(c) => match c {
-                SubscriptionConfirmation::StreamName(s) => operation_out::SubscriptionEvent {
-                    event: Some(operation_out::subscription_event::Event::Confirmation(
-                        operation_out::subscription_event::Confirmation {
+                SubscriptionConfirmation::StreamName(s) => protocol::SubscribeResponse {
+                    event: Some(protocol::subscribe_response::Event::Confirmation(
+                        protocol::subscribe_response::Confirmation {
                             kind: Some(
-                                operation_out::subscription_event::confirmation::Kind::StreamName(
-                                    s,
-                                ),
+                                protocol::subscribe_response::confirmation::Kind::StreamName(s),
                             ),
                         },
                     )),
                 },
-                SubscriptionConfirmation::ProcessId(p) => operation_out::SubscriptionEvent {
-                    event: Some(operation_out::subscription_event::Event::Confirmation(
-                        operation_out::subscription_event::Confirmation {
+                SubscriptionConfirmation::ProcessId(p) => protocol::SubscribeResponse {
+                    event: Some(protocol::subscribe_response::Event::Confirmation(
+                        protocol::subscribe_response::Confirmation {
                             kind: Some(
-                                operation_out::subscription_event::confirmation::Kind::ProcessId(
+                                protocol::subscribe_response::confirmation::Kind::ProcessId(
                                     p.into(),
                                 ),
                             ),
@@ -1208,21 +1068,21 @@ impl From<SubscriptionEvent> for operation_out::SubscriptionEvent {
                     )),
                 },
             },
-            SubscriptionEvent::EventAppeared(e) => operation_out::SubscriptionEvent {
-                event: Some(operation_out::subscription_event::Event::EventAppeared(
-                    operation_out::subscription_event::EventAppeared {
+            SubscriptionEvent::EventAppeared(e) => protocol::SubscribeResponse {
+                event: Some(protocol::subscribe_response::Event::EventAppeared(
+                    protocol::subscribe_response::EventAppeared {
                         event: Some(e.into()),
                     },
                 )),
             },
-            SubscriptionEvent::CaughtUp => operation_out::SubscriptionEvent {
-                event: Some(operation_out::subscription_event::Event::CaughtUp(
-                    operation_out::subscription_event::CaughtUp {},
+            SubscriptionEvent::CaughtUp => protocol::SubscribeResponse {
+                event: Some(protocol::subscribe_response::Event::CaughtUp(
+                    protocol::subscribe_response::CaughtUp {},
                 )),
             },
-            SubscriptionEvent::Unsubscribed(_) => operation_out::SubscriptionEvent {
-                event: Some(operation_out::subscription_event::Event::Error(
-                    operation_out::subscription_event::Error {},
+            SubscriptionEvent::Unsubscribed(_) => protocol::SubscribeResponse {
+                event: Some(protocol::subscribe_response::Event::Error(
+                    protocol::subscribe_response::Error {},
                 )),
             },
         }
