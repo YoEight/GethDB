@@ -4,7 +4,7 @@ use std::time::Duration;
 use eyre::bail;
 use uuid::Uuid;
 
-use geth_common::generated::next::protocol;
+use geth_common::generated::protocol;
 use geth_common::{EndPoint, Operation, OperationIn, OperationOut, Reply};
 
 use crate::next::{connect_to_node, Command, ConnErr, Connection, Mailbox};

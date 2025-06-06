@@ -1089,8 +1089,8 @@ impl From<SubscriptionEvent> for protocol::SubscribeResponse {
     }
 }
 
-impl From<operation_out::subscription_event::Error> for SubscriptionError {
-    fn from(_: operation_out::subscription_event::Error) -> Self {
+impl From<protocol::subscribe_response::Error> for SubscriptionError {
+    fn from(_: protocol::subscribe_response::Error) -> Self {
         SubscriptionError {}
     }
 }
@@ -1146,10 +1146,10 @@ impl Display for DeleteError {
     }
 }
 
-impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
-    fn from(value: operation_out::DeleteStreamCompleted) -> Self {
+impl From<protocol::DeleteStreamResponse> for DeleteStreamCompleted {
+    fn from(value: protocol::DeleteStreamResponse) -> Self {
         match value.result.unwrap() {
-            operation_out::delete_stream_completed::Result::WriteResult(r) => {
+            protocol::delete_stream_response::Result::WriteResult(r) => {
                 DeleteStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: r.position,
@@ -1157,8 +1157,8 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
                 })
             }
 
-            operation_out::delete_stream_completed::Result::Error(e) => match e.error.unwrap() {
-                operation_out::delete_stream_completed::error::Error::WrongRevision(e) => {
+            protocol::delete_stream_response::Result::Error(e) => match e.error.unwrap() {
+                protocol::delete_stream_response::error::Error::WrongRevision(e) => {
                     DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
                         WrongExpectedRevisionError {
                             expected: e.expected_revision.unwrap().into(),
@@ -1167,14 +1167,14 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
                     ))
                 }
 
-                operation_out::delete_stream_completed::error::Error::NotLeader(e) => {
+                protocol::delete_stream_response::error::Error::NotLeader(e) => {
                     DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
                         host: e.leader_host,
                         port: e.leader_port as u16,
                     }))
                 }
 
-                operation_out::delete_stream_completed::error::Error::StreamDeleted(_) => {
+                protocol::delete_stream_response::error::Error::StreamDeleted(_) => {
                     DeleteStreamCompleted::Error(DeleteError::StreamDeleted)
                 }
             },
@@ -1182,28 +1182,28 @@ impl From<operation_out::DeleteStreamCompleted> for DeleteStreamCompleted {
     }
 }
 
-impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
+impl From<DeleteStreamCompleted> for protocol::DeleteStreamResponse {
     fn from(value: DeleteStreamCompleted) -> Self {
         match value {
-            DeleteStreamCompleted::Success(w) => operation_out::DeleteStreamCompleted {
-                result: Some(operation_out::delete_stream_completed::Result::WriteResult(
+            DeleteStreamCompleted::Success(w) => protocol::DeleteStreamResponse {
+                result: Some(protocol::delete_stream_response::Result::WriteResult(
                     w.into(),
                 )),
             },
 
-            DeleteStreamCompleted::Error(e) => operation_out::DeleteStreamCompleted {
-                result: Some(operation_out::delete_stream_completed::Result::Error(
-                    operation_out::delete_stream_completed::Error {
+            DeleteStreamCompleted::Error(e) => protocol::DeleteStreamResponse {
+                result: Some(protocol::delete_stream_response::Result::Error(
+                    protocol::delete_stream_response::Error {
                         error: Some(match e {
                             DeleteError::WrongExpectedRevision(e) => {
-                                operation_out::delete_stream_completed::error::Error::WrongRevision(
+                                protocol::delete_stream_response::error::Error::WrongRevision(
                                     e.into(),
                                 )
                             }
 
                             DeleteError::NotLeaderException(e) => {
-                                operation_out::delete_stream_completed::error::Error::NotLeader(
-                                    operation_out::delete_stream_completed::error::NotLeader {
+                                protocol::delete_stream_response::error::Error::NotLeader(
+                                    protocol::delete_stream_response::error::NotLeader {
                                         leader_host: e.host,
                                         leader_port: e.port as u32,
                                     },
@@ -1211,9 +1211,7 @@ impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
                             }
 
                             DeleteError::StreamDeleted => {
-                                operation_out::delete_stream_completed::error::Error::StreamDeleted(
-                                    (),
-                                )
+                                protocol::delete_stream_response::error::Error::StreamDeleted(())
                             }
                         }),
                     },
@@ -1226,14 +1224,14 @@ impl From<DeleteStreamCompleted> for operation_out::DeleteStreamCompleted {
 #[derive(Clone, Debug)]
 pub struct ListPrograms {}
 
-impl From<ListPrograms> for operation_in::ListPrograms {
+impl From<ListPrograms> for protocol::ListProgramsRequest {
     fn from(_: ListPrograms) -> Self {
         Self { empty: None }
     }
 }
 
-impl From<operation_in::ListPrograms> for ListPrograms {
-    fn from(_: operation_in::ListPrograms) -> Self {
+impl From<protocol::ListProgramsRequest> for ListPrograms {
+    fn from(_: protocol::ListProgramsRequest) -> Self {
         Self {}
     }
 }
@@ -1243,14 +1241,14 @@ pub struct GetProgramStats {
     pub id: u64,
 }
 
-impl From<GetProgramStats> for operation_in::GetProgramStats {
+impl From<GetProgramStats> for protocol::ProgramStatsRequest {
     fn from(value: GetProgramStats) -> Self {
         Self { id: value.id }
     }
 }
 
-impl From<operation_in::GetProgramStats> for GetProgramStats {
-    fn from(value: operation_in::GetProgramStats) -> Self {
+impl From<protocol::ProgramStatsRequest> for GetProgramStats {
+    fn from(value: protocol::ProgramStatsRequest) -> Self {
         Self { id: value.id }
     }
 }
@@ -1260,14 +1258,14 @@ pub struct KillProgram {
     pub id: u64,
 }
 
-impl From<KillProgram> for operation_in::KillProgram {
+impl From<KillProgram> for protocol::StopProgramRequest {
     fn from(value: KillProgram) -> Self {
         Self { id: value.id }
     }
 }
 
-impl From<operation_in::KillProgram> for KillProgram {
-    fn from(value: operation_in::KillProgram) -> Self {
+impl From<protocol::StopProgramRequest> for KillProgram {
+    fn from(value: protocol::StopProgramRequest) -> Self {
         Self { id: value.id }
     }
 }
@@ -1284,8 +1282,8 @@ pub struct ProgramSummary {
     pub started_at: DateTime<Utc>,
 }
 
-impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
-    fn from(value: operation_out::programs_listed::ProgramSummary) -> Self {
+impl From<protocol::list_programs_response::ProgramSummary> for ProgramSummary {
+    fn from(value: protocol::list_programs_response::ProgramSummary) -> Self {
         Self {
             id: value.id,
             name: value.name,
@@ -1294,7 +1292,7 @@ impl From<operation_out::programs_listed::ProgramSummary> for ProgramSummary {
     }
 }
 
-impl From<ProgramSummary> for operation_out::programs_listed::ProgramSummary {
+impl From<ProgramSummary> for protocol::list_programs_response::ProgramSummary {
     fn from(value: ProgramSummary) -> Self {
         Self {
             id: value.id,
@@ -1304,15 +1302,15 @@ impl From<ProgramSummary> for operation_out::programs_listed::ProgramSummary {
     }
 }
 
-impl From<operation_out::ProgramsListed> for ProgramListed {
-    fn from(value: operation_out::ProgramsListed) -> Self {
+impl From<protocol::ListProgramsResponse> for ProgramListed {
+    fn from(value: protocol::ListProgramsResponse) -> Self {
         Self {
             programs: value.programs.into_iter().map(|p| p.into()).collect(),
         }
     }
 }
 
-impl From<ProgramListed> for operation_out::ProgramsListed {
+impl From<ProgramListed> for protocol::ListProgramsResponse {
     fn from(value: ProgramListed) -> Self {
         Self {
             programs: value.programs.into_iter().map(|p| p.into()).collect(),
@@ -1331,12 +1329,12 @@ pub enum ProgramKillError {
     NotExists,
 }
 
-impl From<operation_out::ProgramKilled> for ProgramKilled {
-    fn from(value: operation_out::ProgramKilled) -> Self {
+impl From<protocol::StopProgramResponse> for ProgramKilled {
+    fn from(value: protocol::StopProgramResponse) -> Self {
         match value.result.unwrap() {
-            operation_out::program_killed::Result::Success(_) => ProgramKilled::Success,
-            operation_out::program_killed::Result::Error(e) => match e.error.unwrap() {
-                operation_out::program_killed::error::Error::NotExists(_) => {
+            protocol::stop_program_response::Result::Success(_) => ProgramKilled::Success,
+            protocol::stop_program_response::Result::Error(e) => match e.error.unwrap() {
+                protocol::stop_program_response::error::Error::NotExists(_) => {
                     ProgramKilled::Error(ProgramKillError::NotExists)
                 }
             },
@@ -1344,19 +1342,19 @@ impl From<operation_out::ProgramKilled> for ProgramKilled {
     }
 }
 
-impl From<ProgramKilled> for operation_out::ProgramKilled {
+impl From<ProgramKilled> for protocol::StopProgramResponse {
     fn from(value: ProgramKilled) -> Self {
         match value {
-            ProgramKilled::Success => operation_out::ProgramKilled {
-                result: Some(operation_out::program_killed::Result::Success(())),
+            ProgramKilled::Success => protocol::StopProgramResponse {
+                result: Some(protocol::stop_program_response::Result::Success(())),
             },
 
-            ProgramKilled::Error(e) => operation_out::ProgramKilled {
-                result: Some(operation_out::program_killed::Result::Error(
-                    operation_out::program_killed::Error {
+            ProgramKilled::Error(e) => protocol::StopProgramResponse {
+                result: Some(protocol::stop_program_response::Result::Error(
+                    protocol::stop_program_response::Error {
                         error: Some(match e {
                             ProgramKillError::NotExists => {
-                                operation_out::program_killed::error::Error::NotExists(())
+                                protocol::stop_program_response::error::Error::NotExists(())
                             }
                         }),
                     },
@@ -1376,8 +1374,8 @@ pub struct ProgramStats {
     pub started: DateTime<Utc>,
 }
 
-impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
-    fn from(value: operation_out::program_obtained::ProgramStats) -> Self {
+impl From<protocol::program_stats_response::ProgramStats> for ProgramStats {
+    fn from(value: protocol::program_stats_response::ProgramStats) -> Self {
         Self {
             id: value.id,
             name: value.name,
@@ -1389,7 +1387,7 @@ impl From<operation_out::program_obtained::ProgramStats> for ProgramStats {
     }
 }
 
-impl From<ProgramStats> for operation_out::program_obtained::ProgramStats {
+impl From<ProgramStats> for protocol::program_stats_response::ProgramStats {
     fn from(value: ProgramStats) -> Self {
         Self {
             id: value.id,
@@ -1413,15 +1411,15 @@ pub enum GetProgramError {
     NotExists,
 }
 
-impl From<operation_out::ProgramObtained> for ProgramObtained {
-    fn from(value: operation_out::ProgramObtained) -> Self {
+impl From<protocol::ProgramStatsResponse> for ProgramObtained {
+    fn from(value: protocol::ProgramStatsResponse) -> Self {
         match value.result.unwrap() {
-            operation_out::program_obtained::Result::Program(stats) => {
+            protocol::program_stats_response::Result::Program(stats) => {
                 ProgramObtained::Success(stats.into())
             }
 
-            operation_out::program_obtained::Result::Error(e) => match e.error.unwrap() {
-                operation_out::program_obtained::error::Error::NotExists(_) => {
+            protocol::program_stats_response::Result::Error(e) => match e.error.unwrap() {
+                protocol::program_stats_response::error::Error::NotExists(_) => {
                     ProgramObtained::Error(GetProgramError::NotExists)
                 }
             },
@@ -1429,21 +1427,21 @@ impl From<operation_out::ProgramObtained> for ProgramObtained {
     }
 }
 
-impl From<ProgramObtained> for operation_out::ProgramObtained {
+impl From<ProgramObtained> for protocol::ProgramStatsResponse {
     fn from(value: ProgramObtained) -> Self {
         match value {
-            ProgramObtained::Success(stats) => operation_out::ProgramObtained {
-                result: Some(operation_out::program_obtained::Result::Program(
+            ProgramObtained::Success(stats) => protocol::ProgramStatsResponse {
+                result: Some(protocol::program_stats_response::Result::Program(
                     stats.into(),
                 )),
             },
 
-            ProgramObtained::Error(e) => operation_out::ProgramObtained {
-                result: Some(operation_out::program_obtained::Result::Error(
-                    operation_out::program_obtained::Error {
+            ProgramObtained::Error(e) => protocol::ProgramStatsResponse {
+                result: Some(protocol::program_stats_response::Result::Error(
+                    protocol::program_stats_response::Error {
                         error: Some(match e {
                             GetProgramError::NotExists => {
-                                operation_out::program_obtained::error::Error::NotExists(())
+                                protocol::program_stats_response::error::Error::NotExists(())
                             }
                         }),
                     },

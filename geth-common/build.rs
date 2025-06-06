@@ -3,8 +3,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         .build_server(true)
         .build_client(true)
         .bytes([
-            ".geth.OperationIn.AppendStream.Propose.payload",
-            ".geth.OperationIn.AppendStream.Propose.metadata",
+            ".geth.AppendStreamRequest.Propose.payload",
+            ".geth.AppendStreamRequest.Propose.metadata",
             ".geth.RecordedEvent.payload",
             ".geth.RecordedEvent.metadata",
         ])
