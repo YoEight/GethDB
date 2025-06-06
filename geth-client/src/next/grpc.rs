@@ -1,85 +1,34 @@
 use std::fmt::Display;
 
 use futures_util::stream::BoxStream;
-use tokio::sync::mpsc;
+use geth_common::generated::protocol::protocol_client::ProtocolClient;
+use geth_common::protocol::ProgramStatsRequest;
+use prost_types::source_code_info;
 use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tonic::transport::Channel;
+use tonic::{Code, Request};
 use uuid::Uuid;
 
 use geth_common::{
-    AppendStream, AppendStreamCompleted, Client, DeleteStream, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgramStats, KillProgram, ListPrograms, Operation,
-    ProgramKilled, ProgramObtained, ProgramSummary, Propose, ReadStream, ReadStreamCompleted,
-    Record, Reply, Revision, StreamRead, Subscribe, SubscribeToProgram, SubscribeToStream,
-    SubscriptionEvent, UnsubscribeReason,
+    AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, Direction, EndPoint,
+    ExpectedRevision, GetProgramError, GetProgramStats, KillProgram, ListPrograms, Operation,
+    ProgramKilled, ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadError, ReadStream,
+    ReadStreamCompleted, ReadStreamResponse, Record, Reply, Revision, Subscribe,
+    SubscribeToProgram, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
 };
 
-use crate::next::driver::Driver;
-use crate::next::{multiplex_loop, Command, Msg, OperationIn, OperationOut};
-
-pub struct Task {
-    rx: UnboundedReceiver<OperationOut>,
-}
-
-impl Task {
-    // FIXME: There would be some general error at that level.
-    pub async fn recv(&mut self) -> eyre::Result<Option<Reply>> {
-        if let Some(event) = self.rx.recv().await {
-            return Ok(Some(event.reply));
-        }
-
-        Ok(None)
-    }
-}
-
-#[derive(Clone)]
-pub struct Mailbox {
-    tx: UnboundedSender<Msg>,
-}
-
-impl Mailbox {
-    pub fn new(tx: UnboundedSender<Msg>) -> Self {
-        Self { tx }
-    }
-
-    async fn send(&self, msg: Msg) -> eyre::Result<()> {
-        self.tx
-            .send(msg)
-            .map_err(|_| eyre::eyre!("connection is permanently closed"))?;
-
-        Ok(())
-    }
-
-    pub async fn send_operation(&self, operation: Operation) -> eyre::Result<Task> {
-        let (resp, rx) = mpsc::unbounded_channel();
-
-        self.send(Msg::Command(Command {
-            operation_in: OperationIn {
-                correlation: Uuid::new_v4(),
-                operation,
-            },
-            resp,
-        }))
-        .await?;
-
-        Ok(Task { rx })
-    }
-}
+use crate::{Client, ReadStreaming, SubscriptionStreaming};
 
 #[derive(Clone)]
 pub struct GrpcClient {
-    mailbox: Mailbox,
+    inner: ProtocolClient<Channel>,
 }
 
 impl GrpcClient {
-    pub fn new(endpoint: EndPoint) -> Self {
-        let (tx, rx) = mpsc::unbounded_channel();
-        let driver = Driver::new(endpoint, tx.clone());
+    pub async fn connect(endpoint: EndPoint) -> eyre::Result<Self> {
+        let inner = ProtocolClient::connect(format!("http://{}", endpoint)).await?;
 
-        tokio::spawn(multiplex_loop(driver, rx));
-
-        Self {
-            mailbox: Mailbox::new(tx),
-        }
+        Ok(Self { inner })
     }
 }
 
@@ -91,33 +40,20 @@ impl Client for GrpcClient {
         expected_revision: ExpectedRevision,
         proposes: Vec<Propose>,
     ) -> eyre::Result<AppendStreamCompleted> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::AppendStream(AppendStream {
-                stream_name: stream_id.to_string(),
-                events: proposes,
-                expected_revision,
-            }))
+        let result = self
+            .inner
+            .clone()
+            .append_stream(Request::new(
+                AppendStream {
+                    stream_name: stream_id.to_string(),
+                    expected_revision,
+                    events: proposes,
+                }
+                .into(),
+            ))
             .await?;
 
-        if let Some(out) = task.recv().await? {
-            match out {
-                Reply::AppendStreamCompleted(resp) => Ok(resp),
-                Reply::Error(e) => {
-                    eyre::bail!("server error when writing to stream '{}': {}", stream_id, e)
-                }
-                x => eyre::bail!(
-                    "unexpected reply when appending events to '{}' = {:?}",
-                    stream_id,
-                    x
-                ),
-            }
-        } else {
-            eyre::bail!(
-                "task unable to complete when appending events to '{}'",
-                stream_id
-            );
-        }
+        Ok(result.into_inner().into())
     }
 
     async fn read_stream(
@@ -126,65 +62,29 @@ impl Client for GrpcClient {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::ReadStream(ReadStream {
-                stream_name: stream_id.to_string(),
-                direction,
-                revision,
-                max_count,
-            }))
-            .await?;
+    ) -> eyre::Result<ReadStreamCompleted<ReadStreaming>> {
+        let result = self
+            .inner
+            .clone()
+            .read_stream(Request::new(
+                ReadStream {
+                    stream_name: stream_id.to_string(),
+                    direction,
+                    revision,
+                    max_count,
+                }
+                .into(),
+            ))
+            .await;
 
-        if let Some(event) = task.recv().await? {
-            match event {
-                Reply::StreamRead(event) => match event {
-                    StreamRead::EventAppeared(record) => {
-                        let stream_id = stream_id.to_string();
-                        Ok(ReadStreamCompleted::Success(Box::pin(
-                            async_stream::try_stream! {
-                                yield record;
-                                while let Some(event) = task.recv().await? {
-                                    match event {
-                                        Reply::StreamRead(read) => match read {
-                                            StreamRead::EventAppeared(record) => {
-                                                yield record;
-                                            }
+        match result {
+            Err(s) => match parse_read_error(s)? {
+                ReadError::StreamDeleted => Ok(ReadStreamCompleted::StreamDeleted),
+            },
 
-                                            StreamRead::Unexpected(e) => {
-                                                read_error(&stream_id, e)?;
-                                            }
-
-                                            StreamRead::EndOfStream => break,
-
-                                            _ => {
-                                                unexpected_reply_when_reading(&stream_id)?;
-                                            }
-                                        }
-
-                                        _ => {
-                                            unexpected_reply_when_reading(&stream_id)?;
-                                        }
-                                    }
-                                }
-                            },
-                        )))
-                    }
-
-                    StreamRead::StreamDeleted => Ok(ReadStreamCompleted::StreamDeleted),
-
-                    StreamRead::Unexpected(e) => Err(e),
-
-                    StreamRead::EndOfStream => Ok(ReadStreamCompleted::Success(Box::pin(
-                        futures_util::stream::empty(),
-                    ))),
-                },
-
-                _ => unexpected_reply_when_reading(stream_id),
-            }
-        } else {
-            eyre::bail!("multiplex process is no longer reachable");
+            Ok(resp) => Ok(ReadStreamCompleted::Success(ReadStreaming::Grpc(
+                resp.into_inner(),
+            ))),
         }
     }
 
@@ -192,36 +92,40 @@ impl Client for GrpcClient {
         &self,
         stream_id: &str,
         start: Revision<u64>,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        let outcome = self
-            .mailbox
-            .send_operation(Operation::Subscribe(Subscribe::ToStream(
-                SubscribeToStream {
+    ) -> eyre::Result<SubscriptionStreaming> {
+        let result = self
+            .inner
+            .clone()
+            .subscribe(Request::new(
+                Subscribe::ToStream(SubscribeToStream {
                     stream_name: stream_id.to_string(),
                     start,
-                },
-            )))
-            .await;
+                })
+                .into(),
+            ))
+            .await?;
 
-        produce_subscription_stream(stream_id.to_string(), outcome)
+        Ok(SubscriptionStreaming::Grpc(result.into_inner()))
     }
 
     async fn subscribe_to_process(
         &self,
         name: &str,
         source_code: &str,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        let outcome = self
-            .mailbox
-            .send_operation(Operation::Subscribe(Subscribe::ToProgram(
-                SubscribeToProgram {
+    ) -> eyre::Result<SubscriptionStreaming> {
+        let result = self
+            .inner
+            .clone()
+            .subscribe(Request::new(
+                Subscribe::ToProgram(SubscribeToProgram {
                     name: name.to_string(),
                     source: source_code.to_string(),
-                },
-            )))
-            .await;
+                })
+                .into(),
+            ))
+            .await?;
 
-        produce_subscription_stream(format!("process '{}'", name), outcome)
+        Ok(SubscriptionStreaming::Grpc(result.into_inner()))
     }
 
     async fn delete_stream(
@@ -229,59 +133,54 @@ impl Client for GrpcClient {
         stream_id: &str,
         expected_revision: ExpectedRevision,
     ) -> eyre::Result<DeleteStreamCompleted> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::DeleteStream(DeleteStream {
-                stream_name: stream_id.to_string(),
-                expected_revision,
-            }))
+        let result = self
+            .inner
+            .clone()
+            .delete_stream(Request::new(
+                DeleteStream {
+                    stream_name: stream_id.to_string(),
+                    expected_revision,
+                }
+                .into(),
+            ))
             .await?;
 
-        if let Some(event) = task.recv().await? {
-            match event {
-                Reply::DeleteStreamCompleted(resp) => return Ok(resp),
-                _ => eyre::bail!("unexpected reply when deleting stream '{}'", stream_id),
-            }
-        }
-
-        eyre::bail!("unexpected code path when deleting stream '{}'", stream_id);
+        Ok(result.into_inner().into())
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::ListPrograms(ListPrograms {}))
+        let result = self
+            .inner
+            .clone()
+            .list_programs(Request::new(ListPrograms {}.into()))
             .await?;
 
-        if let Some(event) = task.recv().await? {
-            match event {
-                Reply::ProgramsListed(resp) => {
-                    return Ok(resp.programs);
-                }
-                _ => eyre::bail!("unexpected reply when listing programs"),
-            }
-        }
-
-        eyre::bail!("unexpected code path when listing programs");
+        // paying a premium just so we have a type that is not from the generated code
+        // fortunately, that isn't a call that one should make often.
+        Ok(result
+            .into_inner()
+            .programs
+            .into_iter()
+            .map(|p| p.into())
+            .collect())
     }
 
-    async fn get_program(&self, id: u64) -> eyre::Result<ProgramObtained> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::GetProgramStats(GetProgramStats { id }))
+    async fn get_program(&self, id: u64) -> eyre::Result<Option<ProgramStats>> {
+        let result = self
+            .inner
+            .clone()
+            .program_stats(Request::new(ProgramStatsRequest { id }.into()))
             .await?;
 
-        if let Some(event) = task.recv().await? {
-            match event {
-                Reply::ProgramObtained(resp) => return Ok(resp),
-                _ => eyre::bail!("unexpected reply when getting program {}", id),
-            }
+        match result.into_inner().into() {
+            ProgramObtained::Success(stats) => Ok(Some(stats)),
+            ProgramObtained::Error(e) => match e {
+                GetProgramError::NotExists => Ok(None),
+            },
         }
-
-        eyre::bail!("unexpected code path when getting program {}", id);
     }
 
-    async fn kill_program(&self, id: u64) -> eyre::Result<ProgramKilled> {
+    async fn stop_program(&self, id: u64) -> eyre::Result<()> {
         let mut task = self
             .mailbox
             .send_operation(Operation::KillProgram(KillProgram { id }))
@@ -324,4 +223,12 @@ fn unexpected_reply_when_reading<A>(stream_id: &str) -> eyre::Result<A> {
 
 fn read_error<T: Display>(stream_id: &str, e: T) -> eyre::Result<()> {
     eyre::bail!("error when reading '{}': {}", stream_id, e)
+}
+
+fn parse_read_error(status: tonic::Status) -> eyre::Result<ReadError> {
+    if status.code() == Code::FailedPrecondition && status.message() == "stream-deleted" {
+        Ok(ReadError::StreamDeleted)
+    } else {
+        Err(status.into())
+    }
 }

@@ -12,8 +12,8 @@ use geth_common::generated::next::protocol;
 use geth_common::generated::next::protocol::protocol_server::Protocol;
 use geth_common::{
     Direction, GetProgramError, Operation, OperationIn, OperationOut, ProgramKilled, ProgramListed,
-    ProgramObtained, ReadStreamCompleted, Record, Reply, StreamRead, Subscribe, SubscribeToStream,
-    SubscriptionConfirmation, SubscriptionEvent, UnsubscribeReason,
+    ProgramObtained, ReadStreamCompleted, ReadStreamResponse, Record, Reply, Subscribe,
+    SubscribeToStream, SubscriptionConfirmation, SubscriptionEvent, UnsubscribeReason,
 };
 use uuid::Uuid;
 
@@ -244,7 +244,7 @@ async fn execute_operation(
                     ReadStreamCompleted::StreamDeleted => {
                         yield OperationOut {
                             correlation,
-                            reply: Reply::StreamRead(StreamRead::StreamDeleted),
+                            reply: Reply::StreamRead(ReadStreamResponse::StreamDeleted),
                         };
 
                         local_storage.complete(&correlation).await;
@@ -267,7 +267,7 @@ async fn execute_operation(
                                 Err(e) => {
                                     yield OperationOut {
                                         correlation,
-                                        reply: Reply::StreamRead(StreamRead::Unexpected(e)),
+                                        reply: Reply::StreamRead(ReadStreamResponse::Unexpected(e)),
                                     };
 
                                    local_storage.complete(&correlation).await;
@@ -279,7 +279,7 @@ async fn execute_operation(
                                         None => {
                                         yield OperationOut {
                                                 correlation,
-                                                reply: Reply::StreamRead(StreamRead::EndOfStream),
+                                                reply: Reply::StreamRead(ReadStreamResponse::EndOfStream),
                                             };
 
                                             local_storage.complete(&correlation).await;
@@ -289,7 +289,7 @@ async fn execute_operation(
                                         Some(entry) => {
                                             yield OperationOut {
                                                 correlation,
-                                                reply: Reply::StreamRead(StreamRead::EventAppeared(entry)),
+                                                reply: Reply::StreamRead(ReadStreamResponse::EventAppeared(entry)),
                                             };
                                         }
                                     }
@@ -311,7 +311,7 @@ async fn execute_operation(
                         } else {
                             yield OperationOut {
                                 correlation,
-                                reply: Reply::StreamRead(StreamRead::StreamDeleted),
+                                reply: Reply::StreamRead(ReadStreamResponse::StreamDeleted),
                             };
 
                             local_storage.complete(&correlation).await;

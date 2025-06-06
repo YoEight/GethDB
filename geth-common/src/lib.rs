@@ -6,13 +6,13 @@ use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use client::{Client, SubscriptionEvent, UnsubscribeReason};
+pub use client::{SubscriptionEvent, UnsubscribeReason};
 pub use io::{IteratorIO, IteratorIOExt};
 
 mod client;
 mod io;
 
-use crate::generated::protocol;
+pub use crate::generated::protocol;
 
 pub mod generated {
     pub mod protocol {
@@ -45,6 +45,12 @@ impl EndPoint {
     }
 }
 
+impl Display for EndPoint {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}:{}", self.host, self.port)
+    }
+}
+
 #[derive(Clone)]
 pub struct OperationIn {
     pub correlation: Uuid,
@@ -66,7 +72,7 @@ pub enum Operation {
 #[derive(Debug)]
 pub enum Reply {
     AppendStreamCompleted(AppendStreamCompleted),
-    StreamRead(StreamRead),
+    StreamRead(ReadStreamResponse),
     SubscriptionEvent(SubscriptionEvent),
     DeleteStreamCompleted(DeleteStreamCompleted),
     ProgramsListed(ProgramListed),
@@ -85,7 +91,7 @@ impl OperationOut {
     pub fn is_streaming(&self) -> bool {
         match &self.reply {
             Reply::SubscriptionEvent(event) => !matches!(event, SubscriptionEvent::Unsubscribed(_)),
-            Reply::StreamRead(event) => matches!(event, StreamRead::EventAppeared(_)),
+            Reply::StreamRead(event) => matches!(event, ReadStreamResponse::EventAppeared(_)),
             _ => false,
         }
     }
@@ -944,7 +950,6 @@ impl From<AppendStreamCompleted> for protocol::AppendStreamResponse {
 
 pub enum ReadStreamCompleted<A> {
     StreamDeleted,
-    Unexpected(eyre::Report),
     Success(A),
 }
 
@@ -952,7 +957,6 @@ impl<A> ReadStreamCompleted<A> {
     pub fn success(self) -> eyre::Result<A> {
         match self {
             ReadStreamCompleted::StreamDeleted => eyre::bail!("stream deleted"),
-            ReadStreamCompleted::Unexpected(e) => Err(e),
             ReadStreamCompleted::Success(a) => Ok(a),
         }
     }
@@ -963,48 +967,47 @@ impl<A> ReadStreamCompleted<A> {
 }
 
 #[derive(Debug)]
-pub enum StreamRead {
+pub enum ReadStreamResponse {
     EndOfStream,
     EventAppeared(Record),
     StreamDeleted,
-    Unexpected(eyre::Report),
 }
 
-impl From<protocol::ReadStreamResponse> for StreamRead {
+impl From<protocol::ReadStreamResponse> for ReadStreamResponse {
     fn from(value: protocol::ReadStreamResponse) -> Self {
         match value.read_result.unwrap() {
-            protocol::read_stream_response::ReadResult::EndOfStream(_) => StreamRead::EndOfStream,
-            protocol::read_stream_response::ReadResult::EventAppeared(e) => {
-                StreamRead::EventAppeared(e.into())
+            protocol::read_stream_response::ReadResult::EndOfStream(_) => {
+                ReadStreamResponse::EndOfStream
             }
-            protocol::read_stream_response::ReadResult::StreamDeleted(_) => {
-                StreamRead::StreamDeleted
+            protocol::read_stream_response::ReadResult::EventAppeared(e) => {
+                ReadStreamResponse::EventAppeared(e.into())
             }
         }
     }
 }
 
-impl TryFrom<StreamRead> for protocol::ReadStreamResponse {
-    type Error = eyre::Report;
-    fn try_from(value: StreamRead) -> eyre::Result<Self> {
+impl TryFrom<ReadStreamResponse> for protocol::ReadStreamResponse {
+    type Error = ReadError;
+
+    fn try_from(value: ReadStreamResponse) -> Result<Self, Self::Error> {
         match value {
-            StreamRead::EndOfStream => Ok(protocol::ReadStreamResponse {
+            ReadStreamResponse::EndOfStream => Ok(protocol::ReadStreamResponse {
                 read_result: Some(protocol::read_stream_response::ReadResult::EndOfStream(())),
             }),
 
-            StreamRead::EventAppeared(e) => Ok(protocol::ReadStreamResponse {
+            ReadStreamResponse::EventAppeared(e) => Ok(protocol::ReadStreamResponse {
                 read_result: Some(protocol::read_stream_response::ReadResult::EventAppeared(
                     e.into(),
                 )),
             }),
 
-            StreamRead::StreamDeleted => Ok(protocol::ReadStreamResponse {
-                read_result: Some(protocol::read_stream_response::ReadResult::StreamDeleted(())),
-            }),
-
-            StreamRead::Unexpected(e) => Err(e),
+            ReadStreamResponse::StreamDeleted => Err(ReadError::StreamDeleted),
         }
     }
+}
+
+pub enum ReadError {
+    StreamDeleted,
 }
 
 #[derive(Debug)]
