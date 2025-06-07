@@ -1,19 +1,16 @@
 use std::collections::VecDeque;
 
-use futures::{pin_mut, Stream, StreamExt};
 use geth_common::protocol::protocol_server::Protocol;
 use geth_common::protocol::{self, SubscribeResponse};
 use geth_mikoshi::hashing::mikoshi_hash;
 use tokio::select;
-use tokio::sync::mpsc::{self, unbounded_channel};
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::unbounded_channel;
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 
 use geth_common::{
-    AppendStream, DeleteStream, Direction, GetProgramError, ListPrograms, Operation, OperationIn,
-    OperationOut, ProgramKilled, ProgramListed, ProgramObtained, ReadStream, ReadStreamCompleted,
-    ReadStreamResponse, Record, Reply, Subscribe, SubscribeToStream, SubscriptionConfirmation,
-    SubscriptionEvent, UnsubscribeReason,
+    AppendStream, DeleteStream, Direction, GetProgramStats, KillProgram, ProgramKilled,
+    ProgramListed, ProgramObtained, ReadStream, ReadStreamCompleted, ReadStreamResponse, Record,
+    Subscribe, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
 };
 use tonic::{Request, Response, Status};
 
@@ -251,397 +248,33 @@ impl Protocol for ProtocolImpl {
 
     async fn program_stats(
         &self,
-        _request: Request<protocol::ProgramStatsRequest>,
+        request: Request<protocol::ProgramStatsRequest>,
     ) -> Result<Response<protocol::ProgramStatsResponse>, Status> {
-        // Not yet implemented
-        Err(Status::unimplemented("program_stats is not implemented"))
+        let params: GetProgramStats = request.into_inner().into();
+        match self.sub.program_stats(params.id).await {
+            Err(e) => Err(Status::internal(e.to_string())),
+            Ok(stats) => {
+                if let Some(stats) = stats {
+                    Ok(Response::new(ProgramObtained::Success(stats).into()))
+                } else {
+                    Err(Status::not_found("program-not-found"))
+                }
+            }
+        }
     }
 
     async fn stop_program(
         &self,
-        _request: Request<protocol::StopProgramRequest>,
+        request: Request<protocol::StopProgramRequest>,
     ) -> Result<Response<protocol::StopProgramResponse>, Status> {
-        // Not yet implemented
-        Err(Status::unimplemented("stop_program is not implemented"))
+        let params: KillProgram = request.into_inner().into();
+        if let Err(e) = self.sub.program_stop(params.id).await {
+            return Err(Status::internal(e.to_string()));
+        }
+
+        Ok(Response::new(ProgramKilled::Success.into()))
     }
 }
-
-enum Msg {
-    User(OperationIn),
-    Server(OperationOut),
-}
-
-// struct Pipeline {
-//     input: tonic::Streaming<protocol::OperationIn>,
-//     output: UnboundedReceiver<eyre::Result<OperationOut>>,
-// }
-
-// impl Pipeline {
-//     async fn recv(&mut self) -> Result<Option<Msg>, Status> {
-//         select! {
-//             input = self.input.next() => {
-//                 if let Some(input) = input {
-//                     return match input {
-//                         Ok(operation) => Ok(Some(Msg::User(operation.into()))),
-//                         Err(e) => {
-//                             tracing::error!("user error: {:?}", e);
-//                             Err(e)
-//                         }
-//                     };
-//                 }
-
-//                 tracing::warn!("user closed connection");
-//                 Ok(None)
-//             },
-
-//             output = self.output.recv() => {
-//                 if let Some(output) = output {
-//                     return match output {
-//                         Err(e) => {
-//                             tracing::error!("server error: {:?}", e);
-//                             Err(Status::unavailable(e.to_string()))
-//                         }
-
-//                         Ok(out)=> {
-//                             Ok(Some(Msg::Server(out)))
-//                         }
-//                     }
-//                 }
-
-//                 tracing::error!("unexpected server error");
-//                 Err(Status::unavailable("unexpected server error"))
-//             }
-//         }
-//     }
-// }
-
-// async fn multiplex(
-//     internal: Internal,
-//     downstream: Downstream,
-//     input: tonic::Streaming<protocol::OperationIn>,
-// ) {
-//     let local_storage = LocalStorage::new();
-//     let (tx, out_rx) = mpsc::unbounded_channel();
-//     let mut pipeline = Pipeline {
-//         input,
-//         output: out_rx,
-//     };
-
-//     loop {
-//         match pipeline.recv().await {
-//             Err(e) => {
-//                 let _ = downstream.send(Err(e));
-//                 break;
-//             }
-
-//             Ok(msg) => match msg {
-//                 None => break,
-//                 Some(msg) => match msg {
-//                     Msg::User(operation) => {
-//                         run_operation(
-//                             internal.clone(),
-//                             local_storage.clone(),
-//                             tx.clone(),
-//                             operation,
-//                         );
-//                     }
-
-//                     Msg::Server(operation) => {
-//                         let output = operation
-//                             .try_into()
-//                             .map_err(|e: eyre::Report| Status::unavailable(e.to_string()));
-//                         if downstream.send(output).is_err() {
-//                             tracing::warn!("user reset connection");
-//                             break;
-//                         }
-//                     }
-//                 },
-//             },
-//         }
-//     }
-// }
-
-// fn run_operation(
-//     internal: Internal,
-//     local_storage: LocalStorage,
-//     tx: UnboundedSender<eyre::Result<OperationOut>>,
-//     input: OperationIn,
-// ) {
-//     tokio::spawn(async move {
-//         let stream = execute_operation(internal, local_storage, input).await;
-
-//         pin_mut!(stream);
-//         while let Some(out) = stream.next().await {
-//             if tx.send(out).is_err() {
-//                 break;
-//             }
-//         }
-//     });
-// }
-
-// fn unexpected_error<A>(report: eyre::Report) -> eyre::Result<A> {
-//     Err(report)
-// }
-
-// async fn execute_operation(
-//     internal: Internal,
-//     local_storage: LocalStorage,
-//     input: OperationIn,
-// ) -> impl Stream<Item = eyre::Result<OperationOut>> {
-//     async_stream::try_stream! {
-//         let correlation = input.correlation;
-//         match input.operation {
-//             Operation::AppendStream(params) => {
-//                 let outcome = internal.writer.append(params.stream_name, params.expected_revision, params.events).await;
-
-//                 let completed = match outcome {
-//                     Err(e) => {
-//                         yield OperationOut {
-//                             correlation,
-//                             reply: Reply::Error(e.to_string()),
-//                         };
-
-//                         return;
-//                     },
-
-//                     Ok(c) => c,
-//                 };
-
-//                 yield OperationOut {
-//                     correlation,
-//                     reply: Reply::AppendStreamCompleted(completed),
-//                 };
-//             }
-
-//             Operation::DeleteStream(params) => {
-//                 tracing::debug!("received deleting stream request");
-//                 let completed = internal.writer.delete(params.stream_name, params.expected_revision).await?;
-//                 tracing::debug!("delete stream request completed");
-
-//                 yield OperationOut {
-//                     correlation,
-//                     reply: Reply::DeleteStreamCompleted(completed),
-//                 };
-//             }
-
-//             Operation::ReadStream(params) => {
-//                 let result = internal.reader.read(
-//                     &params.stream_name,
-//                     params.revision,
-//                     params.direction,
-//                     params.max_count as usize,
-//                 ).await?;
-
-//                 let mut stream = match result {
-//                     ReadStreamCompleted::StreamDeleted => {
-//                         yield OperationOut {
-//                             correlation,
-//                             reply: Reply::StreamRead(ReadStreamResponse::StreamDeleted),
-//                         };
-
-//                         local_storage.complete(&correlation).await;
-//                         return;
-//                     }
-
-//                     ReadStreamCompleted::Unexpected(e) => {
-//                         unexpected_error(e)?;
-//                         return;
-//                     }
-
-//                     ReadStreamCompleted::Success(streaming) => streaming,
-//                 };
-
-//                 let token = local_storage.new_cancellation_token(correlation).await;
-//                 loop {
-//                     select! {
-//                         outcome = stream.next() => {
-//                             match outcome {
-//                                 Err(e) => {
-//                                     yield OperationOut {
-//                                         correlation,
-//                                         reply: Reply::StreamRead(ReadStreamResponse::Unexpected(e)),
-//                                     };
-
-//                                    local_storage.complete(&correlation).await;
-//                                    break;
-//                                 }
-
-//                                 Ok(entry) => {
-//                                     match entry {
-//                                         None => {
-//                                         yield OperationOut {
-//                                                 correlation,
-//                                                 reply: Reply::StreamRead(ReadStreamResponse::EndOfStream),
-//                                             };
-
-//                                             local_storage.complete(&correlation).await;
-//                                             break;
-//                                         }
-
-//                                         Some(entry) => {
-//                                             yield OperationOut {
-//                                                 correlation,
-//                                                 reply: Reply::StreamRead(ReadStreamResponse::EventAppeared(entry)),
-//                                             };
-//                                         }
-//                                     }
-//                                 }
-//                             }
-//                         }
-
-//                         _ = token.notified() => break,
-//                     }
-//                 }
-//             }
-
-//             Operation::Subscribe(subscribe) => {
-//                 let token = local_storage.new_cancellation_token(correlation).await;
-//                 match subscribe {
-//                     Subscribe::ToStream(params) => {
-//                         let mut catchup = if let Some(catchup) = CatchupSubscription::init(&internal, correlation, params).await? {
-//                             catchup
-//                         } else {
-//                             yield OperationOut {
-//                                 correlation,
-//                                 reply: Reply::StreamRead(ReadStreamResponse::StreamDeleted),
-//                             };
-
-//                             local_storage.complete(&correlation).await;
-//                             return;
-//                         };
-
-//                         yield OperationOut {
-//                             correlation,
-//                             reply: Reply::SubscriptionEvent(SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(catchup.params.stream_name.to_string()))),
-//                         };
-
-//                         loop {
-//                             select! {
-//                                 outcome = catchup.next() => {
-//                                     match outcome {
-//                                         Err(e) => {
-//                                             tracing::error!(error = %e, stream = catchup.params.stream_name, "unexpected error when running catchup subscription");
-
-//                                             yield OperationOut {
-//                                                 correlation,
-//                                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-//                                             };
-
-//                                             break;
-//                                         }
-
-//                                         Ok(out) => {
-//                                             if let Some(out) = out {
-//                                                 yield out;
-//                                                 continue;
-//                                             } else {
-//                                                 break;
-//                                             }
-//                                         }
-//                                     }
-//                                 }
-
-//                                 _ = token.notified() => {
-//                                     yield OperationOut {
-//                                         correlation,
-//                                         reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
-//                                     };
-
-//                                     break;
-//                                 }
-//                             }
-//                         }
-
-//                         local_storage.complete(&correlation).await;
-//                     }
-
-//                     Subscribe::ToProgram(params) => {
-//                         let mut stream = internal.sub.subscribe_to_program(&params.name, &params.source).await?;
-
-//                         yield OperationOut {
-//                             correlation,
-//                             reply: Reply::SubscriptionEvent(SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(stream.id()))),
-//                         };
-
-//                         loop {
-//                             select! {
-//                                 outcome = stream.next() => {
-//                                     match outcome {
-//                                         Err(e) => {
-//                                             tracing::error!(error = %e, name = params.name, proc_id = stream.id(), "unexpected error when running program");
-
-//                                             yield OperationOut {
-//                                                 correlation,
-//                                                 reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)),
-//                                             };
-
-//                                             break;
-//                                         }
-
-//                                         Ok(event) => {
-//                                             if let Some(event) = event {
-//                                                 yield OperationOut {
-//                                                     correlation,
-//                                                     reply: Reply::SubscriptionEvent(SubscriptionEvent::EventAppeared(event)),
-//                                                 };
-//                                                 continue;
-//                                             } else {
-//                                                 break;
-//                                             }
-//                                         }
-//                                     }
-//                                 }
-
-//                                 _ = token.notified() => {
-//                                     yield OperationOut {
-//                                         correlation,
-//                                         reply: Reply::SubscriptionEvent(SubscriptionEvent::Unsubscribed(UnsubscribeReason::User)),
-//                                     };
-
-//                                     break;
-//                                 }
-//                             }
-//                         }
-
-//                         local_storage.complete(&correlation).await;
-//                     }
-//                 };
-//             }
-
-//             Operation::ListPrograms(_) => {
-//                 let programs = internal.sub.list_programs().await?;
-//                 yield OperationOut {
-//                     correlation,
-//                     reply: Reply::ProgramsListed(ProgramListed { programs }),
-//                 };
-//             }
-
-//             Operation::GetProgramStats(params) => {
-//                 let result = match internal.sub.program_stats(params.id).await? {
-//                     Some(stats) => ProgramObtained::Success(stats),
-//                     None => ProgramObtained::Error(GetProgramError::NotExists),
-//                 };
-
-//                 yield OperationOut {
-//                     correlation,
-//                     reply: Reply::ProgramObtained(result),
-//                 };
-//             }
-
-//             Operation::KillProgram(params) => {
-//                 internal.sub.program_stop(params.id).await?;
-//                 yield OperationOut {
-//                     correlation,
-//                     reply: Reply::ProgramKilled(ProgramKilled::Success),
-//                 };
-//             }
-
-//             Operation::Unsubscribe => {
-//                 local_storage.cancel(&correlation).await;
-//             }
-//         };
-//     }
-// }
 
 struct CatchupSubscription {
     params: SubscribeToStream,

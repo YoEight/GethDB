@@ -3,8 +3,6 @@ use std::{fs, fs::File, io, path::PathBuf};
 
 use cli::AppendStream;
 use directories::UserDirs;
-use futures::stream::BoxStream;
-use futures::TryStreamExt;
 use geth_engine::{start_process_manager_with_catalog, Catalog, Options, Proc};
 use glyph::{FileBackedInputs, Input, PromptOptions};
 use local::LocalClient;
@@ -14,7 +12,7 @@ use uuid::Uuid;
 use geth_client::{Client, GrpcClient, ReadStreaming};
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, Direction, EndPoint,
-    ExpectedRevision, Propose, ReadStreamCompleted, Revision, SubscriptionEvent,
+    ExpectedRevision, Propose, ReadStreamCompleted, Revision,
 };
 
 use crate::cli::{

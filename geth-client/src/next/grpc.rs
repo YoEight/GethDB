@@ -163,12 +163,22 @@ impl Client for GrpcClient {
             .inner
             .clone()
             .program_stats(Request::new(ProgramStatsRequest { id }.into()))
-            .await?;
+            .await;
 
-        match result.into_inner().into() {
-            ProgramObtained::Success(stats) => Ok(Some(stats)),
-            ProgramObtained::Error(e) => match e {
-                GetProgramError::NotExists => Ok(None),
+        match result {
+            Err(e) => {
+                if e.code() == Code::NotFound {
+                    Ok(None)
+                } else {
+                    Err(e.into())
+                }
+            }
+
+            Ok(resp) => match resp.into_inner().into() {
+                ProgramObtained::Success(stats) => Ok(Some(stats)),
+                ProgramObtained::Error(e) => match e {
+                    GetProgramError::NotExists => Ok(None),
+                },
             },
         }
     }
