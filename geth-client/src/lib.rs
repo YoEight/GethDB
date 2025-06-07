@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use futures_util::TryStreamExt;
 use geth_common::{
-    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramKilled,
-    ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadStreamCompleted,
-    ReadStreamResponse, Record, Revision, SubscriptionEvent,
+    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
+    ProgramSummary, Propose, ReadStreamCompleted, ReadStreamResponse, Record, Revision,
+    SubscriptionEvent,
 };
 pub use next::grpc::GrpcClient;
 use tonic::Streaming;
@@ -14,6 +14,8 @@ mod types;
 
 pub enum ReadStreaming {
     Grpc(Streaming<geth_common::protocol::ReadStreamResponse>),
+    Local(geth_engine::reading::Streaming),
+    Subscription(SubscriptionStreaming),
 }
 
 impl ReadStreaming {
@@ -29,6 +31,20 @@ impl ReadStreaming {
                 }
 
                 return Ok(None);
+            }
+
+            ReadStreaming::Local(streaming) => streaming.next().await,
+
+            ReadStreaming::Subscription(sub) => {
+                while let Some(event) = sub.next().await? {
+                    match event {
+                        SubscriptionEvent::EventAppeared(record) => return Ok(Some(record)),
+                        SubscriptionEvent::Confirmed(_) | SubscriptionEvent::CaughtUp => continue,
+                        SubscriptionEvent::Unsubscribed(_) => break,
+                    }
+                }
+
+                Ok(None)
             }
         }
     }

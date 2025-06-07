@@ -747,6 +747,7 @@ dependencies = [
  "eyre",
  "futures-util",
  "geth-common",
+ "geth-engine",
  "prost",
  "prost-derive",
  "prost-types",

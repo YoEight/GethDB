@@ -1,20 +1,13 @@
-use std::fmt::Display;
-
-use futures_util::stream::BoxStream;
 use geth_common::generated::protocol::protocol_client::ProtocolClient;
 use geth_common::protocol::ProgramStatsRequest;
-use prost_types::source_code_info;
-use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender};
 use tonic::transport::Channel;
 use tonic::{Code, Request};
-use uuid::Uuid;
 
 use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, Direction, EndPoint,
-    ExpectedRevision, GetProgramError, GetProgramStats, KillProgram, ListPrograms, Operation,
-    ProgramKilled, ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadError, ReadStream,
-    ReadStreamCompleted, ReadStreamResponse, Record, Reply, Revision, Subscribe,
-    SubscribeToProgram, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
+    ExpectedRevision, GetProgramError, KillProgram, ListPrograms, ProgramObtained, ProgramStats,
+    ProgramSummary, Propose, ReadError, ReadStream, ReadStreamCompleted, Revision, Subscribe,
+    SubscribeToProgram, SubscribeToStream,
 };
 
 use crate::{Client, ReadStreaming, SubscriptionStreaming};
@@ -181,48 +174,13 @@ impl Client for GrpcClient {
     }
 
     async fn stop_program(&self, id: u64) -> eyre::Result<()> {
-        let mut task = self
-            .mailbox
-            .send_operation(Operation::KillProgram(KillProgram { id }))
+        self.inner
+            .clone()
+            .stop_program(Request::new(KillProgram { id }.into()))
             .await?;
 
-        if let Some(event) = task.recv().await? {
-            match event {
-                Reply::ProgramKilled(resp) => return Ok(resp),
-                _ => eyre::bail!("unexpected reply when killing program {}", id),
-            }
-        }
-
-        eyre::bail!("unexpected code path when killing program {}", id);
+        Ok(())
     }
-}
-
-fn produce_subscription_stream<'a>(
-    ident: String,
-    outcome: eyre::Result<Task>,
-) -> BoxStream<'a, eyre::Result<SubscriptionEvent>> {
-    Box::pin(async_stream::try_stream! {
-        let mut task = outcome?;
-        while let Some(event) = task.recv().await? {
-            match event {
-                Reply::SubscriptionEvent(event) => {
-                    yield event;
-                }
-
-                _ => unexpected_reply_when_reading(&ident)?,
-            }
-        }
-
-        yield SubscriptionEvent::Unsubscribed(UnsubscribeReason::User);
-    })
-}
-
-fn unexpected_reply_when_reading<A>(stream_id: &str) -> eyre::Result<A> {
-    eyre::bail!("unexpected reply when reading: {}", stream_id)
-}
-
-fn read_error<T: Display>(stream_id: &str, e: T) -> eyre::Result<()> {
-    eyre::bail!("error when reading '{}': {}", stream_id, e)
 }
 
 fn parse_read_error(status: tonic::Status) -> eyre::Result<ReadError> {

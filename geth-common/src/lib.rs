@@ -1006,6 +1006,7 @@ impl TryFrom<ReadStreamResponse> for protocol::ReadStreamResponse {
     }
 }
 
+#[derive(Debug)]
 pub enum ReadError {
     StreamDeleted,
 }

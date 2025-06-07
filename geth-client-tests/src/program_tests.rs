@@ -1,7 +1,6 @@
 use fake::{faker::name::en::Name, Fake};
-use futures::TryStreamExt;
-use geth_client::GrpcClient;
-use geth_common::{Client, ContentType, ExpectedRevision, Propose};
+use geth_client::{Client, GrpcClient};
+use geth_common::{ContentType, ExpectedRevision, Propose};
 use temp_dir::TempDir;
 use uuid::Uuid;
 
@@ -12,7 +11,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    let client = GrpcClient::new(client_endpoint(&options));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
     tokio::spawn(geth_engine::run(options.clone()));
 
     let class: String = Name().fake();
@@ -30,7 +29,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
 
     let mut stream = client
         .subscribe_to_process("echo", include_str!("./resources/programs/echo.pyro"))
-        .await;
+        .await?;
 
     client
         .append_stream("foobar", ExpectedRevision::Any, proposes)
@@ -38,7 +37,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
         .success()?;
 
     let mut count = 0;
-    while let Some(event) = stream.try_next().await? {
+    while let Some(event) = stream.next().await? {
         match event {
             geth_common::SubscriptionEvent::Confirmed(
                 geth_common::SubscriptionConfirmation::ProcessId(proc_id),

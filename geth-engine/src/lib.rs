@@ -6,9 +6,11 @@ mod options;
 mod process;
 
 pub use process::{
-    indexing::IndexClient, reading::ReaderClient, start_process_manager,
-    start_process_manager_with_catalog, writing::WriterClient, Catalog, CatalogBuilder,
-    ManagerClient, Proc,
+    indexing::IndexClient,
+    reading::{self, ReaderClient},
+    start_process_manager, start_process_manager_with_catalog,
+    writing::WriterClient,
+    Catalog, CatalogBuilder, ManagerClient, Proc,
 };
 
 pub async fn run(options: Options) -> eyre::Result<()> {

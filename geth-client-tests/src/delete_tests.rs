@@ -1,7 +1,7 @@
 use bytes::Bytes;
 use fake::{faker::name::en::Name, Fake};
-use geth_client::GrpcClient;
-use geth_common::{Client, ContentType, Direction, ExpectedRevision, Propose, Revision};
+use geth_client::{Client, GrpcClient};
+use geth_common::{ContentType, Direction, ExpectedRevision, Propose, Revision};
 use temp_dir::TempDir;
 use uuid::Uuid;
 
@@ -12,7 +12,7 @@ async fn simple_delete() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    let client = GrpcClient::new(client_endpoint(&options));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
     tokio::spawn(geth_engine::run(options.clone()));
 
     let stream_name: String = Name().fake();
