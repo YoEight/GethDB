@@ -22,7 +22,7 @@ pub mod tests {
         tracing_subscriber::fmt::fmt()
             .with_env_filter(EnvFilter::new(
                 // "pyro_runtime=debug",
-                "geth_engine=debug,geth_client_tests=debug,pyro_runtime=debug",
+                "geth_engine=debug,geth_client=debug,geth_client_tests=debug,pyro_runtime=debug",
             ))
             // .with_max_level(tracing::Level::DEBUG)
             .with_file(true)

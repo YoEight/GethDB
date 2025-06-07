@@ -11,8 +11,8 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    let client = GrpcClient::connect(client_endpoint(&options)).await?;
     tokio::spawn(geth_engine::run(options.clone()));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let class: String = Name().fake();
     let content_type = ContentType::Json;

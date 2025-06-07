@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use geth_common::generated::protocol::protocol_client::ProtocolClient;
 use geth_common::protocol::ProgramStatsRequest;
 use tonic::transport::Channel;
@@ -19,9 +21,31 @@ pub struct GrpcClient {
 
 impl GrpcClient {
     pub async fn connect(endpoint: EndPoint) -> eyre::Result<Self> {
-        let inner = ProtocolClient::connect(format!("http://{}", endpoint)).await?;
+        let endpoint_str = format!("http://{}", endpoint);
+        let max_attempts = 10;
+        let mut attempt = 1;
 
-        Ok(Self { inner })
+        while attempt <= max_attempts {
+            tracing::debug!(
+                endpoint = endpoint_str,
+                attempt = attempt,
+                max_attempts = max_attempts,
+                "connecting to node"
+            );
+
+            match ProtocolClient::connect(endpoint_str.clone()).await {
+                Err(e) => {
+                    tracing::error!(attempt = attempt, max_attempts = max_attempts, error = %e, "failed to connect to node");
+                    attempt += 1;
+
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+
+                Ok(inner) => return Ok(Self { inner }),
+            }
+        }
+
+        eyre::bail!("cannot connect to {}", endpoint)
     }
 }
 

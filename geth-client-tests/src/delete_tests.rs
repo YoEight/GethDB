@@ -12,8 +12,8 @@ async fn simple_delete() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    let client = GrpcClient::connect(client_endpoint(&options)).await?;
     tokio::spawn(geth_engine::run(options.clone()));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
     let class: String = Name().fake();
