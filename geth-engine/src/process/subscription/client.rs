@@ -3,34 +3,65 @@ use crate::process::messages::{
     SubscriptionType,
 };
 use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
-use geth_common::{ProgramStats, ProgramSummary, Record};
+use geth_common::{
+    ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
+    UnsubscribeReason,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
 pub struct Streaming {
-    id: ProcId,
+    stream_name: String,
+    id: Option<ProcId>,
     inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub fn from(id: ProcId, inner: UnboundedReceiver<Messages>) -> Self {
-        Self { id, inner }
+    pub fn from(stream_name: String, inner: UnboundedReceiver<Messages>) -> Self {
+        Self {
+            stream_name,
+            inner,
+            id: None,
+        }
     }
 
     pub fn id(&self) -> ProcId {
-        self.id
+        self.id.unwrap_or_default()
     }
 
-    pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
+    pub async fn wait_until_confirmation(&mut self) -> eyre::Result<ProcId> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        if let Some(SubscriptionEvent::Confirmed(_)) = self.next().await? {
+            return Ok(self.id.unwrap_or_default());
+        }
+
+        eyre::bail!("subscription never got confirmed")
+    }
+
+    pub async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
         if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_into().ok()) {
             match resp {
                 SubscribeResponses::Error(e) => {
                     return Err(e);
                 }
 
-                SubscribeResponses::Confirmed(_) => {}
                 SubscribeResponses::Record(record) => {
-                    return Ok(Some(record));
+                    return Ok(Some(SubscriptionEvent::EventAppeared(record)));
+                }
+
+                SubscribeResponses::Confirmed(proc_id) => {
+                    let conf = if let Some(id) = proc_id {
+                        self.id = Some(id);
+                        SubscriptionConfirmation::ProcessId(id)
+                    } else {
+                        self.id = Some(0);
+                        SubscriptionConfirmation::StreamName(std::mem::take(&mut self.stream_name))
+                    };
+
+                    return Ok(Some(SubscriptionEvent::Confirmed(conf)));
                 }
 
                 SubscribeResponses::Unsubscribed => {
@@ -39,7 +70,9 @@ impl Streaming {
                     // should be already empty but best to be sure.
                     while self.inner.recv().await.is_some() {}
 
-                    return Ok(None);
+                    return Ok(Some(SubscriptionEvent::Unsubscribed(
+                        UnsubscribeReason::Server,
+                    )));
                 }
 
                 _ => {
@@ -77,7 +110,7 @@ impl SubscriptionClient {
     }
 
     pub async fn subscribe_to_stream(&self, stream_name: &str) -> eyre::Result<Streaming> {
-        let mut mailbox = self
+        let mailbox = self
             .inner
             .request_stream(
                 self.target,
@@ -88,27 +121,11 @@ impl SubscriptionClient {
             )
             .await?;
 
-        if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
-            match resp {
-                SubscribeResponses::Error(e) => {
-                    return Err(e);
-                }
-
-                SubscribeResponses::Confirmed(_) => {
-                    return Ok(Streaming::from(0, mailbox));
-                }
-
-                _ => {
-                    eyre::bail!("protocol error when communicating with the pubsub process");
-                }
-            }
-        }
-
-        eyre::bail!("pubsub process is no longer running")
+        Ok(Streaming::from(stream_name.to_string(), mailbox))
     }
 
     pub async fn subscribe_to_program(&self, name: &str, code: &str) -> eyre::Result<Streaming> {
-        let mut mailbox = self
+        let mailbox = self
             .inner
             .request_stream(
                 self.target,
@@ -120,23 +137,7 @@ impl SubscriptionClient {
             )
             .await?;
 
-        if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
-            match resp {
-                SubscribeResponses::Error(e) => {
-                    return Err(e);
-                }
-
-                SubscribeResponses::Confirmed(proc_id) => {
-                    return Ok(Streaming::from(proc_id.unwrap_or_default(), mailbox));
-                }
-
-                _ => {
-                    eyre::bail!("protocol error when communicating with the pubsub process");
-                }
-            }
-        }
-
-        eyre::bail!("pubsub process is no longer running")
+        Ok(Streaming::from(String::default(), mailbox))
     }
 
     pub async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {

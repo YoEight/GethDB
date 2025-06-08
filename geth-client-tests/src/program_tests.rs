@@ -39,16 +39,6 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let mut count = 0;
     while let Some(event) = stream.next().await? {
         match event {
-            geth_common::SubscriptionEvent::Confirmed(
-                geth_common::SubscriptionConfirmation::ProcessId(proc_id),
-            ) => {
-                tracing::debug!(
-                    proc_id = proc_id,
-                    name = "echo",
-                    "subscription to program confirmed"
-                )
-            }
-
             geth_common::SubscriptionEvent::EventAppeared(record) => {
                 let expected = expecteds.get(count).unwrap();
                 let actual = record.as_pyro_value::<Toto>()?;

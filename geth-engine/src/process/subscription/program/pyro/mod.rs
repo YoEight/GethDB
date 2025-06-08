@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use geth_common::Record;
+use geth_common::{Record, SubscriptionConfirmation, SubscriptionEvent};
 use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
 use pyro_runtime::{
     helpers::{Declared, TypeBuilder},
@@ -312,20 +312,6 @@ pub fn create_pyro_runtime(
                         );
                     })?;
 
-                tracing::debug!(
-                    name = name_subscribe_local,
-                    proc_id = proc_id,
-                    target = "subscription",
-                    kind = "pyro",
-                    stream_name = stream_name,
-                    "subscription is confirmed"
-                );
-
-                {
-                    let mut streams = subs_subscribe_local.write().await;
-                    streams.push(stream_name.clone());
-                }
-
                 loop {
                     match streaming.next().await {
                         Err(e) => {
@@ -344,25 +330,61 @@ pub fn create_pyro_runtime(
                         }
 
                         Ok(outcome) => {
-                            if let Some(record) = outcome {
-                                if input.send(EventRecord(record).serialize()?).is_err() {
-                                    tracing::debug!(
-                                        name = name_subscribe_local,
-                                        target = "subscription",
-                                        proc_id = proc_id,
-                                        kind = "pyro",
-                                        stream_name = stream_name,
-                                        reason = "unsubscribe",
-                                        "subscription was dropped"
-                                    );
+                            if let Some(event) = outcome {
+                                match event {
+                                    SubscriptionEvent::CaughtUp => {}
 
-                                    break;
+                                    SubscriptionEvent::Confirmed(conf) => {
+                                        if let SubscriptionConfirmation::StreamName(stream_name) =
+                                            conf
+                                        {
+                                            tracing::debug!(
+                                                name = name_subscribe_local,
+                                                proc_id = proc_id,
+                                                target = "subscription",
+                                                kind = "pyro",
+                                                stream_name = stream_name,
+                                                "subscription is confirmed"
+                                            );
+
+                                            let mut streams = subs_subscribe_local.write().await;
+                                            streams.push(stream_name);
+                                        }
+                                    }
+
+                                    SubscriptionEvent::Unsubscribed(reason) => {
+                                        tracing::warn!(
+                                            name = name_subscribe_local,
+                                            target = "subscription",
+                                            proc_id = proc_id,
+                                            kind = "pyro",
+                                            stream_name = stream_name,
+                                            reason = ?reason,
+                                            "subscription was dropped"
+                                        );
+                                        break;
+                                    }
+
+                                    SubscriptionEvent::EventAppeared(record) => {
+                                        if input.send(EventRecord(record).serialize()?).is_err() {
+                                            tracing::debug!(
+                                                name = name_subscribe_local,
+                                                target = "subscription",
+                                                proc_id = proc_id,
+                                                kind = "pyro",
+                                                stream_name = stream_name,
+                                                reason = "User",
+                                                "subscription was dropped"
+                                            );
+
+                                            break;
+                                        }
+
+                                        pushed_events_subscribe_local
+                                            .fetch_add(1, atomic::Ordering::SeqCst);
+                                    }
                                 }
-
-                                pushed_events_subscribe_local
-                                    .fetch_add(1, atomic::Ordering::SeqCst);
                             } else {
-                                tracing::error!("WTF!!!");
                                 break;
                             }
                         }

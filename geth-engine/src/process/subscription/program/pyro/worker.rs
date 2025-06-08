@@ -130,7 +130,10 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                             tracing::warn!("exiting program because nothing is listening");
                             break;
                         }
+
+                        tracing::debug!(name = args.name, id = env.client.id, revision = revision, "program emitted event");
                     }
+
                     Err(e) => {
                         tracing::error!(error = %e, "error when converting runtime value to JSON");
                         let _ = args.output.send(SubscribeResponses::Error(e).into());

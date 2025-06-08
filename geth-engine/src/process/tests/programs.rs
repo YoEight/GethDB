@@ -1,6 +1,6 @@
 use std::any::type_name;
 
-use geth_common::{ExpectedRevision, Propose, PyroRecord};
+use geth_common::{ExpectedRevision, Propose, SubscriptionConfirmation, SubscriptionEvent};
 
 use crate::{process::tests::Foo, start_process_manager, Options};
 
@@ -32,17 +32,27 @@ pub async fn test_program_created() -> eyre::Result<()> {
     let mut count = 0usize;
 
     while let Some(event) = streaming.next().await? {
-        let actual = event.as_value::<PyroRecord<Foo>>()?;
+        match event {
+            SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(id)) => {
+                tracing::debug!(id = id, "subscription to program is confirmed");
+            }
 
-        assert_eq!(actual.class, type_name::<Foo>());
-        assert_eq!(actual.stream_name.as_str(), stream_name);
-        assert_eq!(actual.event_revision, count as u64);
-        assert_eq!(actual.payload.baz, (count as u32) + 10);
+            SubscriptionEvent::EventAppeared(event) => {
+                let actual = event.as_pyro_value::<Foo>()?;
 
-        count += 1;
+                assert_eq!(actual.class, type_name::<Foo>());
+                assert_eq!(actual.stream_name.as_str(), stream_name);
+                assert_eq!(actual.event_revision, count as u64);
+                assert_eq!(actual.payload.baz, (count as u32) + 10);
 
-        if count >= expected.len() {
-            break;
+                count += 1;
+
+                if count >= expected.len() {
+                    break;
+                }
+            }
+
+            _ => break,
         }
     }
 

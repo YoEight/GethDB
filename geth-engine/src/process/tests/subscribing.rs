@@ -1,6 +1,6 @@
 use crate::process::start_process_manager;
 use crate::Options;
-use geth_common::{ExpectedRevision, Propose};
+use geth_common::{ExpectedRevision, Propose, SubscriptionEvent};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
@@ -19,6 +19,8 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
 
     let mut stream = sub_client.subscribe_to_stream(&stream_name).await?;
 
+    stream.wait_until_confirmation().await?;
+
     for i in 0..10 {
         expected.push(Propose::from_value(&Foo { baz: i + 10 })?);
     }
@@ -29,18 +31,20 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
         .success()?;
 
     let mut count = 0;
-    while let Some(record) = stream.next().await? {
-        tracing::debug!("received entry {}/10", count + 1);
-        let foo = record.as_value::<Foo>()?;
+    while let Some(event) = stream.next().await? {
+        if let SubscriptionEvent::EventAppeared(record) = event {
+            tracing::debug!("received entry {}/10", count + 1);
+            let foo = record.as_value::<Foo>()?;
 
-        assert_eq!(count, record.revision);
-        assert_eq!(stream_name, record.stream_name);
-        assert_eq!(foo.baz, count as u32 + 10);
+            assert_eq!(count, record.revision);
+            assert_eq!(stream_name, record.stream_name);
+            assert_eq!(foo.baz, count as u32 + 10);
 
-        count += 1;
+            count += 1;
 
-        if count >= 10 {
-            break;
+            if count >= 10 {
+                break;
+            }
         }
     }
 

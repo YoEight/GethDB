@@ -197,12 +197,7 @@ impl Protocol for ProtocolImpl {
 
                                     Ok(event) => {
                                         if let Some(event) = event {
-                                            if sender
-                                                .send(Ok(
-                                                    SubscriptionEvent::EventAppeared(event).into()
-                                                ))
-                                                .is_err()
-                                            {
+                                            if sender.send(Ok(event.into())).is_err() {
                                                 tracing::debug!(
                                                     name = params.name,
                                                     "user disconnected from catchup subscription"
@@ -282,6 +277,7 @@ struct CatchupSubscription {
     history: VecDeque<Record>,
     end_revision: u64,
     done: bool,
+    confirmed: bool,
     read_stream: crate::process::reading::Streaming,
     sub_stream: crate::process::subscription::Streaming,
 }
@@ -335,6 +331,7 @@ impl CatchupSubscription {
             catching_up: false,
             history: VecDeque::new(),
             done: false,
+            confirmed: false,
             end_revision,
             read_stream,
             sub_stream,
@@ -348,6 +345,15 @@ impl CatchupSubscription {
     async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
         if self.done {
             return Ok(None);
+        }
+
+        if !self.confirmed {
+            if let Some(SubscriptionEvent::Confirmed(conf)) = self.sub_stream.next().await? {
+                self.confirmed = true;
+                return Ok(Some(SubscriptionEvent::Confirmed(conf)));
+            }
+
+            eyre::bail!("subscription was not confirmed");
         }
 
         if self.catching_up {
@@ -369,11 +375,22 @@ impl CatchupSubscription {
                         match outcome {
                             Err(e) => return Err(e),
                             Ok(outcome) => if let Some(event) = outcome {
-                                if event.revision <= self.end_revision {
-                                    continue;
-                                }
+                                match event {
+                                    SubscriptionEvent::EventAppeared(event)=> {
+                                        if event.revision <= self.end_revision {
+                                            continue;
+                                        }
 
-                                self.history.push_back(event);
+                                        self.history.push_back(event);
+                                    }
+
+                                    SubscriptionEvent::Unsubscribed(reason) => {
+                                        self.done = true;
+                                        return Ok(Some(SubscriptionEvent::Unsubscribed(reason)));
+                                    },
+
+                                    _ => unreachable!()
+                                }
                             } else {
                                 self.done = true;
                                 return Ok(None);
@@ -389,7 +406,7 @@ impl CatchupSubscription {
         }
 
         if let Some(event) = self.sub_stream.next().await? {
-            return Ok(Some(SubscriptionEvent::EventAppeared(event)));
+            return Ok(Some(event));
         }
 
         self.done = true;

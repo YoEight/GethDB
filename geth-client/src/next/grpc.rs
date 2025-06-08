@@ -1,5 +1,6 @@
 use std::time::Duration;
 
+use futures_util::TryStreamExt;
 use geth_common::generated::protocol::protocol_client::ProtocolClient;
 use geth_common::protocol::ProgramStatsRequest;
 use tonic::transport::Channel;
@@ -9,7 +10,7 @@ use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, Direction, EndPoint,
     ExpectedRevision, GetProgramError, KillProgram, ListPrograms, ProgramObtained, ProgramStats,
     ProgramSummary, Propose, ReadError, ReadStream, ReadStreamCompleted, Revision, Subscribe,
-    SubscribeToProgram, SubscribeToStream,
+    SubscribeToProgram, SubscribeToStream, SubscriptionConfirmation, SubscriptionEvent,
 };
 
 use crate::{Client, ReadStreaming, SubscriptionStreaming};
@@ -27,7 +28,7 @@ impl GrpcClient {
 
         while attempt <= max_attempts {
             tracing::debug!(
-                endpoint = endpoint_str,
+                endpoint = %endpoint,
                 attempt = attempt,
                 max_attempts = max_attempts,
                 "connecting to node"
@@ -35,13 +36,16 @@ impl GrpcClient {
 
             match ProtocolClient::connect(endpoint_str.clone()).await {
                 Err(e) => {
-                    tracing::error!(attempt = attempt, max_attempts = max_attempts, error = %e, "failed to connect to node");
+                    tracing::warn!(attempt = attempt, max_attempts = max_attempts, error = %e, "failed to connect to node");
                     attempt += 1;
 
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
 
-                Ok(inner) => return Ok(Self { inner }),
+                Ok(inner) => {
+                    tracing::debug!(attempt = attempt, max_attempts = max_attempts, endpoint = %endpoint, "connected to node");
+                    return Ok(Self { inner });
+                }
             }
         }
 
@@ -142,7 +146,26 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        Ok(SubscriptionStreaming::Grpc(result.into_inner()))
+        let mut stream = result.into_inner();
+
+        tracing::debug!(
+            name = name,
+            "waiting for subscription to process confirmation"
+        );
+
+        if let Some(event) = stream.try_next().await? {
+            if let SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(id)) =
+                event.into()
+            {
+                tracing::debug!(id = id, name = name, "subscription to process confirmed");
+            } else {
+                eyre::bail!("subscription to program wasn't confirmed")
+            }
+        } else {
+            eyre::bail!("process exited earlier than expected")
+        };
+
+        Ok(SubscriptionStreaming::Grpc(stream))
     }
 
     async fn delete_stream(
