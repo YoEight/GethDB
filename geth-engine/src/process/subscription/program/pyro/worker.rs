@@ -104,8 +104,8 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 }).into());
                             }
 
-                            _ => {
-                                tracing::debug!("ignore program message")
+                            x => {
+                                tracing::warn!(msg = ?x, "ignore program message")
                             }
                         }
                     }

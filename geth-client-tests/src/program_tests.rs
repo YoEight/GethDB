@@ -17,6 +17,11 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let class: String = Name().fake();
     let content_type = ContentType::Json;
     let expecteds = fake::vec![Toto; 10];
+
+    let mut stream = client
+        .subscribe_to_process("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
     let proposes = expecteds
         .iter()
         .map(|x| Propose {
@@ -27,16 +32,15 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
         })
         .collect();
 
-    let mut stream = client
-        .subscribe_to_process("echo", include_str!("./resources/programs/echo.pyro"))
-        .await?;
-
     client
         .append_stream("foobar", ExpectedRevision::Any, proposes)
         .await?
         .success()?;
 
+    tracing::debug!("wrote to foobar stream successfully");
+
     let mut count = 0;
+
     while let Some(event) = stream.next().await? {
         match event {
             geth_common::SubscriptionEvent::EventAppeared(record) => {
@@ -47,7 +51,9 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
                 count += 1;
             }
 
-            geth_common::SubscriptionEvent::Unsubscribed(_) => break,
+            geth_common::SubscriptionEvent::Unsubscribed(reason) => {
+                tracing::debug!(reason = ?reason, "subscription to program is unsubscribed");
+            }
 
             _ => {}
         }

@@ -350,6 +350,7 @@ impl CatchupSubscription {
         if !self.confirmed {
             if let Some(SubscriptionEvent::Confirmed(conf)) = self.sub_stream.next().await? {
                 self.confirmed = true;
+                tracing::debug!(conf = ?conf, "subscription is confirmed");
                 return Ok(Some(SubscriptionEvent::Confirmed(conf)));
             }
 
@@ -363,9 +364,11 @@ impl CatchupSubscription {
                         match outcome {
                             Err(e) => return Err(e),
                             Ok(outcome) => if let Some(event) = outcome {
+                                tracing::debug!("subscription caught up process yield an event");
                                 return Ok(Some(SubscriptionEvent::EventAppeared(event)));
                             } else {
                                 self.catching_up = false;
+                                tracing::debug!("subscription has caught up");
                                 return Ok(Some(SubscriptionEvent::CaughtUp));
                             }
                         }
@@ -377,7 +380,9 @@ impl CatchupSubscription {
                             Ok(outcome) => if let Some(event) = outcome {
                                 match event {
                                     SubscriptionEvent::EventAppeared(event)=> {
+                                        tracing::debug!("event appeared before catching up");
                                         if event.revision <= self.end_revision {
+                                            tracing::debug!("event appeared before catching up but ignore because it will be processed by the catchup process");
                                             continue;
                                         }
 
@@ -386,13 +391,18 @@ impl CatchupSubscription {
 
                                     SubscriptionEvent::Unsubscribed(reason) => {
                                         self.done = true;
+                                        tracing::error!(reason = ?reason, "unsubscribed");
                                         return Ok(Some(SubscriptionEvent::Unsubscribed(reason)));
                                     },
 
-                                    _ => unreachable!()
+                                    _ => {
+                                        tracing::error!("WTF unreachable!");
+                                        unreachable!();
+                                    }
                                 }
                             } else {
                                 self.done = true;
+                                tracing::error!("WTF subscription stream closed");
                                 return Ok(None);
                             }
                         }
@@ -402,14 +412,17 @@ impl CatchupSubscription {
         }
 
         if let Some(event) = self.history.pop_front() {
+            tracing::debug!("pushing events from the history buffer");
             return Ok(Some(SubscriptionEvent::EventAppeared(event)));
         }
 
         if let Some(event) = self.sub_stream.next().await? {
+            tracing::debug!("live subscription produced an event");
             return Ok(Some(event));
         }
 
         self.done = true;
+        tracing::warn!("live subscription stopped for some reason");
 
         Ok(None)
     }

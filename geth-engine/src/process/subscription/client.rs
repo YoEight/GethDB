@@ -75,7 +75,8 @@ impl Streaming {
                     )));
                 }
 
-                _ => {
+                x => {
+                    tracing::error!(msg = ?x, "unexpected message");
                     eyre::bail!("unexpected message when streaming from the pubsub process");
                 }
             }
