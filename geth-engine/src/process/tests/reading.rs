@@ -1,6 +1,4 @@
-use crate::process::reading::ReaderClient;
-use crate::process::writing::WriterClient;
-use crate::process::{start_process_manager, Proc};
+use crate::process::start_process_manager;
 use crate::Options;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use serde::{Deserialize, Serialize};
@@ -14,10 +12,8 @@ struct Foo {
 #[tokio::test]
 async fn test_reader_proc_simple() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_id = manager.wait_for(Proc::Writing).await?;
-    let reader_id = manager.wait_for(Proc::Reading).await?;
-    let writer_client = WriterClient::new(writer_id, manager.clone());
-    let reader_client = ReaderClient::new(reader_id, manager.clone());
+    let writer_client = manager.new_writer_client().await?;
+    let reader_client = manager.new_reader_client().await?;
     let mut expected = vec![];
 
     for i in 0..10 {

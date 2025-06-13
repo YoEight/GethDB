@@ -7,6 +7,9 @@ edition = "2021"
 [dependencies.geth-common]
 path = "../geth-common"
 
+[dependencies.geth-engine]
+path = "../geth-engine"
+
 [dependencies.uuid]
 version = "1"
 features = ["v4"]

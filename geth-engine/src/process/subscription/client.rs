@@ -1,30 +1,84 @@
-use crate::process::messages::{Messages, SubscribeRequests, SubscribeResponses};
-use crate::process::{ManagerClient, Proc, ProcId, ProcessRawEnv};
-use geth_common::Record;
+use crate::process::messages::{
+    Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
+    SubscriptionType,
+};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
+use geth_common::{
+    ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
+    UnsubscribeReason,
+};
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
 pub struct Streaming {
+    stream_name: String,
+    id: Option<ProcId>,
     inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub fn from(inner: UnboundedReceiver<Messages>) -> Self {
-        Self { inner }
+    pub fn from(stream_name: String, inner: UnboundedReceiver<Messages>) -> Self {
+        Self {
+            stream_name,
+            inner,
+            id: None,
+        }
     }
 
-    pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
+    pub fn id(&self) -> ProcId {
+        self.id.unwrap_or_default()
+    }
+
+    pub async fn wait_until_confirmation(&mut self) -> eyre::Result<ProcId> {
+        if let Some(id) = self.id {
+            return Ok(id);
+        }
+
+        if let Some(SubscriptionEvent::Confirmed(_)) = self.next().await? {
+            return Ok(self.id.unwrap_or_default());
+        }
+
+        eyre::bail!("subscription never got confirmed")
+    }
+
+    pub async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
         if let Some(resp) = self.inner.recv().await.and_then(|r| r.try_into().ok()) {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("error when streaming from the pubsub process");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
                 SubscribeResponses::Record(record) => {
-                    return Ok(Some(record));
+                    return Ok(Some(SubscriptionEvent::EventAppeared(record)));
                 }
 
-                _ => {
+                SubscribeResponses::Confirmed(proc_id) => {
+                    let conf = if let Some(id) = proc_id {
+                        self.id = Some(id);
+                        tracing::debug!(proc_id = proc_id, "subscription confirmed");
+                        SubscriptionConfirmation::ProcessId(id)
+                    } else {
+                        self.id = Some(0);
+                        tracing::debug!(stream_name = self.stream_name, "subscription confirmed");
+                        SubscriptionConfirmation::StreamName(std::mem::take(&mut self.stream_name))
+                    };
+
+                    return Ok(Some(SubscriptionEvent::Confirmed(conf)));
+                }
+
+                SubscribeResponses::Unsubscribed => {
+                    self.inner.close();
+
+                    // should be already empty but best to be sure.
+                    while self.inner.recv().await.is_some() {}
+
+                    return Ok(Some(SubscriptionEvent::Unsubscribed(
+                        UnsubscribeReason::Server,
+                    )));
+                }
+
+                x => {
+                    tracing::error!(msg = ?x, "unexpected message");
                     eyre::bail!("unexpected message when streaming from the pubsub process");
                 }
             }
@@ -45,31 +99,127 @@ impl SubscriptionClient {
         Self { target, inner }
     }
 
-    pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for(Proc::PubSub))?;
+    pub async fn resolve(env: &ProcessEnv) -> eyre::Result<Self> {
+        let proc_id = env.client.wait_for(Proc::PubSub).await?.must_succeed()?;
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    pub async fn subscribe(&self, stream_name: &str) -> eyre::Result<Streaming> {
-        let mut mailbox = self
+    pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
+        let proc_id = env
+            .handle
+            .block_on(env.client.wait_for(Proc::PubSub))?
+            .must_succeed()?;
+        Ok(Self::new(proc_id, env.client.clone()))
+    }
+
+    pub async fn subscribe_to_stream(&self, stream_name: &str) -> eyre::Result<Streaming> {
+        let mailbox = self
             .inner
             .request_stream(
                 self.target,
-                SubscribeRequests::Subscribe {
+                SubscribeRequests::Subscribe(SubscriptionType::Stream {
                     ident: stream_name.to_string(),
-                }
+                })
                 .into(),
             )
             .await?;
 
-        if let Some(resp) = mailbox.recv().await.and_then(|r| r.try_into().ok()) {
+        Ok(Streaming::from(stream_name.to_string(), mailbox))
+    }
+
+    pub async fn subscribe_to_program(&self, name: &str, code: &str) -> eyre::Result<Streaming> {
+        let mailbox = self
+            .inner
+            .request_stream(
+                self.target,
+                SubscribeRequests::Subscribe(SubscriptionType::Program {
+                    name: name.to_string(),
+                    code: code.to_string(),
+                })
+                .into(),
+            )
+            .await?;
+
+        Ok(Streaming::from(String::default(), mailbox))
+    }
+
+    pub async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::List).into(),
+            )
+            .await?;
+
+        if let Ok(resp) = mailbox.payload.try_into() {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("internal error");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
-                SubscribeResponses::Confirmed => {
-                    return Ok(Streaming::from(mailbox));
+                SubscribeResponses::Programs(ProgramResponses::List(list)) => {
+                    return Ok(list);
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub sent an unexpected response")
+    }
+
+    pub async fn program_stats(&self, id: ProcId) -> eyre::Result<Option<ProgramStats>> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::Stats { id }).into(),
+            )
+            .await?;
+
+        if let Ok(resp) = mailbox.payload.try_into() {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::Stats(resp)) => {
+                    return Ok(Some(resp));
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::NotFound) => {
+                    return Ok(None);
+                }
+
+                _ => {
+                    eyre::bail!("protocol error when communicating with the pubsub process");
+                }
+            }
+        }
+
+        eyre::bail!("pubsub process is no longer running")
+    }
+
+    pub async fn program_stop(&self, id: ProcId) -> eyre::Result<()> {
+        let mailbox = self
+            .inner
+            .request(
+                self.target,
+                SubscribeRequests::Program(ProgramRequests::Stop { id }).into(),
+            )
+            .await?;
+
+        if let Ok(resp) = mailbox.payload.try_into() {
+            match resp {
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
+                }
+
+                SubscribeResponses::Programs(ProgramResponses::Stopped) => {
+                    return Ok(());
                 }
 
                 _ => {
@@ -92,11 +242,11 @@ impl SubscriptionClient {
 
         if let Ok(resp) = resp.payload.try_into() {
             match resp {
-                SubscribeResponses::Error => {
-                    eyre::bail!("internal error");
+                SubscribeResponses::Error(e) => {
+                    return Err(e);
                 }
 
-                SubscribeResponses::Confirmed => {
+                SubscribeResponses::Pushed => {
                     tracing::debug!("push request confirmed by the pubsub process");
                     return Ok(());
                 }

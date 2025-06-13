@@ -4,7 +4,7 @@ use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
 use geth_mikoshi::wal::LogEntry;
 use std::vec;
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{self, UnboundedReceiver};
 
 pub struct Streaming {
     inner: UnboundedReceiver<Messages>,
@@ -12,6 +12,13 @@ pub struct Streaming {
 }
 
 impl Streaming {
+    pub fn empty() -> Self {
+        Self {
+            inner: mpsc::unbounded_channel().1,
+            batch: None,
+        }
+    }
+
     pub async fn next(&mut self) -> eyre::Result<Option<Record>> {
         loop {
             if let Some(entry) = self.batch.as_mut().and_then(Iterator::next) {
@@ -54,7 +61,7 @@ impl ReaderClient {
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
         tracing::debug!("waiting for the reader process to be available...");
-        let proc_id = env.client.wait_for(Proc::Reading).await?;
+        let proc_id = env.client.wait_for(Proc::Reading).await?.must_succeed()?;
         tracing::debug!("reader process available on {}", proc_id);
 
         Ok(Self::new(proc_id, env.client.clone()))

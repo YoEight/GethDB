@@ -1,19 +1,18 @@
-use tonic::transport::{self, Server};
+use tonic::transport::Server;
 
-use geth_common::generated::next::protocol::protocol_server::ProtocolServer;
+use geth_common::generated::protocol::protocol_server::ProtocolServer;
 
 use crate::process::ProcessEnv;
 
-mod local;
 mod protocol;
 
-pub async fn start_server(env: ProcessEnv) -> Result<(), transport::Error> {
+pub async fn start_server(env: ProcessEnv) -> eyre::Result<()> {
     let client = env.client.clone();
     let addr = format!("{}:{}", env.options.host, env.options.port)
         .parse()
         .unwrap();
 
-    let protocols = protocol::ProtocolImpl::new(env.client);
+    let protocols = protocol::ProtocolImpl::connect(env.client).await?;
 
     tracing::info!(
         "GethDB is listening on {} using database '{}'",

@@ -1,13 +1,17 @@
-use geth_common::{Direction, ExpectedRevision, Propose, Record};
+use geth_common::{Direction, ExpectedRevision, ProgramStats, ProgramSummary, Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
+use tokio::sync::mpsc::UnboundedSender;
 
 use crate::domain::index::CurrentRevision;
+
+use super::ProcId;
 
 #[derive(Debug)]
 pub enum Messages {
     Requests(Requests),
     Responses(Responses),
+    Notifications(Notifications),
 }
 
 #[cfg(test)]
@@ -65,6 +69,18 @@ impl From<WriteResponses> for Messages {
     }
 }
 
+impl From<ProgramRequests> for Messages {
+    fn from(req: ProgramRequests) -> Self {
+        Messages::Requests(Requests::Program(req))
+    }
+}
+
+impl From<ProgramResponses> for Messages {
+    fn from(resp: ProgramResponses) -> Self {
+        Messages::Responses(Responses::Program(resp))
+    }
+}
+
 impl From<TestSinkRequests> for Messages {
     fn from(req: TestSinkRequests) -> Self {
         Messages::Requests(Requests::TestSink(req))
@@ -74,6 +90,18 @@ impl From<TestSinkRequests> for Messages {
 impl From<TestSinkResponses> for Messages {
     fn from(resp: TestSinkResponses) -> Self {
         Messages::Responses(Responses::TestSink(resp))
+    }
+}
+
+impl From<RequestError> for Messages {
+    fn from(err: RequestError) -> Self {
+        Messages::Responses(Responses::Error(err))
+    }
+}
+
+impl From<Notifications> for Messages {
+    fn from(notif: Notifications) -> Self {
+        Messages::Notifications(notif)
     }
 }
 
@@ -165,6 +193,17 @@ impl TryFrom<Messages> for WriteResponses {
     }
 }
 
+impl TryFrom<Messages> for ProgramRequests {
+    type Error = ();
+
+    fn try_from(msg: Messages) -> Result<Self, ()> {
+        match msg {
+            Messages::Requests(Requests::Program(req)) => Ok(req),
+            _ => Err(()),
+        }
+    }
+}
+
 impl TryFrom<Messages> for TestSinkRequests {
     type Error = ();
 
@@ -187,12 +226,24 @@ impl TryFrom<Messages> for TestSinkResponses {
     }
 }
 
+impl TryFrom<Messages> for ProgramResponses {
+    type Error = ();
+
+    fn try_from(msg: Messages) -> Result<Self, ()> {
+        match msg {
+            Messages::Responses(Responses::Program(resp)) => Ok(resp),
+            _ => Err(()),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum Requests {
     Index(IndexRequests),
     Read(ReadRequests),
     Subscribe(SubscribeRequests),
     Write(WriteRequests),
+    Program(ProgramRequests),
     TestSink(TestSinkRequests),
 }
 
@@ -230,8 +281,15 @@ pub enum ReadRequests {
 
 #[derive(Debug)]
 pub enum SubscribeRequests {
-    Subscribe { ident: String },
+    Subscribe(SubscriptionType),
+    Program(ProgramRequests),
     Push { events: Vec<Record> },
+}
+
+#[derive(Debug)]
+pub enum SubscriptionType {
+    Stream { ident: String },
+    Program { name: String, code: String },
 }
 
 #[derive(Debug)]
@@ -249,6 +307,25 @@ pub enum WriteRequests {
 }
 
 #[derive(Debug)]
+pub enum ProgramRequests {
+    Start {
+        name: String,
+        code: String,
+        sender: UnboundedSender<Messages>,
+    },
+
+    Stats {
+        id: ProcId,
+    },
+
+    List,
+
+    Stop {
+        id: ProcId,
+    },
+}
+
+#[derive(Debug)]
 pub enum TestSinkRequests {
     StreamFrom { low: u64, high: u64 },
 }
@@ -259,8 +336,20 @@ pub enum Responses {
     Read(ReadResponses),
     Subscribe(SubscribeResponses),
     Write(WriteResponses),
+    Program(ProgramResponses),
     TestSink(TestSinkResponses),
+    Error(RequestError),
     FatalError,
+}
+
+#[derive(Debug)]
+pub enum Notifications {
+    ProcessTerminated(ProcId),
+}
+
+#[derive(Debug)]
+pub enum RequestError {
+    NotFound,
 }
 
 #[derive(Debug)]
@@ -282,9 +371,12 @@ pub enum ReadResponses {
 
 #[derive(Debug)]
 pub enum SubscribeResponses {
-    Error,
-    Confirmed,
+    Error(eyre::Report),
+    Programs(ProgramResponses),
+    Confirmed(Option<ProcId>),
+    Pushed,
     Record(Record),
+    Unsubscribed,
 }
 
 #[derive(Debug)]
@@ -309,4 +401,15 @@ pub enum WriteResponses {
 #[derive(Debug)]
 pub enum TestSinkResponses {
     Stream(u64),
+}
+
+#[derive(Debug)]
+pub enum ProgramResponses {
+    Stats(ProgramStats),
+    Summary(ProgramSummary),
+    List(Vec<ProgramSummary>),
+    NotFound,
+    Error(eyre::Report),
+    Started,
+    Stopped,
 }

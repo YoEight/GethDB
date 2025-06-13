@@ -1,5 +1,8 @@
+use serde::{Deserialize, Serialize};
+
 mod indexing;
 mod interactions;
+mod programs;
 mod reading;
 mod subscribing;
 mod writing;
@@ -12,4 +15,9 @@ fn test_init() {
         .with_line_number(true)
         .with_target(true)
         .init();
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Foo {
+    pub baz: u32,
 }

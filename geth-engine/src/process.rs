@@ -1,21 +1,25 @@
 use bb8::Pool;
+use chrono::Utc;
+use geth_common::ProgramSummary;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
 use messages::{Messages, Responses};
 use resource::{create_buffer_pool, BufferManager};
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
 use std::thread;
 use std::time::Instant;
+use subscription::{pyro, SubscriptionClient};
 use tokio::runtime::Handle;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::sync::{oneshot, Notify};
 use tracing::instrument;
 use uuid::Uuid;
 
-use crate::Options;
+use crate::process::messages::Notifications;
+use crate::{IndexClient, Options, ReaderClient, WriterClient};
 
 #[cfg(test)]
 mod tests;
@@ -67,6 +71,7 @@ pub enum Proc {
     Indexing,
     PubSub,
     Grpc,
+    PyroWorker,
     #[cfg(test)]
     Echo,
     #[cfg(test)]
@@ -77,7 +82,10 @@ pub enum Proc {
 
 enum Topology {
     Singleton(Option<ProcId>),
-    // Multiple(Vec<ProcId>),
+    Multiple {
+        limit: usize,
+        instances: HashSet<ProcId>,
+    },
 }
 
 struct RunningProc {
@@ -85,6 +93,7 @@ struct RunningProc {
     proc: Proc,
     last_received_request: Uuid,
     mailbox: Mailbox,
+    dependents: Vec<ProcId>,
 }
 
 pub struct Catalog {
@@ -93,38 +102,29 @@ pub struct Catalog {
 }
 
 impl Catalog {
-    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProcId>> {
+    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
         if let Some(topology) = self.inner.get(proc) {
             return match &topology {
-                Topology::Singleton(prev) => Ok(*prev),
+                Topology::Singleton(prev) => {
+                    if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
+                        Ok(Some(ProgramSummary {
+                            id: run.id,
+                            name: format!("{:?}", proc),
+                            started_at: Utc::now(), // TODO - no use for date times.
+                        }))
+                    } else {
+                        Ok(None)
+                    }
+                }
+
+                Topology::Multiple { .. } => {
+                    // It doesn't really make sense for this topology.
+                    Ok(None)
+                }
             };
         }
 
         eyre::bail!("process {:?} is not registered", proc);
-    }
-
-    fn report(&mut self, running: RunningProc) -> eyre::Result<()> {
-        let proc = running.proc;
-        if let Some(mut topology) = self.inner.get_mut(&running.proc) {
-            match &mut topology {
-                Topology::Singleton(prev) => {
-                    if let Some(prev) = prev.as_ref() {
-                        eyre::bail!(
-                            "a {:?} process is already running on {:04}",
-                            running.proc,
-                            prev
-                        );
-                    }
-
-                    *prev = Some(running.id);
-                }
-            }
-
-            self.monitor.insert(running.id, running);
-            return Ok(());
-        }
-
-        eyre::bail!("process {:?} is not registered in the catalog", proc);
     }
 
     fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
@@ -134,6 +134,10 @@ impl Catalog {
                 match &mut topology {
                     Topology::Singleton(prev) => {
                         *prev = None;
+                    }
+
+                    Topology::Multiple { instances, .. } => {
+                        instances.remove(&proc_id);
                     }
                 }
             }
@@ -176,6 +180,18 @@ impl CatalogBuilder {
         self
     }
 
+    pub fn register_multiple(mut self, proc: Proc, limit: usize) -> Self {
+        self.inner.insert(
+            proc,
+            Topology::Multiple {
+                limit,
+                instances: Default::default(),
+            },
+        );
+
+        self
+    }
+
     pub fn build(self) -> Catalog {
         Catalog {
             inner: self.inner,
@@ -201,12 +217,6 @@ impl<S> Manager<S>
 where
     S: Storage + Send + Sync + 'static,
 {
-    fn gen_proc_id(&mut self) -> ProcId {
-        let id = self.proc_id_gen;
-        self.proc_id_gen += 1;
-        id
-    }
-
     fn handle(&mut self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.closing && !cmd.is_shutdown_related() {
             return Ok(());
@@ -247,53 +257,98 @@ where
                 }
             },
 
-            ManagerCommand::WaitFor { proc, resp } => {
-                if let Some(proc_id) = self.catalog.lookup(&proc)? {
-                    let _ = resp.send(proc_id);
+            ManagerCommand::WaitFor { origin, proc, resp } => {
+                let id = if let Some(topology) = self.catalog.inner.get_mut(&proc) {
+                    match topology {
+                        Topology::Singleton(prev) => {
+                            if let Some(id) = prev.as_ref() {
+                                // no need to track if the process that started this new process is the manager itself.
+                                if origin != 0 {
+                                    if let Some(running) = self.catalog.monitor.get_mut(id) {
+                                        running.dependents.push(origin);
+                                    } else {
+                                        tracing::error!(id = id, proc = ?proc, "running process was expected but is not found");
+                                        panic!();
+                                    }
+                                }
+
+                                let _ = resp.send(SpawnResult::Success(*id));
+                                return Ok(());
+                            } else {
+                                let id = self.proc_id_gen;
+                                self.proc_id_gen += 1;
+                                *prev = Some(id);
+                                id
+                            }
+                        }
+
+                        Topology::Multiple { limit, instances } => {
+                            if instances.len() + 1 > *limit {
+                                let _ = resp.send(SpawnResult::Failure {
+                                    proc,
+                                    error: SpawnError::LimitReached,
+                                });
+                                return Ok(());
+                            }
+
+                            let id = self.proc_id_gen;
+                            self.proc_id_gen += 1;
+
+                            instances.insert(id);
+                            id
+                        }
+                    }
                 } else {
-                    let id = self.gen_proc_id();
-                    let runtime = self.runtime.clone();
-                    let mut client = self.client.clone();
-                    let options = self.options.clone();
+                    eyre::bail!("process {:?} is not registered", proc);
+                };
 
-                    client.id = id;
-                    client.origin_proc = proc;
+                let runtime = self.runtime.clone();
+                let mut client = self.client.clone();
+                let options = self.options.clone();
 
-                    let running_proc = match proc {
-                        Proc::Writing => {
-                            spawn_raw(client, runtime, Handle::current(), proc, writing::run)
-                        }
+                client.id = id;
+                client.origin_proc = proc;
 
-                        Proc::Reading => {
-                            spawn_raw(client, runtime, Handle::current(), proc, reading::run)
-                        }
+                let mut running_proc = match proc {
+                    Proc::Writing => {
+                        spawn_raw(client, runtime, Handle::current(), proc, writing::run)
+                    }
 
-                        Proc::Indexing => {
-                            spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
-                        }
+                    Proc::Reading => {
+                        spawn_raw(client, runtime, Handle::current(), proc, reading::run)
+                    }
 
-                        Proc::PubSub => spawn(options, client, proc, subscription::run),
-                        Proc::Grpc => spawn(options, client, proc, grpc::run),
+                    Proc::Indexing => {
+                        spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
+                    }
 
-                        Proc::Root => {
-                            let _ = resp.send(0);
-                            return Ok(());
-                        }
+                    Proc::PubSub => spawn(options, client, proc, subscription::run),
+                    Proc::Grpc => spawn(options, client, proc, grpc::run),
 
-                        #[cfg(test)]
-                        Proc::Echo => spawn(options, client, proc, echo::run),
+                    Proc::PyroWorker => spawn(options, client, proc, pyro::worker::run),
 
-                        #[cfg(test)]
-                        Proc::Sink => spawn(options, client, proc, sink::run),
+                    Proc::Root => {
+                        let _ = resp.send(SpawnResult::Success(0));
+                        return Ok(());
+                    }
 
-                        #[cfg(test)]
-                        Proc::Panic => spawn(options, client, proc, panic::run),
-                    };
+                    #[cfg(test)]
+                    Proc::Echo => spawn(options, client, proc, echo::run),
 
-                    let proc_id = running_proc.id;
-                    self.catalog.report(running_proc)?;
-                    let _ = resp.send(proc_id);
+                    #[cfg(test)]
+                    Proc::Sink => spawn(options, client, proc, sink::run),
+
+                    #[cfg(test)]
+                    Proc::Panic => spawn(options, client, proc, panic::run),
+                };
+
+                // no need to track if the process that started this new process is the manager itself.
+                if origin != 0 {
+                    running_proc.dependents.push(origin);
                 }
+
+                self.catalog.monitor.insert(id, running_proc);
+                let _ = resp.send(SpawnResult::Success(id));
             }
 
             ManagerCommand::ProcTerminated { id, error } => self.handle_terminate(id, error),
@@ -323,20 +378,20 @@ where
         if let Some(running) = self.catalog.terminate(id) {
             if let Some(e) = error {
                 tracing::error!(
-                    "process {:?}:{} terminated with error {}",
-                    running.proc,
-                    id,
-                    e
+                    error = %e,
+                    id = id,
+                    proc = ?running.proc,
+                    "process terminated with error",
                 );
             } else {
-                tracing::info!("process {:?}:{} terminated", running.proc, id);
+                tracing::info!(id = id, proc = ?running.proc,"process terminated");
             }
 
             if let Some(resp) = self.requests.remove(&running.last_received_request) {
                 tracing::warn!(
-                    "process {:?}:{} terminated with pending request",
-                    running.proc,
-                    id
+                    id = id,
+                    proc = ?running.proc,
+                    "process terminated with pending request",
                 );
 
                 let _ = resp.send(Mail {
@@ -345,6 +400,23 @@ where
                     payload: Messages::Responses(Responses::FatalError),
                     created: Instant::now(),
                 });
+            }
+
+            for dependent in running.dependents {
+                if let Some(running) = self.catalog.monitor.get(&dependent) {
+                    if !self.closing
+                        && !running.mailbox.send(Item::Mail(Mail {
+                            origin: 0,
+                            correlation: Uuid::nil(),
+                            payload: Notifications::ProcessTerminated(id).into(),
+                            created: Instant::now(),
+                        }))
+                    {
+                        // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
+                        // I could rewrite `handle_terminate` to avoid recursion.
+                        tracing::warn!(id = dependent, proc = ?running.proc, "process seems to be terminated");
+                    }
+                }
             }
         }
 
@@ -377,6 +449,34 @@ pub enum Item {
     Stream(Stream),
 }
 
+pub enum SpawnResult {
+    Success(ProcId),
+    Failure { proc: Proc, error: SpawnError },
+}
+
+impl SpawnResult {
+    pub fn ok(&self) -> Option<ProcId> {
+        match self {
+            SpawnResult::Success(id) => Some(*id),
+            _ => None,
+        }
+    }
+
+    pub fn must_succeed(self) -> eyre::Result<ProcId> {
+        match self {
+            SpawnResult::Success(id) => Ok(id),
+            SpawnResult::Failure { proc, error } => match error {
+                SpawnError::LimitReached => eyre::bail!("process {:?} limit reached", proc),
+            },
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SpawnError {
+    LimitReached,
+}
+
 pub enum ManagerCommand {
     // Spawn {
     //     parent: Option<ProcId>,
@@ -384,7 +484,7 @@ pub enum ManagerCommand {
     // },
     Find {
         proc: Proc,
-        resp: oneshot::Sender<Option<ProcId>>,
+        resp: oneshot::Sender<Option<ProgramSummary>>,
     },
 
     Send {
@@ -394,8 +494,9 @@ pub enum ManagerCommand {
     },
 
     WaitFor {
+        origin: ProcId,
         proc: Proc,
-        resp: oneshot::Sender<ProcId>,
+        resp: oneshot::Sender<SpawnResult>,
     },
 
     ProcTerminated {
@@ -440,7 +541,7 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProcId>> {
+    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -451,7 +552,7 @@ impl ManagerClient {
         }
 
         match receiver.await {
-            Ok(id) => Ok(id),
+            Ok(ps) => Ok(ps),
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
     }
@@ -486,7 +587,7 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
+    pub async fn request_opt(&self, dest: ProcId, payload: Messages) -> eyre::Result<Option<Mail>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
@@ -505,9 +606,14 @@ impl ManagerClient {
             eyre::bail!("process manager has shutdown");
         }
 
-        match receiver.await {
-            Ok(mail) => Ok(mail),
-            Err(_) => eyre::bail!("process manager has shutdown"),
+        Ok(receiver.await.ok())
+    }
+
+    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
+        if let Some(mail) = self.request_opt(dest, payload).await? {
+            Ok(mail)
+        } else {
+            eyre::bail!("process manager has shutdown")
         }
     }
 
@@ -558,26 +664,52 @@ impl ManagerClient {
     }
 
     #[instrument(skip(self), fields(origin = ?self.origin_proc))]
-    pub async fn wait_for(&self, proc: Proc) -> eyre::Result<ProcId> {
+    pub async fn wait_for(&self, proc: Proc) -> eyre::Result<SpawnResult> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
-            .send(ManagerCommand::WaitFor { proc, resp })
+            .send(ManagerCommand::WaitFor {
+                origin: self.id,
+                proc,
+                resp,
+            })
             .is_err()
         {
             eyre::bail!("process manager has shutdown");
         }
 
-        tracing::debug!("waiting for process {:?} to be available...", proc,);
+        tracing::debug!(proc = ?proc, "waiting for process to be available...");
 
         match receiver.await {
-            Ok(id) => {
-                tracing::debug!("process {:?} resolved to be {}", proc, id);
+            Ok(res) => {
+                if let Some(id) = res.ok() {
+                    tracing::info!(proc = ?proc, id = %id, "process resolved");
+                }
 
-                Ok(id)
+                Ok(res)
             }
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
+    }
+
+    pub async fn new_writer_client(&self) -> eyre::Result<WriterClient> {
+        let id = self.wait_for(Proc::Writing).await?.must_succeed()?;
+        Ok(WriterClient::new(id, self.clone()))
+    }
+
+    pub async fn new_subscription_client(&self) -> eyre::Result<SubscriptionClient> {
+        let id = self.wait_for(Proc::PubSub).await?.must_succeed()?;
+        Ok(SubscriptionClient::new(id, self.clone()))
+    }
+
+    pub async fn new_index_client(&self) -> eyre::Result<IndexClient> {
+        let id = self.wait_for(Proc::Indexing).await?.must_succeed()?;
+        Ok(IndexClient::new(id, self.clone()))
+    }
+
+    pub async fn new_reader_client(&self) -> eyre::Result<ReaderClient> {
+        let id = self.wait_for(Proc::Reading).await?.must_succeed()?;
+        Ok(ReaderClient::new(id, self.clone()))
     }
 
     pub async fn shutdown(&self) -> eyre::Result<()> {
@@ -602,6 +734,7 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
         .register(Proc::Reading)
         .register(Proc::PubSub)
         .register(Proc::Grpc)
+        .register_multiple(Proc::PyroWorker, 8)
         .build();
 
     start_process_manager_with_catalog(options, catalog).await
@@ -729,6 +862,7 @@ where
         proc,
         mailbox: Mailbox::Raw(proc_sender),
         last_received_request: Uuid::nil(),
+        dependents: Vec::new(),
     }
 }
 
@@ -761,5 +895,6 @@ where
         proc,
         mailbox: Mailbox::Tokio(proc_sender),
         last_received_request: Uuid::nil(),
+        dependents: Vec::new(),
     }
 }

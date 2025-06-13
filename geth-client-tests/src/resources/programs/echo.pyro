@@ -1,0 +1,4 @@
+run
+    (def loop stream: ?EventRecord =
+        stream ? event = (output ! event | loop ! stream)
+    loop ! (subscribe "foobar"))

@@ -3,19 +3,16 @@ use std::{fs, fs::File, io, path::PathBuf};
 
 use cli::AppendStream;
 use directories::UserDirs;
-use futures::stream::BoxStream;
-use futures::TryStreamExt;
 use geth_engine::{start_process_manager_with_catalog, Catalog, Options, Proc};
 use glyph::{FileBackedInputs, Input, PromptOptions};
 use local::LocalClient;
 use serde::Deserialize;
 use uuid::Uuid;
 
-use geth_client::GrpcClient;
+use geth_client::{Client, GrpcClient, ReadStreaming};
 use geth_common::{
-    AppendError, AppendStreamCompleted, Client, DeleteError, DeleteStreamCompleted, Direction,
-    EndPoint, ExpectedRevision, GetProgramError, ProgramObtained, Propose, ReadStreamCompleted,
-    Record, Revision, SubscriptionEvent,
+    AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, Direction, EndPoint,
+    ExpectedRevision, Propose, ReadStreamCompleted, Revision,
 };
 
 use crate::cli::{
@@ -57,7 +54,7 @@ async fn main() -> eyre::Result<()> {
                         repl_state = ReplState::Online(OnlineState {
                             host: host.clone(),
                             port,
-                            client: GrpcClient::new(EndPoint::new(host.clone(), port)),
+                            client: GrpcClient::connect(EndPoint::new(host.clone(), port)).await?,
                         });
                     }
 
@@ -92,7 +89,7 @@ async fn main() -> eyre::Result<()> {
 
                     OnlineCommands::Subscribe(cmd) => {
                         let state = repl_state.online();
-                        let mut stream = match cmd.command {
+                        let stream = match cmd.command {
                             SubscribeCommands::Stream(opts) => {
                                 state
                                     .client
@@ -118,17 +115,9 @@ async fn main() -> eyre::Result<()> {
                                     .subscribe_to_process(&opts.name, &source_code)
                                     .await
                             }
-                        };
+                        }?;
 
-                        let reading = Box::pin(async_stream::try_stream! {
-                            while let Some(event) = stream.try_next().await? {
-                                if let SubscriptionEvent::EventAppeared(record) = event {
-                                    yield record;
-                                }
-                            }
-                        });
-
-                        display_stream(reading).await;
+                        display_stream(ReadStreaming::Subscription(stream)).await;
                     }
 
                     OnlineCommands::Disconnect => {
@@ -399,18 +388,14 @@ where
                 println!("ERR: stream {} is deleted", opts.stream);
             }
 
-            ReadStreamCompleted::Unexpected(e) => {
-                println!("ERR: error when reading stream {}: {}", opts.stream, e);
-            }
-
             ReadStreamCompleted::Success(stream) => display_stream(stream).await,
         },
     }
 }
 
-async fn display_stream(mut stream: BoxStream<'static, eyre::Result<Record>>) {
+async fn display_stream(mut stream: ReadStreaming) {
     loop {
-        match stream.try_next().await {
+        match stream.next().await {
             Err(e) => {
                 println!("ERR: error when reading stream: {}", e);
                 break;
@@ -456,11 +441,11 @@ async fn list_programmable_subscriptions(state: &mut OnlineState) {
 }
 
 async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
-    let id = match id.parse::<Uuid>() {
+    let id = match id.parse::<u64>() {
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
+                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
                 e
             );
 
@@ -468,17 +453,17 @@ async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
         }
     };
 
-    if let Err(e) = state.client.kill_program(id).await {
+    if let Err(e) = state.client.stop_program(id).await {
         println!("Err: Error when killing programmable subscription: {}", e);
     }
 }
 
 async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String) {
-    let id = match id.parse::<Uuid>() {
+    let id = match id.parse::<u64>() {
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid UUID: {}",
+                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
                 e
             );
 
@@ -492,18 +477,17 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
             return;
         }
 
-        Ok(prog) => match prog {
-            ProgramObtained::Success(stats) => stats,
-            ProgramObtained::Error(e) => match e {
-                GetProgramError::NotExists => {
-                    println!(
-                        "Err: programmable subscription with id {} does not exist",
-                        id
-                    );
-                    return;
-                }
-            },
-        },
+        Ok(prog) => {
+            if let Some(stats) = prog {
+                stats
+            } else {
+                println!(
+                    "Err: programmable subscription with id {} does not exist",
+                    id
+                );
+                return;
+            }
+        }
     };
 
     // let source_code = stats.source_code;

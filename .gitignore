@@ -2,3 +2,4 @@ target/
 .idea/
 proptest-regressions/
 mutants.out/
+.DS_Store

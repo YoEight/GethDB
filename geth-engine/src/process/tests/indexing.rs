@@ -1,16 +1,12 @@
 use geth_common::Direction;
 use geth_domain::index::BlockEntry;
 
-use crate::{
-    process::{indexing::IndexClient, start_process_manager, Proc},
-    Options,
-};
+use crate::{process::start_process_manager, Options};
 
 #[tokio::test]
 async fn test_store_read() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone());
+    let client = manager.new_index_client().await?;
     let mut expected = vec![];
 
     for i in 0..10 {
@@ -37,8 +33,7 @@ async fn test_store_read() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_last_revision_when_exists() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone());
+    let client = manager.new_index_client().await?;
     let mut expected = vec![];
 
     for i in 0..10 {
@@ -61,8 +56,7 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
 #[tokio::test]
 async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
-    let proc_id = manager.wait_for(Proc::Indexing).await?;
-    let mut client = IndexClient::new(proc_id, manager.clone());
+    let client = manager.new_index_client().await?;
     let revision = client.latest_revision(2).await?.revision();
 
     assert!(revision.is_none());

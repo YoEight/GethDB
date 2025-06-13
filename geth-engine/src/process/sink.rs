@@ -31,7 +31,7 @@ pub struct SinkClient {
 impl SinkClient {
     pub async fn resolve(inner: ManagerClient) -> eyre::Result<Self> {
         Ok(Self {
-            target: inner.wait_for(Proc::Sink).await?,
+            target: inner.wait_for(Proc::Sink).await?.must_succeed()?,
             inner,
         })
     }

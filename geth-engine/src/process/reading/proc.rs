@@ -14,7 +14,7 @@ where
     S: Storage + Send + Sync + 'static,
 {
     let reader = LogReader::new(runtime.container().clone());
-    let mut index_client = IndexClient::resolve_raw(&env)?;
+    let index_client = IndexClient::resolve_raw(&env)?;
 
     while let Ok(item) = env.queue.recv() {
         match item {

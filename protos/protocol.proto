@@ -4,7 +4,247 @@ package geth;
 import "google/protobuf/empty.proto";
 
 service Protocol {
-  rpc Multiplex(stream OperationIn) returns (stream OperationOut);
+  rpc AppendStream(AppendStreamRequest) returns (AppendStreamResponse);
+  rpc ReadStream(ReadStreamRequest) returns (stream ReadStreamResponse);
+  rpc DeleteStream(DeleteStreamRequest) returns (DeleteStreamResponse);
+  rpc Subscribe(SubscribeRequest) returns (stream SubscribeResponse);
+  rpc ListPrograms(ListProgramsRequest) returns (ListProgramsResponse);
+  rpc ProgramStats(ProgramStatsRequest) returns (ProgramStatsResponse);
+  rpc StopProgram(StopProgramRequest) returns (StopProgramResponse);
+}
+
+message AppendStreamRequest {
+  string stream_name = 1;
+
+  oneof expected_revision {
+    google.protobuf.Empty Any = 2;
+    google.protobuf.Empty StreamExists = 3;
+    google.protobuf.Empty NoStream = 4;
+    uint64 Revision = 5;
+  }
+
+  repeated Propose events = 6;
+
+  message Propose {
+    Ident id = 1;
+    ContentType content_type = 2;
+    string class = 3;
+    bytes payload = 4;
+    bytes metadata = 5;
+  }
+}
+
+message ReadStreamRequest {
+  string stream_name = 1;
+
+  oneof direction {
+    google.protobuf.Empty Forwards = 2;
+    google.protobuf.Empty Backwards = 3;
+  }
+
+  oneof start {
+    google.protobuf.Empty Beginning = 4;
+    google.protobuf.Empty End = 5;
+    uint64 revision = 6;
+  }
+
+  uint64 max_count = 7;
+}
+
+message SubscribeRequest {
+  oneof to {
+    Stream stream = 1;
+    Program program = 2;
+  }
+
+  message Stream {
+    string stream_name = 1;
+
+    oneof start {
+      google.protobuf.Empty Beginning = 4;
+      google.protobuf.Empty End = 5;
+      uint64 revision = 6;
+    }
+  }
+
+  message Program {
+    string name = 1;
+    string source = 2;
+  }
+}
+
+message DeleteStreamRequest {
+  string stream_name = 1;
+  oneof expected_revision {
+    google.protobuf.Empty Any = 2;
+    google.protobuf.Empty StreamExists = 3;
+    google.protobuf.Empty NoStream = 4;
+    uint64 Revision = 5;
+  }
+}
+
+message ListProgramsRequest {
+  google.protobuf.Empty empty = 1;
+}
+
+message StopProgramRequest {
+  uint64 id = 1;
+}
+
+message ProgramStatsRequest {
+  uint64 id = 1;
+}
+
+message AppendStreamResponse {
+  oneof append_result {
+    WriteResult write_result = 1;
+    Error error = 2;
+  }
+
+  message WriteResult {
+    uint64 position = 1;
+    uint64 next_revision = 2;
+  }
+
+  message Error {
+    oneof error {
+      WrongExpectedRevision wrong_revision = 1;
+      google.protobuf.Empty stream_deleted = 2;
+    }
+
+    message WrongExpectedRevision {
+      oneof current_revision {
+        google.protobuf.Empty NotExists = 1;
+        uint64 revision = 2;
+      }
+
+      oneof expected_revision {
+        google.protobuf.Empty Any = 3;
+        google.protobuf.Empty NoStream = 4;
+        google.protobuf.Empty StreamExists = 5;
+        uint64 expected = 6;
+      }
+    }
+  }
+}
+
+message ReadStreamResponse {
+  oneof read_result {
+    google.protobuf.Empty end_of_stream = 1;
+    RecordedEvent event_appeared = 2;
+  }
+
+  message EventAppeared {
+    RecordedEvent event = 1;
+  }
+}
+
+message SubscribeResponse {
+  oneof event {
+    Confirmation confirmation = 1;
+    EventAppeared event_appeared = 2;
+    CaughtUp caught_up = 3;
+    Error error = 4;
+  }
+
+  message Confirmation {
+    oneof kind {
+      string stream_name = 1;
+      uint64 process_id = 2;
+    }
+  }
+
+  message EventAppeared {
+    RecordedEvent event = 1;
+  }
+
+  message CaughtUp {}
+
+  message Error {}
+}
+
+message DeleteStreamResponse {
+  oneof result {
+    DeleteResult write_result = 1;
+    Error error = 2;
+  }
+
+  message DeleteResult {
+    uint64 position = 1;
+    uint64 next_revision = 2;
+  }
+
+  message Error {
+    oneof error {
+      NotLeader not_leader = 1;
+      WrongExpectedRevision wrong_revision = 2;
+      google.protobuf.Empty stream_deleted = 3;
+    }
+
+    message NotLeader {
+      string leader_host = 1;
+      uint32 leader_port = 2;
+    }
+
+    message WrongExpectedRevision {
+      oneof current_revision {
+        google.protobuf.Empty NotExists = 1;
+        uint64 revision = 2;
+      }
+
+      oneof expected_revision {
+        google.protobuf.Empty Any = 3;
+        google.protobuf.Empty NoStream = 4;
+        google.protobuf.Empty StreamExists = 5;
+        uint64 expected = 6;
+      }
+    }
+  }
+}
+
+message ListProgramsResponse {
+  repeated ProgramSummary programs = 1;
+
+  message ProgramSummary {
+    uint64 id = 1;
+    string name = 2;
+    int64 started_at = 3;
+  }
+}
+
+message StopProgramResponse {
+  oneof result {
+    google.protobuf.Empty success = 1;
+    Error error = 2;
+  }
+
+  message Error {
+    oneof error {
+      google.protobuf.Empty NotExists = 1;
+    }
+  }
+}
+
+message ProgramStatsResponse {
+  oneof result {
+    ProgramStats program = 1;
+    Error error = 2;
+  }
+
+  message ProgramStats {
+    uint64 id = 1;
+    string name = 2;
+    string source_code = 3;
+    repeated string subscriptions = 4;
+    uint64 pushed_events = 5;
+    int64 started_at = 6;
+  }
+
+  message Error {
+    oneof error {
+      google.protobuf.Empty NotExists = 1;
+    }
+  }
 }
 
 enum ContentType {
@@ -27,269 +267,4 @@ message RecordedEvent {
   uint64 position = 6;
   bytes payload = 7;
   bytes metadata = 8;
-}
-
-message OperationIn {
-  Ident correlation = 1;
-
-  oneof operation {
-    AppendStream append_stream = 2;
-    DeleteStream delete_stream = 3;
-    ReadStream read_stream = 4;
-    Subscribe subscribe = 5;
-    ListPrograms list_programs = 6;
-    KillProgram kill_program = 7;
-    GetProgram get_program = 8;
-    google.protobuf.Empty unsubscribe = 9;
-  }
-
-  message AppendStream {
-    string stream_name = 1;
-
-    oneof expected_revision {
-      google.protobuf.Empty Any = 2;
-      google.protobuf.Empty StreamExists = 3;
-      google.protobuf.Empty NoStream = 4;
-      uint64 Revision = 5;
-    }
-
-    repeated Propose events = 6;
-
-    message Propose {
-      Ident id = 1;
-      ContentType content_type = 2;
-      string class = 3;
-      bytes payload = 4;
-      bytes metadata = 5;
-    }
-  }
-
-  message DeleteStream {
-    string stream_name = 1;
-    oneof expected_revision {
-      google.protobuf.Empty Any = 2;
-      google.protobuf.Empty StreamExists = 3;
-      google.protobuf.Empty NoStream = 4;
-      uint64 Revision = 5;
-    }
-  }
-
-  message ReadStream {
-    string stream_name = 1;
-
-    oneof direction {
-      google.protobuf.Empty Forwards = 2;
-      google.protobuf.Empty Backwards = 3;
-    }
-
-    oneof start {
-      google.protobuf.Empty Beginning = 4;
-      google.protobuf.Empty End = 5;
-      uint64 revision = 6;
-    }
-
-    uint64 max_count = 7;
-  }
-
-  message Subscribe {
-    oneof to {
-      Stream stream = 1;
-      Program program = 2;
-    }
-
-    message Stream {
-      string stream_name = 1;
-
-      oneof start {
-        google.protobuf.Empty Beginning = 4;
-        google.protobuf.Empty End = 5;
-        uint64 revision = 6;
-      }
-    }
-
-    message Program {
-      string name = 1;
-      string source = 2;
-    }
-  }
-
-  message ListPrograms {
-    google.protobuf.Empty empty = 1;
-  }
-
-  message KillProgram {
-    Ident id = 1;
-  }
-
-  message GetProgram {
-    Ident id = 1;
-  }
-}
-
-message OperationOut {
-  Ident correlation = 1;
-
-  oneof operation {
-    AppendStreamCompleted append_completed = 2;
-    DeleteStreamCompleted delete_completed = 3;
-    StreamRead stream_read = 4;
-    SubscriptionEvent subscription_event = 5;
-    ProgramsListed programs_listed = 6;
-    ProgramKilled program_killed = 7;
-    ProgramObtained program_got = 8;
-    string error = 9;
-  }
-
-  message AppendStreamCompleted {
-    oneof append_result {
-      WriteResult write_result = 1;
-      Error error = 2;
-    }
-
-    message WriteResult {
-      uint64 position = 1;
-      uint64 next_revision = 2;
-    }
-
-    message Error {
-      oneof error {
-        WrongExpectedRevision wrong_revision = 1;
-        google.protobuf.Empty stream_deleted = 2;
-      }
-
-      message WrongExpectedRevision {
-        oneof current_revision {
-          google.protobuf.Empty NotExists = 1;
-          uint64 revision = 2;
-        }
-
-        oneof expected_revision {
-          google.protobuf.Empty Any = 3;
-          google.protobuf.Empty NoStream = 4;
-          google.protobuf.Empty StreamExists = 5;
-          uint64 expected = 6;
-        }
-      }
-    }
-  }
-
-  message StreamRead {
-    oneof read_result {
-      google.protobuf.Empty end_of_stream = 1;
-      RecordedEvent event_appeared = 2;
-      google.protobuf.Empty stream_deleted = 3;
-    }
-
-    message EventAppeared {
-      RecordedEvent event = 1;
-    }
-  }
-
-  message SubscriptionEvent {
-    oneof event {
-      Confirmation confirmation = 1;
-      EventAppeared event_appeared = 2;
-      CaughtUp caught_up = 3;
-      Error error = 4;
-    }
-
-    message Confirmation {
-      oneof kind {
-        string stream_name = 1;
-        Ident process_id = 2;
-      }
-    }
-
-    message EventAppeared {
-      RecordedEvent event = 1;
-    }
-
-    message CaughtUp {}
-
-    message Error {}
-  }
-
-  message ProgramsListed {
-    repeated ProgramSummary programs = 1;
-
-    message ProgramSummary {
-      Ident id = 1;
-      string name = 2;
-      int64 started_at = 3;
-    }
-  }
-
-  message ProgramKilled {
-    oneof result {
-      google.protobuf.Empty success = 1;
-      Error error = 2;
-    }
-
-    message Error {
-      oneof error {
-        google.protobuf.Empty NotExists = 1;
-      }
-    }
-  }
-
-  message ProgramObtained {
-    oneof result {
-      ProgramStats program = 1;
-      Error error = 2;
-    }
-
-    message ProgramStats {
-      Ident id = 1;
-      string name = 2;
-      string source_code = 3;
-      repeated string subscriptions = 4;
-      uint64 pushed_events = 5;
-      int64 started_at = 6;
-    }
-
-    message Error {
-      oneof error {
-        google.protobuf.Empty NotExists = 1;
-      }
-    }
-  }
-
-  message DeleteStreamCompleted {
-    oneof result {
-      DeleteResult write_result = 1;
-      Error error = 2;
-    }
-
-    message DeleteResult {
-      uint64 position = 1;
-      uint64 next_revision = 2;
-    }
-
-    message Error {
-      oneof error {
-        NotLeader not_leader = 1;
-        WrongExpectedRevision wrong_revision = 2;
-        google.protobuf.Empty stream_deleted = 3;
-      }
-
-      message NotLeader {
-        string leader_host = 1;
-        uint32 leader_port = 2;
-      }
-
-      message WrongExpectedRevision {
-        oneof current_revision {
-          google.protobuf.Empty NotExists = 1;
-          uint64 revision = 2;
-        }
-
-        oneof expected_revision {
-          google.protobuf.Empty Any = 3;
-          google.protobuf.Empty NoStream = 4;
-          google.protobuf.Empty StreamExists = 5;
-          uint64 expected = 6;
-        }
-      }
-    }
-  }
 }

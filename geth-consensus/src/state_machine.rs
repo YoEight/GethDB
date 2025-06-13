@@ -228,7 +228,7 @@ where
             self.tally.insert(args.node_id);
 
             // If the cluster reached quorum
-            if self.tally.len() + 1 >= (self.replicas.len() + 1) / 2 {
+            if self.tally.len() + 1 >= self.replicas.len().div_ceil(2) {
                 self.state = State::Leader;
 
                 let last_index = storage.last_entry().map(|e| e.index).unwrap_or_default();

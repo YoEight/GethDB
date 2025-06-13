@@ -174,9 +174,9 @@ fn from_json_to_pyro_runtime_value(value: Value) -> eyre::Result<RuntimeValue> {
 
 fn from_runtime_value_to_json(value: RuntimeValue) -> eyre::Result<Value> {
     match value {
-        RuntimeValue::Channel(_) => eyre::bail!("Pyro channels can't be converted to JSON"),
-        RuntimeValue::Abs(_) => eyre::bail!("Pyro anonymous clients can't be converted to JSON"),
-        RuntimeValue::Fun(_) => eyre::bail!("Pyro functions can't be converted to JSON"),
+        RuntimeValue::Channel(_) => eyre::bail!("pyro channels can't be converted to JSON"),
+        RuntimeValue::Abs(_) => eyre::bail!("pyro anonymous clients can't be converted to JSON"),
+        RuntimeValue::Fun(_) => eyre::bail!("pyro functions can't be converted to JSON"),
         RuntimeValue::Literal(l) => Ok(match l {
             Literal::Integer(n) => serde_json::to_value(n)?,
             Literal::String(s) => Value::String(s),

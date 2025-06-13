@@ -5,6 +5,9 @@ mod append_read_tests;
 mod delete_tests;
 
 #[cfg(test)]
+mod program_tests;
+
+#[cfg(test)]
 pub mod tests {
     use fake::{Dummy, Fake};
     use serde::{Deserialize, Serialize};
@@ -17,7 +20,10 @@ pub mod tests {
     #[ctor::ctor]
     fn test_init() {
         tracing_subscriber::fmt::fmt()
-            .with_env_filter(EnvFilter::new("geth_engine=debug"))
+            .with_env_filter(EnvFilter::new(
+                // "pyro_runtime=debug",
+                "geth_engine=debug,geth_client=debug,geth_client_tests=debug,pyro_runtime=debug",
+            ))
             // .with_max_level(tracing::Level::DEBUG)
             .with_file(true)
             .with_line_number(true)
@@ -40,9 +46,9 @@ pub mod tests {
         }
     }
 
-    #[derive(Serialize, Deserialize, Dummy)]
+    #[derive(Serialize, Deserialize, Dummy, Clone, PartialEq, Eq, Debug)]
     pub struct Toto {
         pub key: String,
-        pub value: u64,
+        pub value: i64,
     }
 }

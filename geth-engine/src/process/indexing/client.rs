@@ -20,18 +20,21 @@ impl IndexClient {
     }
 
     pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for(Proc::Indexing).await?;
+        let proc_id = env.client.wait_for(Proc::Indexing).await?.must_succeed()?;
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
     pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env.handle.block_on(env.client.wait_for(Proc::Indexing))?;
+        let proc_id = env
+            .handle
+            .block_on(env.client.wait_for(Proc::Indexing))?
+            .must_succeed()?;
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
     #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
     pub async fn read(
-        &mut self,
+        &self,
         key: u64,
         start: u64,
         count: usize,
@@ -77,7 +80,7 @@ impl IndexClient {
     }
 
     #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc))]
-    pub async fn store(&mut self, entries: Vec<BlockEntry>) -> eyre::Result<()> {
+    pub async fn store(&self, entries: Vec<BlockEntry>) -> eyre::Result<()> {
         tracing::debug!("storing entries to the index process...");
         let resp = self
             .inner
@@ -108,7 +111,7 @@ impl IndexClient {
     }
 
     #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
-    pub async fn latest_revision(&mut self, key: u64) -> eyre::Result<CurrentRevision> {
+    pub async fn latest_revision(&self, key: u64) -> eyre::Result<CurrentRevision> {
         tracing::debug!("looking up the latest revision for key: {}", key);
 
         let resp = self

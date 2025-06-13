@@ -1,11 +1,9 @@
-use futures::stream::BoxStream;
+use geth_client::{Client, ReadStreaming, SubscriptionStreaming};
 use geth_common::{
-    AppendStreamCompleted, Client, DeleteStreamCompleted, Direction, ExpectedRevision,
-    ProgramKilled, ProgramObtained, ProgramSummary, Propose, ReadStreamCompleted, Record, Revision,
-    SubscriptionEvent,
+    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
+    ProgramSummary, Propose, ReadStreamCompleted, Revision,
 };
-use geth_engine::{ManagerClient, Proc, ReaderClient, WriterClient};
-use uuid::Uuid;
+use geth_engine::{ManagerClient, ReaderClient, WriterClient};
 
 #[derive(Clone)]
 pub struct LocalClient {
@@ -15,12 +13,9 @@ pub struct LocalClient {
 
 impl LocalClient {
     pub async fn new(client: ManagerClient) -> eyre::Result<Self> {
-        let writer_id = client.wait_for(Proc::Writing).await?;
-        let reader_id = client.wait_for(Proc::Reading).await?;
-
         Ok(Self {
-            writer: WriterClient::new(writer_id, client.clone()),
-            reader: ReaderClient::new(reader_id, client),
+            writer: client.new_writer_client().await?,
+            reader: client.new_reader_client().await?,
         })
     }
 }
@@ -44,7 +39,7 @@ impl Client for LocalClient {
         direction: Direction,
         revision: Revision<u64>,
         max_count: u64,
-    ) -> eyre::Result<ReadStreamCompleted<BoxStream<'static, eyre::Result<Record>>>> {
+    ) -> eyre::Result<ReadStreamCompleted<ReadStreaming>> {
         let outcome = self
             .reader
             .read(stream_id, revision, direction, max_count as usize)
@@ -52,15 +47,8 @@ impl Client for LocalClient {
 
         match outcome {
             ReadStreamCompleted::StreamDeleted => Ok(ReadStreamCompleted::StreamDeleted),
-            ReadStreamCompleted::Unexpected(e) => Ok(ReadStreamCompleted::Unexpected(e)),
-            ReadStreamCompleted::Success(mut reading) => {
-                let stream = async_stream::try_stream! {
-                    while let Some(record) = reading.next().await? {
-                        yield record;
-                    }
-                };
-
-                Ok(ReadStreamCompleted::Success(Box::pin(stream)))
+            ReadStreamCompleted::Success(reading) => {
+                Ok(ReadStreamCompleted::Success(ReadStreaming::Local(reading)))
             }
         }
     }
@@ -69,20 +57,16 @@ impl Client for LocalClient {
         &self,
         _stream_id: &str,
         _start: Revision<u64>,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        Box::pin(async_stream::stream! {
-            yield Err(eyre::eyre!("subscriptions are not supported in local mode"));
-        })
+    ) -> eyre::Result<SubscriptionStreaming> {
+        eyre::bail!("subscriptions are not supported in local mode");
     }
 
     async fn subscribe_to_process(
         &self,
         _name: &str,
         _source_code: &str,
-    ) -> BoxStream<'static, eyre::Result<SubscriptionEvent>> {
-        Box::pin(async_stream::stream! {
-            yield Err(eyre::eyre!("subscriptions are not supported in local mode"));
-        })
+    ) -> eyre::Result<SubscriptionStreaming> {
+        eyre::bail!("subscriptions are not supported in local mode");
     }
 
     async fn delete_stream(
@@ -97,11 +81,11 @@ impl Client for LocalClient {
         eyre::bail!("not implemented")
     }
 
-    async fn get_program(&self, _id: Uuid) -> eyre::Result<ProgramObtained> {
+    async fn get_program(&self, _id: u64) -> eyre::Result<Option<ProgramStats>> {
         eyre::bail!("not implemented")
     }
 
-    async fn kill_program(&self, _id: Uuid) -> eyre::Result<ProgramKilled> {
+    async fn stop_program(&self, _id: u64) -> eyre::Result<()> {
         eyre::bail!("not implemented")
     }
 }
