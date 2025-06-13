@@ -101,3 +101,43 @@ async fn stop_program_subscription() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn list_program_subscription() -> eyre::Result<()> {
+    let db_dir = TempDir::new()?;
+    let options = random_valid_options(&db_dir);
+
+    tokio::spawn(geth_engine::run(options.clone()));
+    let mut procs = Vec::new();
+    let expected_count = 3;
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
+
+    for i in 0..expected_count {
+        let name = format!("echo-{}", i);
+        let mut stream = client
+            .subscribe_to_process(
+                name.as_str(),
+                include_str!("./resources/programs/echo.pyro"),
+            )
+            .await?;
+
+        let proc_id = stream.wait_until_confirmed().await?.try_into_process_id()?;
+
+        procs.push((stream, name, proc_id));
+    }
+
+    let mut list = client.list_programs().await?;
+
+    list.sort_by(|x, y| x.name.cmp(&y.name));
+
+    for (i, sum) in list.iter().enumerate() {
+        let (_, name, proc_id) = &procs[i];
+
+        assert_eq!(*proc_id, sum.id);
+        assert_eq!(name, &sum.name);
+    }
+
+    assert_eq!(list.len(), expected_count);
+
+    Ok(())
+}
