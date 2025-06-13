@@ -125,7 +125,7 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        Ok(SubscriptionStreaming::Grpc(result.into_inner()))
+        Ok(SubscriptionStreaming::from_grpc(result.into_inner()))
     }
 
     async fn subscribe_to_process(
@@ -152,7 +152,7 @@ impl Client for GrpcClient {
             "waiting for subscription to process confirmation"
         );
 
-        Ok(SubscriptionStreaming::Grpc(stream))
+        Ok(SubscriptionStreaming::from_grpc(stream))
     }
 
     async fn delete_stream(

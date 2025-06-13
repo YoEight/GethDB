@@ -4,7 +4,7 @@ use futures_util::TryStreamExt;
 use geth_common::{
     AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
     ProgramSummary, Propose, ReadStreamCompleted, ReadStreamResponse, Record, Revision,
-    SubscriptionEvent,
+    SubscriptionConfirmation, SubscriptionEvent,
 };
 pub use next::grpc::GrpcClient;
 use tonic::Streaming;
@@ -50,14 +50,39 @@ impl ReadStreaming {
     }
 }
 
-pub enum SubscriptionStreaming {
+enum SubscriptionType {
     Grpc(Streaming<geth_common::protocol::SubscribeResponse>),
 }
 
+pub struct SubscriptionStreaming {
+    confirmation: Option<SubscriptionConfirmation>,
+    r#type: SubscriptionType,
+}
+
 impl SubscriptionStreaming {
+    pub fn from_grpc(streaming: Streaming<geth_common::protocol::SubscribeResponse>) -> Self {
+        Self {
+            confirmation: None,
+            r#type: SubscriptionType::Grpc(streaming),
+        }
+    }
+
+    pub async fn wait_until_confirmed(&mut self) -> eyre::Result<SubscriptionConfirmation> {
+        if let Some(conf) = self.confirmation.as_ref() {
+            return Ok(conf.clone());
+        }
+
+        if let Some(SubscriptionEvent::Confirmed(conf)) = self.next().await? {
+            self.confirmation = Some(conf.clone());
+            return Ok(conf);
+        }
+
+        eyre::bail!("subcription was never confirmed")
+    }
+
     pub async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
-        match self {
-            SubscriptionStreaming::Grpc(streaming) => {
+        match &mut self.r#type {
+            SubscriptionType::Grpc(streaming) => {
                 if let Some(resp) = streaming.try_next().await? {
                     return Ok(Some(resp.into()));
                 }

@@ -1011,10 +1011,21 @@ pub enum ReadError {
     StreamDeleted,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum SubscriptionConfirmation {
     StreamName(String),
     ProcessId(u64),
+}
+
+impl SubscriptionConfirmation {
+    pub fn try_into_process_id(self) -> eyre::Result<u64> {
+        match self {
+            SubscriptionConfirmation::StreamName(_) => {
+                eyre::bail!("unexpected a program confirmation but got a stream instead")
+            }
+            SubscriptionConfirmation::ProcessId(id) => Ok(id),
+        }
+    }
 }
 
 pub struct SubscriptionError {}

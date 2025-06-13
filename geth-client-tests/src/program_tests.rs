@@ -73,3 +73,31 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[tokio::test]
+async fn stop_program_subscription() -> eyre::Result<()> {
+    let db_dir = TempDir::new()?;
+    let options = random_valid_options(&db_dir);
+
+    tokio::spawn(geth_engine::run(options.clone()));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
+
+    let mut stream = client
+        .subscribe_to_process("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
+    let proc_id = stream.wait_until_confirmed().await?.try_into_process_id()?;
+    client.stop_program(proc_id).await?;
+
+    assert!(stream.next().await?.is_some_and(|x| {
+        if let geth_common::SubscriptionEvent::Unsubscribed(_) = x {
+            true
+        } else {
+            false
+        }
+    }));
+
+    assert!(stream.next().await?.is_none());
+
+    Ok(())
+}
