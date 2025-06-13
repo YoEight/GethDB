@@ -264,7 +264,7 @@ where
                             if let Some(id) = prev.as_ref() {
                                 // no need to track if the process that started this new process is the manager itself.
                                 if origin != 0 {
-                                    if let Some(running) = self.catalog.monitor.get_mut(&id) {
+                                    if let Some(running) = self.catalog.monitor.get_mut(id) {
                                         running.dependents.push(origin);
                                     } else {
                                         tracing::error!(id = id, proc = ?proc, "running process was expected but is not found");

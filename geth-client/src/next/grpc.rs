@@ -1,6 +1,5 @@
 use std::time::Duration;
 
-use futures_util::TryStreamExt;
 use geth_common::generated::protocol::protocol_client::ProtocolClient;
 use geth_common::protocol::ProgramStatsRequest;
 use tonic::transport::Channel;
@@ -10,7 +9,7 @@ use geth_common::{
     AppendStream, AppendStreamCompleted, DeleteStream, DeleteStreamCompleted, Direction, EndPoint,
     ExpectedRevision, GetProgramError, KillProgram, ListPrograms, ProgramObtained, ProgramStats,
     ProgramSummary, Propose, ReadError, ReadStream, ReadStreamCompleted, Revision, Subscribe,
-    SubscribeToProgram, SubscribeToStream, SubscriptionConfirmation, SubscriptionEvent,
+    SubscribeToProgram, SubscribeToStream,
 };
 
 use crate::{Client, ReadStreaming, SubscriptionStreaming};
@@ -146,24 +145,12 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        let mut stream = result.into_inner();
+        let stream = result.into_inner();
 
         tracing::debug!(
             name = name,
             "waiting for subscription to process confirmation"
         );
-
-        if let Some(event) = stream.try_next().await? {
-            if let SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(id)) =
-                event.into()
-            {
-                tracing::debug!(id = id, name = name, "subscription to process confirmed");
-            } else {
-                eyre::bail!("subscription to program wasn't confirmed")
-            }
-        } else {
-            eyre::bail!("process exited earlier than expected")
-        };
 
         Ok(SubscriptionStreaming::Grpc(stream))
     }
@@ -209,7 +196,7 @@ impl Client for GrpcClient {
         let result = self
             .inner
             .clone()
-            .program_stats(Request::new(ProgramStatsRequest { id }.into()))
+            .program_stats(Request::new(ProgramStatsRequest { id }))
             .await;
 
         match result {

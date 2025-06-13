@@ -1033,7 +1033,7 @@ impl From<protocol::SubscribeResponse> for SubscriptionEvent {
                     SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(s))
                 }
                 protocol::subscribe_response::confirmation::Kind::ProcessId(p) => {
-                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p.into()))
+                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p))
                 }
             },
             protocol::subscribe_response::Event::EventAppeared(e) => {
@@ -1064,9 +1064,7 @@ impl From<SubscriptionEvent> for protocol::SubscribeResponse {
                     event: Some(protocol::subscribe_response::Event::Confirmation(
                         protocol::subscribe_response::Confirmation {
                             kind: Some(
-                                protocol::subscribe_response::confirmation::Kind::ProcessId(
-                                    p.into(),
-                                ),
+                                protocol::subscribe_response::confirmation::Kind::ProcessId(p),
                             ),
                         },
                     )),

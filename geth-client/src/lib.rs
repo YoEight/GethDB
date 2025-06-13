@@ -30,7 +30,7 @@ impl ReadStreaming {
                     }
                 }
 
-                return Ok(None);
+                Ok(None)
             }
 
             ReadStreaming::Local(streaming) => streaming.next().await,
@@ -62,7 +62,7 @@ impl SubscriptionStreaming {
                     return Ok(Some(resp.into()));
                 }
 
-                return Ok(None);
+                Ok(None)
             }
         }
     }

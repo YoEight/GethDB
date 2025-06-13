@@ -161,7 +161,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                 if let Messages::Notifications(Notifications::ProcessTerminated(proc_id)) =
                     &mail.payload
                 {
-                    if let Some(prog) = programs.remove(&proc_id) {
+                    if let Some(prog) = programs.remove(proc_id) {
                         tracing::info!(id = proc_id, name = prog.name, "program terminated");
                         let _ = prog.sender.send(SubscribeResponses::Unsubscribed.into());
                     }

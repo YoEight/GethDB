@@ -49,6 +49,6 @@ pub mod tests {
     #[derive(Serialize, Deserialize, Dummy, Clone, PartialEq, Eq, Debug)]
     pub struct Toto {
         pub key: String,
-        pub value: u64,
+        pub value: i64,
     }
 }

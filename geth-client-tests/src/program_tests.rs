@@ -1,6 +1,6 @@
 use fake::{faker::name::en::Name, Fake};
 use geth_client::{Client, GrpcClient};
-use geth_common::{ContentType, ExpectedRevision, Propose};
+use geth_common::{ContentType, ExpectedRevision, Propose, SubscriptionConfirmation};
 use temp_dir::TempDir;
 use uuid::Uuid;
 
@@ -40,15 +40,25 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     tracing::debug!("wrote to foobar stream successfully");
 
     let mut count = 0;
+    let mut id = u64::MAX;
 
     while let Some(event) = stream.next().await? {
         match event {
+            geth_common::SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(pid)) => {
+                tracing::error!(pid = pid, "WTF");
+                id = pid;
+            }
+
             geth_common::SubscriptionEvent::EventAppeared(record) => {
                 let expected = expecteds.get(count).unwrap();
                 let actual = record.as_pyro_value::<Toto>()?;
 
                 assert_eq!(expected, &actual.payload);
                 count += 1;
+                if count >= 10 {
+                    assert_ne!(id, u64::MAX);
+                    client.stop_program(id).await?;
+                }
             }
 
             geth_common::SubscriptionEvent::Unsubscribed(reason) => {

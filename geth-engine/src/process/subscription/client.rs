@@ -55,9 +55,11 @@ impl Streaming {
                 SubscribeResponses::Confirmed(proc_id) => {
                     let conf = if let Some(id) = proc_id {
                         self.id = Some(id);
+                        tracing::debug!(proc_id = proc_id, "subscription confirmed");
                         SubscriptionConfirmation::ProcessId(id)
                     } else {
                         self.id = Some(0);
+                        tracing::debug!(stream_name = self.stream_name, "subscription confirmed");
                         SubscriptionConfirmation::StreamName(std::mem::take(&mut self.stream_name))
                     };
 

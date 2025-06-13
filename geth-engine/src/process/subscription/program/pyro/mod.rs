@@ -92,7 +92,12 @@ fn from_json_to_pyro_runtime_value(value: Value) -> eyre::Result<RuntimeValue> {
         Value::Null => eyre::bail!("NULL is not supported"),
         Value::Bool(b) => Ok(RuntimeValue::Literal(Literal::Bool(b))),
         Value::Number(n) => match n.as_i64() {
-            None => eyre::bail!("We only support u64 so far"),
+            None => match n.as_f64() {
+                None => eyre::bail!("We only support i64 or f64 so far"),
+                Some(n) => Ok(RuntimeValue::Literal(Literal::Integer(
+                    i64::try_from(n as i128).unwrap_or(i64::MAX),
+                ))),
+            },
             Some(n) => Ok(RuntimeValue::Literal(Literal::Integer(n))),
         },
         Value::String(s) => Ok(RuntimeValue::Literal(Literal::String(s))),
@@ -311,6 +316,16 @@ pub fn create_pyro_runtime(
                             "error when subscribing to stream",
                         );
                     })?;
+
+                // let mut streaming = local_reader_client
+                //     .read(
+                //         &stream_name,
+                //         Revision::Start,
+                //         Direction::Forward,
+                //         usize::MAX,
+                //     )
+                //     .await?
+                //     .success()?;
 
                 loop {
                     match streaming.next().await {
