@@ -120,6 +120,8 @@ pub async fn test_program_stop() -> eyre::Result<()> {
         .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
+    streaming.wait_until_confirmation().await?;
+
     writer
         .append(
             stream_name.to_string(),
