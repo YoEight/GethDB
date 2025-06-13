@@ -75,6 +75,78 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
 }
 
 #[tokio::test]
+async fn get_program_stats() -> eyre::Result<()> {
+    let db_dir = TempDir::new()?;
+    let options = random_valid_options(&db_dir);
+
+    tokio::spawn(geth_engine::run(options.clone()));
+    let client = GrpcClient::connect(client_endpoint(&options)).await?;
+
+    let class: String = Name().fake();
+    let content_type = ContentType::Json;
+    let expecteds = fake::vec![Toto; 10];
+
+    let mut stream = client
+        .subscribe_to_process("echo", include_str!("./resources/programs/echo.pyro"))
+        .await?;
+
+    let id = stream.wait_until_confirmed().await?.try_into_process_id()?;
+
+    let proposes = expecteds
+        .iter()
+        .map(|x| Propose {
+            id: Uuid::new_v4(),
+            content_type,
+            class: class.clone(),
+            data: serde_json::to_vec(x).unwrap().into(),
+        })
+        .collect();
+
+    client
+        .append_stream("foobar", ExpectedRevision::Any, proposes)
+        .await?
+        .success()?;
+
+    tracing::debug!("wrote to foobar stream successfully");
+
+    let mut count = 0;
+    while let Some(event) = stream.next().await? {
+        match event {
+            geth_common::SubscriptionEvent::EventAppeared(_) => {
+                count += 1;
+                if count >= 10 {
+                    break;
+                }
+            }
+
+            geth_common::SubscriptionEvent::Unsubscribed(reason) => {
+                tracing::debug!(reason = ?reason, "subscription to program is unsubscribed");
+                break;
+            }
+
+            _ => {}
+        }
+    }
+
+    assert_eq!(count, 10);
+
+    let stats = client.get_program(id).await?;
+    assert!(stats.is_some());
+
+    let stats = stats.unwrap();
+    assert_eq!(id, stats.id);
+    assert_eq!("echo", stats.name);
+    assert_eq!(
+        include_str!("./resources/programs/echo.pyro"),
+        stats.source_code
+    );
+    assert_eq!(count as usize, stats.pushed_events);
+    assert_eq!(vec!["foobar".to_string()], stats.subscriptions);
+
+    Ok(())
+}
+
+#[tokio::test]
 async fn stop_program_subscription() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
