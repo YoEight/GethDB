@@ -16,11 +16,19 @@ pub struct Options {
     // Data directory. If you want to use the in-memory storage, set this to `in_mem`
     #[arg(long, default_value = "./geth")]
     pub db: String,
+
+    #[arg(long, default_value = "http://localhost:5341")]
+    pub telemetry_endpoint: String,
 }
 
 impl Options {
     pub fn new(host: String, port: u16, db: String) -> Self {
-        Self { host, port, db }
+        Self {
+            host,
+            port,
+            db,
+            telemetry_endpoint: "http://localhost:5341".to_string(),
+        }
     }
 
     pub fn in_mem() -> Self {
