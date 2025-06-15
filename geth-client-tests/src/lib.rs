@@ -18,9 +18,9 @@ pub mod tests {
 
     use geth_common::EndPoint;
     use geth_engine::Options;
-    use tracing_subscriber::{EnvFilter, Layer};
     use tracing_subscriber::layer::SubscriberExt;
     use tracing_subscriber::util::SubscriberInitExt;
+    use tracing_subscriber::{EnvFilter, Layer};
 
     #[ctor::ctor]
     fn test_init() {

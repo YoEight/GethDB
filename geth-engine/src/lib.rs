@@ -1,5 +1,5 @@
-use std::sync::Arc;
 pub use crate::options::Options;
+use std::sync::Arc;
 
 mod domain;
 mod names;
@@ -7,9 +7,8 @@ mod options;
 mod process;
 
 use opentelemetry::trace::TracerProvider;
-use opentelemetry_otlp::{WithExportConfig};
+use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::trace::SdkTracerProvider;
-use tracing_opentelemetry::OpenTelemetryLayer;
 pub use process::{
     indexing::IndexClient,
     reading::{self, ReaderClient},
@@ -17,6 +16,8 @@ pub use process::{
     writing::WriterClient,
     Catalog, CatalogBuilder, ManagerClient, Proc,
 };
+use tracing::instrument::WithSubscriber;
+use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub async fn run(options: Options) -> eyre::Result<()> {
@@ -64,7 +65,10 @@ fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
         // .with_tonic()
         // .with_endpoint(options.telemetry_endpoint.clone())
         .with_http()
-        .with_endpoint(format!("{}/ingest/otlp/v1/traces", options.telemetry_endpoint))
+        .with_endpoint(format!(
+            "{}/ingest/otlp/v1/traces",
+            options.telemetry_endpoint
+        ))
         .build()?;
 
     let tracer_provider = SdkTracerProvider::builder()
@@ -81,8 +85,25 @@ fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
         .add_directive("reqwest=off".parse()?)
         .add_directive("geth_engine=debug".parse()?);
 
+    let fmt_layer = tracing_subscriber::fmt::layer()
+        .with_file(true)
+        .with_line_number(true)
+        .with_target(true);
+
+    // tracing_subscriber::registry().init()
+    //     .with_env_filter(EnvFilter::new(
+    //         // "pyro_runtime=debug",
+    //         "geth_engine=debug,geth_client=debug,geth_client_tests=debug,pyro_runtime=debug",
+    //     ))
+    //     // .with_max_level(tracing::Level::DEBUG)
+    //     .with_file(true)
+    //     .with_line_number(true)
+    //     .with_target(true)
+    //     .init();
+
     tracing_subscriber::registry()
-        .with(OpenTelemetryLayer::new(tracer).with_filter(filter))
+        // .with(OpenTelemetryLayer::new(tracer).with_filter(filter))
+        .with(fmt_layer.with_filter(filter))
         .init();
 
     Ok(tracer_provider)
