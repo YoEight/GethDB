@@ -1,3 +1,4 @@
+use std::sync::Arc;
 pub use crate::options::Options;
 
 mod domain;
@@ -5,9 +6,10 @@ mod names;
 mod options;
 mod process;
 
-use opentelemetry::KeyValue;
-use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::Resource;
+use opentelemetry::trace::TracerProvider;
+use opentelemetry_otlp::{WithExportConfig};
+use opentelemetry_sdk::trace::SdkTracerProvider;
+use tracing_opentelemetry::OpenTelemetryLayer;
 pub use process::{
     indexing::IndexClient,
     reading::{self, ReaderClient},
@@ -15,53 +17,73 @@ pub use process::{
     writing::WriterClient,
     Catalog, CatalogBuilder, ManagerClient, Proc,
 };
-use tracing_subscriber::{
-    layer::{self, SubscriberExt},
-    util::SubscriberInitExt,
-    EnvFilter, Layer,
-};
+use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub async fn run(options: Options) -> eyre::Result<()> {
+    let provider = init_telemetry(&options)?;
+
     let manager = start_process_manager(options).await?;
 
     manager.wait_for(Proc::Grpc).await?;
     manager.manager_exited().await;
 
+    provider.shutdown()?;
+
     Ok(())
 }
 
-fn init_telemetry(options: &Options) -> eyre::Result<()> {
-    let resource = Resource::builder()
-        .with_service_name("geth-engine")
-        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
-        .build();
+pub struct EmbeddedClient {
+    tracer_provider: SdkTracerProvider,
+    manager: ManagerClient,
+}
 
-    let logs_endpoints = format!("{}/ingest/otlp/v1/logs", options.telemetry_endpoint);
-    let log_exporter = opentelemetry_otlp::LogExporter::builder()
+impl EmbeddedClient {
+    pub async fn shutdown(self) -> eyre::Result<()> {
+        self.manager.shutdown().await?;
+        self.manager.manager_exited().await;
+        self.tracer_provider.shutdown()?;
+
+        Ok(())
+    }
+}
+
+pub async fn run_embedded(options: Options) -> eyre::Result<EmbeddedClient> {
+    let tracer_provider = init_telemetry(&options)?;
+    let manager = start_process_manager(options).await?;
+
+    manager.wait_for(Proc::Grpc).await?;
+
+    Ok(EmbeddedClient {
+        tracer_provider,
+        manager,
+    })
+}
+
+fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
+    let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
+        // .with_tonic()
+        // .with_endpoint(options.telemetry_endpoint.clone())
         .with_http()
-        .with_endpoint(logs_endpoints)
+        .with_endpoint(format!("{}/ingest/otlp/v1/traces", options.telemetry_endpoint))
         .build()?;
 
-    let processor = opentelemetry_sdk::logs::BatchLogProcessor::builder(log_exporter).build();
+    let tracer_provider = SdkTracerProvider::builder()
+        .with_batch_exporter(otlp_exporter)
+        .build();
 
-    let logger_provider = opentelemetry_sdk::logs::SdkLoggerProvider::builder()
-        .with_resource(resource)
-        .with_log_processor(processor);
+    let tracer = tracer_provider.tracer("geth-engine");
+    opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
-    let otel_layer = opentelemetry_appender_log::OpenTelemetryLogBridge::new(&logger_provider);
-
-    let filter = EnvFilter::new("info").add_directive("geth-engine=debug".parse()?);
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_file(true)
-        .with_thread_names(true)
-        .with_target(true)
-        .with_level(true)
-        .with_filter(filter);
+    let filter = EnvFilter::new("info")
+        .add_directive("hyper=off".parse()?)
+        .add_directive("tonic=off".parse()?)
+        .add_directive("h2=off".parse()?)
+        .add_directive("reqwest=off".parse()?)
+        .add_directive("geth_engine=debug".parse()?);
 
     tracing_subscriber::registry()
-        .with(fmt_layer)
-        .with(otel_layer)
+        .with(OpenTelemetryLayer::new(tracer).with_filter(filter))
         .init();
 
-    Ok(())
+    Ok(tracer_provider)
 }

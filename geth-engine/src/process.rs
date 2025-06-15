@@ -430,6 +430,7 @@ where
                 tracing::info!("process manager completed shutdown");
                 for resp in self.close_resp.drain(..) {
                     let _ = resp.send(());
+                    self.client.notify.notify_one();
                 }
 
                 self.queue.close();

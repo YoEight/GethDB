@@ -11,7 +11,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(options.clone()).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let class: String = Name().fake();
@@ -45,7 +45,6 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     while let Some(event) = stream.next().await? {
         match event {
             geth_common::SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(pid)) => {
-                tracing::error!(pid = pid, "WTF");
                 id = pid;
             }
 
@@ -71,7 +70,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
 
     assert_eq!(count, 10);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
