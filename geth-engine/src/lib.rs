@@ -1,5 +1,4 @@
 pub use crate::options::Options;
-use std::sync::Arc;
 
 mod domain;
 mod names;
@@ -7,8 +6,9 @@ mod options;
 mod process;
 
 use opentelemetry::trace::TracerProvider;
+use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::trace::SdkTracerProvider;
+use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider};
 pub use process::{
     indexing::IndexClient,
     reading::{self, ReaderClient},
@@ -16,8 +16,8 @@ pub use process::{
     writing::WriterClient,
     Catalog, CatalogBuilder, ManagerClient, Proc,
 };
-use tracing::instrument::WithSubscriber;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::layer::SubscriberExt;
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub async fn run(options: Options) -> eyre::Result<()> {
@@ -39,10 +39,15 @@ pub struct EmbeddedClient {
 }
 
 impl EmbeddedClient {
+    #[tracing::instrument(skip_all, fields(target = "embedded-client"))]
     pub async fn shutdown(self) -> eyre::Result<()> {
+        tracing::debug!("before shutdown");
         self.manager.shutdown().await?;
-        self.manager.manager_exited().await;
+        tracing::debug!("shutdown completed");
+        tracing::debug!("before tracer provider shutdown");
+        self.tracer_provider.force_flush()?;
         self.tracer_provider.shutdown()?;
+        tracing::debug!("tracer provider shutdown completed");
 
         Ok(())
     }
@@ -78,6 +83,19 @@ fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
     let tracer = tracer_provider.tracer("geth-engine");
     opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
+    // Set up log exporter for events
+    let log_exporter = opentelemetry_otlp::LogExporter::builder()
+        .with_http()
+        .with_endpoint(format!(
+            "{}/ingest/otlp/v1/logs",
+            options.telemetry_endpoint
+        ))
+        .build()?;
+
+    let log_provider = SdkLoggerProvider::builder()
+        .with_batch_exporter(log_exporter)
+        .build();
+
     let filter = EnvFilter::new("info")
         .add_directive("hyper=off".parse()?)
         .add_directive("tonic=off".parse()?)
@@ -85,10 +103,10 @@ fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
         .add_directive("reqwest=off".parse()?)
         .add_directive("geth_engine=debug".parse()?);
 
-    let fmt_layer = tracing_subscriber::fmt::layer()
-        .with_file(true)
-        .with_line_number(true)
-        .with_target(true);
+    // let fmt_layer = tracing_subscriber::fmt::layer()
+    //     .with_file(true)
+    //     .with_line_number(true)
+    //     .with_target(true);
 
     // tracing_subscriber::registry().init()
     //     .with_env_filter(EnvFilter::new(
@@ -102,8 +120,10 @@ fn init_telemetry(options: &Options) -> eyre::Result<SdkTracerProvider> {
     //     .init();
 
     tracing_subscriber::registry()
-        // .with(OpenTelemetryLayer::new(tracer).with_filter(filter))
-        .with(fmt_layer.with_filter(filter))
+        .with(OpenTelemetryLayer::new(tracer).with_filter(filter))
+        .with(OpenTelemetryTracingBridge::new(&log_provider))
+        // .with(otel_log_layer.with_filter(filter))
+        // .with(fmt_layer.with_filter(filter))
         .init();
 
     Ok(tracer_provider)

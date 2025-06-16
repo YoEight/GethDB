@@ -197,8 +197,9 @@ pub struct Manager<S> {
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
+    closed: bool,
     close_resp: Vec<oneshot::Sender<()>>,
-    processes_shutting_down: HashSet<u64>,
+    processes_shutting_down: HashMap<u64, Proc>,
 }
 
 impl<S> Manager<S>
@@ -343,14 +344,14 @@ where
 
                 if !self.closing {
                     self.closing = true;
-                    for pid in self.catalog.monitor.keys() {
-                        self.processes_shutting_down.insert(*pid);
+                    for (pid, proc) in self.catalog.monitor.iter() {
+                        self.processes_shutting_down.insert(*pid, proc.proc);
                     }
 
                     if self.processes_shutting_down.is_empty() {
                         let _ = resp.send(());
                         self.queue.close();
-                        self.client.notify.notify_one();
+                        self.closed = true;
                         return Ok(());
                     }
 
@@ -378,16 +379,18 @@ where
                     error = %e,
                     id = id,
                     proc = ?running.proc,
+                    closing = self.closing,
                     "process terminated with error",
                 );
             } else {
-                tracing::info!(id = id, proc = ?running.proc, "process terminated");
+                tracing::info!(id = id, proc = ?running.proc, closing = self.closing, "process terminated");
             }
 
             if let Some(resp) = self.requests.remove(&running.last_received_request) {
                 tracing::warn!(
                     id = id,
                     proc = ?running.proc,
+                    closing = self.closing,
                     "process terminated with pending request",
                 );
 
@@ -411,23 +414,29 @@ where
                     {
                         // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
                         // I could rewrite `handle_terminate` to avoid recursion.
-                        tracing::warn!(id = dependent, proc = ?running.proc, "process seems to be terminated");
+                        tracing::warn!(id = dependent, proc = ?running.proc, closing = self.closing, "process seems to be terminated");
                     }
                 }
             }
+        } else if !self.closing {
+            tracing::warn!(
+                proc_id = id,
+                "process is terminated but no runtime info were found"
+            );
         }
 
         if self.closing {
-            self.processes_shutting_down.remove(&id);
+            if let Some(proc) = self.processes_shutting_down.remove(&id) {
+                tracing::info!(proc_id = id, ?proc, "process terminated");
+            }
 
             if self.processes_shutting_down.is_empty() {
-                tracing::info!("process manager completed shutdown");
                 for resp in self.close_resp.drain(..) {
                     let _ = resp.send(());
                 }
 
                 self.queue.close();
-                self.client.notify.notify_one();
+                self.closed = true;
             }
         }
     }
@@ -755,13 +764,13 @@ pub async fn start_process_manager_with_catalog(
         let container = ChunkContainer::load(storage)?;
         tokio::spawn(async move {
             process_manager(options, mgr_client, catalog, container, queue).await;
-            notify.notify_one();
+            notify.notify_waiters();
         });
     } else {
         let container = load_fs_chunk_container(&options)?;
         tokio::spawn(async move {
             process_manager(options, mgr_client, catalog, container, queue).await;
-            notify.notify_one();
+            notify.notify_waiters();
         });
     }
 
@@ -804,6 +813,7 @@ async fn process_manager<S>(
         proc_id_gen: 1,
         requests: Default::default(),
         closing: false,
+        closed: false,
         close_resp: vec![],
         queue,
         processes_shutting_down: Default::default(),
@@ -814,7 +824,13 @@ async fn process_manager<S>(
             tracing::error!("unexpected: {}", e);
             break;
         }
+
+        if manager.closed {
+            break;
+        }
     }
+
+    tracing::info!("process manager terminated");
 }
 
 fn spawn_raw<S, F>(
