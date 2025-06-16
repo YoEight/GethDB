@@ -5,10 +5,10 @@ mod names;
 mod options;
 mod process;
 
-use opentelemetry::trace::TracerProvider;
+use opentelemetry::{trace::TracerProvider, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider};
+use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resource};
 pub use process::{
     indexing::IndexClient,
     reading::{self, ReaderClient},
@@ -19,6 +19,11 @@ pub use process::{
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};
 use tracing_subscriber::{prelude::*, EnvFilter};
+
+pub mod built_info {
+    // The file has been placed there by the build script.
+    include!(concat!(env!("OUT_DIR"), "/built.rs"));
+}
 
 pub async fn run(options: Options) -> eyre::Result<()> {
     let handles = init_telemetry(&options)?;
@@ -80,6 +85,18 @@ pub async fn run_embedded(options: Options) -> eyre::Result<EmbeddedClient> {
 
 fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
     let mut handles = TelemetryHandles::default();
+    let resource = Resource::builder()
+        .with_service_name("geth-engine")
+        .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
+        .with_attribute(KeyValue::new("service.target", built_info::TARGET))
+        .with_attribute(KeyValue::new("service.arch", built_info::CFG_TARGET_ARCH))
+        .with_attribute(KeyValue::new("service.family", built_info::CFG_FAMILY))
+        .with_attribute(KeyValue::new("service.os", built_info::CFG_OS))
+        .with_attribute(KeyValue::new(
+            "service.commit_hash",
+            built_info::GIT_COMMIT_HASH.unwrap_or("unknown"),
+        ))
+        .build();
 
     let tracer_layer = if let Some(endpoint) = &options.telemetry_endpoint {
         // TLS must be configured to use gRPC
@@ -92,6 +109,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         let tracer_provider = SdkTracerProvider::builder()
             .with_batch_exporter(otlp_exporter)
+            .with_resource(resource.clone())
             .build();
 
         let tracer = tracer_provider.tracer("geth-engine");
@@ -112,6 +130,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         let log_provider = SdkLoggerProvider::builder()
             .with_batch_exporter(log_exporter)
+            .with_resource(resource)
             .build();
 
         handles.logs = Some(log_provider.clone());
