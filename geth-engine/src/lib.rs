@@ -17,7 +17,7 @@ pub use process::{
     Catalog, CatalogBuilder, ManagerClient, Proc,
 };
 use tracing_opentelemetry::OpenTelemetryLayer;
-use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};
 use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub async fn run(options: Options) -> eyre::Result<()> {
@@ -99,7 +99,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         handles.traces = Some(tracer_provider);
 
-        Some(OpenTelemetryLayer::new(tracer))
+        Some(OpenTelemetryLayer::new(tracer).with_filter(filter_fn(|metadata| metadata.is_span())))
     } else {
         None
     };
