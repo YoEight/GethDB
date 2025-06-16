@@ -9,7 +9,7 @@ use crate::tests::{client_endpoint, random_valid_options, Toto};
 #[tokio::test]
 async fn start_program_subscriptions() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
-    let options = random_valid_options(&db_dir);
+    let options = random_valid_options(&db_dir).with_telemetry_sent_to_seq();
 
     let embedded = geth_engine::run_embedded(options.clone()).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;

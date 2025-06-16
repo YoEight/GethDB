@@ -99,7 +99,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         handles.traces = Some(tracer_provider);
 
-        Some(OpenTelemetryLayer::new(tracer).with_filter(create_event_filter(options)?))
+        Some(OpenTelemetryLayer::new(tracer))
     } else {
         None
     };
@@ -116,10 +116,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         handles.logs = Some(log_provider.clone());
 
-        Some(
-            OpenTelemetryTracingBridge::new(&log_provider)
-                .with_filter(create_event_filter(options)?),
-        )
+        Some(OpenTelemetryTracingBridge::new(&log_provider))
     } else {
         None
     };
@@ -128,8 +125,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         let layer = tracing_subscriber::fmt::layer()
             .with_file(true)
             .with_line_number(true)
-            .with_target(true)
-            .with_filter(create_event_filter(options)?);
+            .with_target(true);
 
         Some(layer)
     } else {
@@ -137,6 +133,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
     };
 
     tracing_subscriber::registry()
+        .with(create_event_filter(options)?)
         .with(tracer_layer)
         .with(log_layer)
         .with(fmt_layer)

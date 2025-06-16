@@ -30,8 +30,15 @@ impl Options {
             host,
             port,
             db,
-            telemetry_endpoint: Some("http://localhost:5341".to_string()),
+            telemetry_endpoint: None,
             telemetry_event_filters: vec![],
+        }
+    }
+
+    pub fn with_telemetry_sent_to_seq(self) -> Options {
+        Self {
+            telemetry_endpoint: Some("http://localhost:5341".to_string()),
+            ..self
         }
     }
 
