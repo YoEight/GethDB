@@ -74,9 +74,9 @@ impl TelemetryHandles {
     }
 }
 
-pub async fn run_embedded(options: Options) -> eyre::Result<EmbeddedClient> {
-    let handles = init_telemetry(&options)?;
-    let manager = start_process_manager(options).await?;
+pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
+    let handles = init_telemetry(options)?;
+    let manager = start_process_manager(options.clone()).await?;
 
     manager.wait_for(Proc::Grpc).await?;
 

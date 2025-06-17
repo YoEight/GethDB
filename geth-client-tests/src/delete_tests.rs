@@ -11,8 +11,7 @@ use crate::tests::{client_endpoint, random_valid_options};
 async fn simple_delete() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -45,5 +44,5 @@ async fn simple_delete() -> eyre::Result<()> {
 
     assert!(stream.is_stream_deleted());
 
-    Ok(())
+    embedded.shutdown().await
 }
