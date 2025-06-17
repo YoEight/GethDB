@@ -26,7 +26,7 @@ where
 
     while let Ok(item) = env.queue.recv() {
         match item {
-            Item::Stream(stream) => {
+            Item::Stream(_) => {
                 continue;
             }
 

@@ -66,11 +66,16 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::AppendStreamRequest>,
     ) -> Result<Response<protocol::AppendStreamResponse>, Status> {
-        let metadata = try_get_request_context_from(&request)?;
+        let ctx = try_get_request_context_from(&request)?;
         let params: AppendStream = request.into_inner().into();
         match self
             .writer
-            .append(params.stream_name, params.expected_revision, params.events)
+            .append(
+                ctx,
+                params.stream_name,
+                params.expected_revision,
+                params.events,
+            )
             .await
         {
             Err(e) => Err(Status::internal(e.to_string())),
@@ -82,11 +87,13 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::ReadStreamRequest>,
     ) -> Result<Response<Self::ReadStreamStream>, Status> {
+        let ctx = try_get_request_context_from(&request)?;
         let params: ReadStream = request.into_inner().into();
 
         match self
             .reader
             .read(
+                ctx,
                 &params.stream_name,
                 params.revision,
                 params.direction,
@@ -128,11 +135,12 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::DeleteStreamRequest>,
     ) -> Result<Response<protocol::DeleteStreamResponse>, Status> {
+        let ctx = try_get_request_context_from(&request)?;
         let params: DeleteStream = request.into_inner().into();
 
         match self
             .writer
-            .delete(params.stream_name, params.expected_revision)
+            .delete(ctx, params.stream_name, params.expected_revision)
             .await
         {
             Err(e) => Err(Status::internal(e.to_string())),
@@ -144,11 +152,12 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
+        let ctx = try_get_request_context_from(&request)?;
         let (sender, recv) = unbounded_channel::<Result<SubscribeResponse, Status>>();
 
         match request.into_inner().into() {
             Subscribe::ToStream(params) => {
-                match CatchupSubscription::init(self, params).await {
+                match CatchupSubscription::init(ctx, self, params).await {
                     Err(e) => return Err(Status::internal(e.to_string())),
                     Ok(catchup) => {
                         if let Some(mut catchup) = catchup {
@@ -201,7 +210,7 @@ impl Protocol for ProtocolImpl {
             Subscribe::ToProgram(params) => {
                 match self
                     .sub
-                    .subscribe_to_program(&params.name, &params.source)
+                    .subscribe_to_program(ctx, &params.name, &params.source)
                     .await
                 {
                     Err(e) => return Err(Status::internal(e.to_string())),
@@ -252,9 +261,10 @@ impl Protocol for ProtocolImpl {
 
     async fn list_programs(
         &self,
-        _: Request<protocol::ListProgramsRequest>,
+        request: Request<protocol::ListProgramsRequest>,
     ) -> Result<Response<protocol::ListProgramsResponse>, Status> {
-        match self.sub.list_programs().await {
+        let ctx = try_get_request_context_from(&request)?;
+        match self.sub.list_programs(ctx).await {
             Err(e) => Err(Status::internal(e.to_string())),
             Ok(programs) => Ok(Response::new(ProgramListed { programs }.into())),
         }
@@ -264,8 +274,9 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::ProgramStatsRequest>,
     ) -> Result<Response<protocol::ProgramStatsResponse>, Status> {
+        let ctx = try_get_request_context_from(&request)?;
         let params: GetProgramStats = request.into_inner().into();
-        match self.sub.program_stats(params.id).await {
+        match self.sub.program_stats(ctx, params.id).await {
             Err(e) => Err(Status::internal(e.to_string())),
             Ok(stats) => {
                 if let Some(stats) = stats {
@@ -281,8 +292,9 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::StopProgramRequest>,
     ) -> Result<Response<protocol::StopProgramResponse>, Status> {
+        let ctx = try_get_request_context_from(&request)?;
         let params: KillProgram = request.into_inner().into();
-        if let Err(e) = self.sub.program_stop(params.id).await {
+        if let Err(e) = self.sub.program_stop(ctx, params.id).await {
             return Err(Status::internal(e.to_string()));
         }
 
@@ -303,17 +315,19 @@ struct CatchupSubscription {
 
 impl CatchupSubscription {
     async fn init(
+        context: RequestContext,
         internal: &ProtocolImpl,
         params: SubscribeToStream,
     ) -> eyre::Result<Option<Self>> {
         let sub_stream = internal
             .sub
-            .subscribe_to_stream(&params.stream_name)
+            .subscribe_to_stream(context, &params.stream_name)
             .await?;
 
         let mut read_stream = match internal
             .reader
             .read(
+                context,
                 &params.stream_name,
                 params.start,
                 Direction::Forward,
@@ -330,7 +344,7 @@ impl CatchupSubscription {
 
         let current_revision = internal
             .index
-            .latest_revision(mikoshi_hash(&params.stream_name))
+            .latest_revision(context, mikoshi_hash(&params.stream_name))
             .await?;
 
         if current_revision.is_deleted() {

@@ -14,7 +14,7 @@ pub use process::{
     reading::{self, ReaderClient},
     start_process_manager, start_process_manager_with_catalog,
     writing::WriterClient,
-    Catalog, CatalogBuilder, ManagerClient, Proc,
+    Catalog, CatalogBuilder, ManagerClient, Proc, RequestContext,
 };
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};

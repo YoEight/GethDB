@@ -44,6 +44,14 @@ pub struct RequestContext {
     pub correlation: Uuid,
 }
 
+impl RequestContext {
+    pub fn new() -> Self {
+        RequestContext {
+            correlation: Uuid::new_v4(),
+        }
+    }
+}
+
 #[derive(Clone)]
 enum Mailbox {
     Tokio(UnboundedSender<Item>),
@@ -401,6 +409,7 @@ where
                 );
 
                 let _ = resp.send(Mail {
+                    context: RequestContext::new(),
                     origin: running.id,
                     correlation: running.last_received_request,
                     payload: Messages::Responses(Responses::FatalError),
@@ -412,6 +421,7 @@ where
                 if let Some(running) = self.catalog.monitor.get(&dependent) {
                     if !self.closing
                         && !running.mailbox.send(Item::Mail(Mail {
+                            context: RequestContext::new(),
                             origin: 0,
                             correlation: Uuid::nil(),
                             payload: Notifications::ProcessTerminated(id).into(),
