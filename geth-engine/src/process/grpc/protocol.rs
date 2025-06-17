@@ -29,6 +29,7 @@ pub struct ProtocolImpl {
     index: IndexClient,
 }
 
+#[allow(clippy::result_large_err)]
 pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContext, tonic::Status> {
     let metadata = req.metadata();
     let correlation = metadata

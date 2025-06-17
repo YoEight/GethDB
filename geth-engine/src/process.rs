@@ -45,6 +45,7 @@ pub struct RequestContext {
 }
 
 impl RequestContext {
+    #[allow(clippy::new_without_default)]
     pub fn new() -> Self {
         RequestContext {
             correlation: Uuid::new_v4(),

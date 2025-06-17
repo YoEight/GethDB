@@ -765,6 +765,7 @@ dependencies = [
  "tokio",
  "tonic 0.10.2",
  "tracing",
+ "uuid",
 ]
 
 [[package]]

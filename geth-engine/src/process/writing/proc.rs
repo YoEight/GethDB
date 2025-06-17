@@ -91,8 +91,9 @@ where
 
                     let revision = current_revision.next_revision();
                     let mut entries = ProposeEntries::new(ident, revision, events);
+                    let span = tracing::info_span!("append_entries_to_log", correlation = %mail.context.correlation);
 
-                    match log_writer.append(&mut entries) {
+                    match span.in_scope(|| log_writer.append(&mut entries)) {
                         Err(e) => {
                             tracing::error!("error when appending to stream: {}", e);
                             env.client.reply(

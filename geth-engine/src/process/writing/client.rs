@@ -35,7 +35,6 @@ impl WriterClient {
         expected: ExpectedRevision,
         events: Vec<Propose>,
     ) -> eyre::Result<AppendStreamCompleted> {
-        tracing::debug!("sending append request to writer process {}", self.target);
         let resp = self
             .inner
             .request(

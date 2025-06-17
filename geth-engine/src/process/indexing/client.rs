@@ -81,13 +81,12 @@ impl IndexClient {
         eyre::bail!("index process is no longer reachable");
     }
 
-    #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc))]
+    #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn store(
         &self,
         context: RequestContext,
         entries: Vec<BlockEntry>,
     ) -> eyre::Result<()> {
-        tracing::debug!("storing entries to the index process...");
         let resp = self
             .inner
             .request(
@@ -104,7 +103,6 @@ impl IndexClient {
                 }
 
                 IndexResponses::Committed => {
-                    tracing::debug!("completed storing entries successfully");
                     return Ok(());
                 }
 
@@ -117,14 +115,12 @@ impl IndexClient {
         eyre::bail!("unexpected message from the index process");
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn latest_revision(
         &self,
         context: RequestContext,
         key: u64,
     ) -> eyre::Result<CurrentRevision> {
-        tracing::debug!("looking up the latest revision for key: {}", key);
-
         let resp = self
             .inner
             .request(
@@ -141,7 +137,6 @@ impl IndexClient {
                 }
 
                 IndexResponses::CurrentRevision(rev) => {
-                    tracing::debug!("latest revision for key: {} is: {:?}", key, rev);
                     return Ok(rev);
                 }
 

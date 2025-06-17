@@ -1,7 +1,7 @@
-use crate::process::reading::record_try_from;
 use crate::process::start_process_manager;
 use crate::process::tests::Foo;
 use crate::Options;
+use crate::{process::reading::record_try_from, RequestContext};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
 use uuid::Uuid;
@@ -12,6 +12,7 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     let index_client = manager.new_index_client().await?;
     let writer_client = manager.new_writer_client().await?;
     let reader_client = manager.new_reader_client().await?;
+    let ctx = RequestContext::new();
     let mut expected = vec![];
 
     for i in 0..10 {
@@ -21,7 +22,12 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     let stream_name = Uuid::new_v4().to_string();
 
     let result = writer_client
-        .append(stream_name.clone(), ExpectedRevision::Any, expected.clone())
+        .append(
+            ctx,
+            stream_name.clone(),
+            ExpectedRevision::Any,
+            expected.clone(),
+        )
         .await?;
 
     if let AppendStreamCompleted::Error(e) = result {
@@ -31,6 +37,7 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     let mut index = 0usize;
     let mut stream = index_client
         .read(
+            ctx,
             mikoshi_hash(&stream_name),
             0,
             usize::MAX,
@@ -42,7 +49,7 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
     while let Some(entry) = stream.next().await? {
         assert_eq!(index as u64, entry.revision);
 
-        let record: Record = record_try_from(reader_client.read_at(entry.position).await?)?;
+        let record: Record = record_try_from(reader_client.read_at(ctx, entry.position).await?)?;
         assert_eq!(index as u64, record.revision);
         assert_eq!(stream_name, record.stream_name);
 
