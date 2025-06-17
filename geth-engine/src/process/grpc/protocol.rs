@@ -32,19 +32,19 @@ pub struct ProtocolImpl {
 #[allow(clippy::result_large_err)]
 pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContext, tonic::Status> {
     let metadata = req.metadata();
-    let correlation = metadata
-        .get("correlation")
-        .ok_or_else(|| tonic::Status::invalid_argument("missing correlation header"))?;
+    if let Some(correlation) = metadata.get("correlation") {
+        let correlation = correlation.to_str().map_err(|e| {
+            tonic::Status::invalid_argument(format!("invalid correlation metadata value: {}", e))
+        })?;
 
-    let correlation = correlation.to_str().map_err(|e| {
-        tonic::Status::invalid_argument(format!("invalid correlation metadata value: {}", e))
-    })?;
+        let correlation = Uuid::parse_str(correlation).map_err(|e| {
+            tonic::Status::invalid_argument(format!("invalid correlation UUID value: {}", e))
+        })?;
 
-    let correlation = Uuid::parse_str(correlation).map_err(|e| {
-        tonic::Status::invalid_argument(format!("invalid correlation UUID value: {}", e))
-    })?;
+        return Ok(RequestContext { correlation });
+    }
 
-    Ok(RequestContext { correlation })
+    return Ok(RequestContext::new());
 }
 
 impl ProtocolImpl {
