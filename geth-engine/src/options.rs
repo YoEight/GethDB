@@ -13,14 +13,33 @@ pub struct Options {
     #[arg(long, default_value = "2113")]
     pub port: u16,
 
-    // Data directory. If you want to use the in-memory storage, set this to `in_mem`
+    /// Data directory. If you want to use the in-memory storage, set this to `in_mem`
     #[arg(long, default_value = "./geth")]
     pub db: String,
+
+    /// OpenTelemetry compatible endpoint where telemetry data is sent
+    #[arg(long)]
+    pub telemetry_endpoint: Option<String>,
+
+    pub telemetry_event_filters: Vec<String>,
 }
 
 impl Options {
     pub fn new(host: String, port: u16, db: String) -> Self {
-        Self { host, port, db }
+        Self {
+            host,
+            port,
+            db,
+            telemetry_endpoint: None,
+            telemetry_event_filters: vec![],
+        }
+    }
+
+    pub fn with_telemetry_sent_to_seq(self) -> Options {
+        Self {
+            telemetry_endpoint: Some("http://localhost:5341".to_string()),
+            ..self
+        }
     }
 
     pub fn in_mem() -> Self {

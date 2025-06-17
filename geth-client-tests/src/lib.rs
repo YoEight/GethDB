@@ -15,28 +15,21 @@ pub mod tests {
 
     use geth_common::EndPoint;
     use geth_engine::Options;
-    use tracing_subscriber::EnvFilter;
-
-    #[ctor::ctor]
-    fn test_init() {
-        tracing_subscriber::fmt::fmt()
-            .with_env_filter(EnvFilter::new(
-                // "pyro_runtime=debug",
-                "geth_engine=debug,geth_client=debug,geth_client_tests=debug,pyro_runtime=debug",
-            ))
-            // .with_max_level(tracing::Level::DEBUG)
-            .with_file(true)
-            .with_line_number(true)
-            .with_target(true)
-            .init();
-    }
 
     pub fn random_valid_options(temp_dir: &TempDir) -> Options {
-        Options {
-            host: "127.0.0.1".to_string(),
-            port: (1_113..2_113).fake(),
-            db: temp_dir.path().as_os_str().to_str().unwrap().to_string(),
-        }
+        let mut opts = Options::new(
+            "127.0.0.1".to_string(),
+            (1_113..2_113).fake(),
+            temp_dir.path().as_os_str().to_str().unwrap().to_string(),
+        );
+
+        opts.telemetry_event_filters = vec![
+            "geth_client=debug".to_string(),
+            "geth_client_tests=debug".to_string(),
+            "pyro_runtime=debug".to_string(),
+        ];
+
+        opts
     }
 
     pub fn client_endpoint(options: &Options) -> EndPoint {

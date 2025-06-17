@@ -16,8 +16,7 @@ use crate::tests::{client_endpoint, random_valid_options, Toto};
 async fn simple_append() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -67,15 +66,14 @@ async fn simple_append() -> eyre::Result<()> {
     assert_eq!(expected.key, actual.key);
     assert_eq!(expected.value, actual.value);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn simple_append_expecting_no_stream_on_non_existing_stream() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -107,15 +105,14 @@ async fn simple_append_expecting_no_stream_on_non_existing_stream() -> eyre::Res
         write_result.next_expected_version
     );
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn simple_append_expecting_existence_on_non_existing_stream() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -146,15 +143,14 @@ async fn simple_append_expecting_existence_on_non_existing_stream() -> eyre::Res
     assert_eq!(ExpectedRevision::StreamExists, err.expected);
     assert_eq!(ExpectedRevision::NoStream, err.current);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn simple_append_expecting_revision_on_non_existing_stream() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -189,15 +185,14 @@ async fn simple_append_expecting_revision_on_non_existing_stream() -> eyre::Resu
     assert_eq!(ExpectedRevision::Revision(42), err.expected);
     assert_eq!(ExpectedRevision::NoStream, err.current);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn simple_append_expecting_revision_on_existing_stream() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -232,15 +227,14 @@ async fn simple_append_expecting_revision_on_existing_stream() -> eyre::Result<(
     assert_eq!(ExpectedRevision::Revision(42), err.expected);
     assert_eq!(ExpectedRevision::NoStream, err.current);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn read_whole_stream_forward() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
-
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let stream_name: String = Name().fake();
@@ -286,5 +280,5 @@ async fn read_whole_stream_forward() -> eyre::Result<()> {
         assert_eq!(class, actual.class);
     }
 
-    Ok(())
+    embedded.shutdown().await
 }

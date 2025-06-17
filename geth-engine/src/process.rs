@@ -127,36 +127,24 @@ impl Catalog {
         eyre::bail!("process {:?} is not registered", proc);
     }
 
-    fn terminate(&mut self, proc_id: ProcId) -> Option<RunningProc> {
-        tracing::debug!("looking up terminated process {} runtime info...", proc_id);
-        if let Some(running) = self.monitor.remove(&proc_id) {
-            if let Some(mut topology) = self.inner.get_mut(&running.proc) {
-                match &mut topology {
-                    Topology::Singleton(prev) => {
-                        *prev = None;
-                    }
+    fn remove(&mut self, running: &RunningProc) {
+        if let Some(mut topology) = self.inner.get_mut(&running.proc) {
+            match &mut topology {
+                Topology::Singleton(prev) => {
+                    *prev = None;
+                }
 
-                    Topology::Multiple { instances, .. } => {
-                        instances.remove(&proc_id);
-                    }
+                Topology::Multiple { instances, .. } => {
+                    instances.remove(&running.id);
                 }
             }
-
-            tracing::debug!("process {} runtime info was found", proc_id);
-            return Some(running);
         }
-
-        tracing::debug!("no running info was found for process {}", proc_id);
-        None
-    }
-
-    fn running_proc_len(&self) -> usize {
-        self.monitor.len()
     }
 
     fn clear_running_processes(&mut self) {
-        for proc_id in self.monitor.keys().copied().collect::<Vec<_>>() {
-            self.terminate(proc_id);
+        for (_, running) in std::mem::take(&mut self.monitor) {
+            self.remove(&running);
+            tracing::debug!(proc_id = running.id, proc = ?running.proc, "process cleared from the monitor and the catalog");
         }
     }
 }
@@ -209,8 +197,9 @@ pub struct Manager<S> {
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
+    closed: bool,
     close_resp: Vec<oneshot::Sender<()>>,
-    processes_shutting_down: usize,
+    processes_shutting_down: HashMap<u64, Proc>,
 }
 
 impl<S> Manager<S>
@@ -223,9 +212,6 @@ where
         }
 
         match cmd {
-            // ManagerCommand::Spawn { parent: _, resp: _ } => {
-            //     // TODO - might change that command to start.
-            // }
             ManagerCommand::Find { proc, resp } => {
                 let _ = resp.send(self.catalog.lookup(&proc)?);
             }
@@ -354,15 +340,25 @@ where
             ManagerCommand::ProcTerminated { id, error } => self.handle_terminate(id, error),
 
             ManagerCommand::Shutdown { resp } => {
+                tracing::info!("received shutdown request, initiating shutdown process");
+
                 if !self.closing {
                     self.closing = true;
-                    self.processes_shutting_down = self.catalog.running_proc_len();
+                    for (pid, proc) in self.catalog.monitor.iter() {
+                        self.processes_shutting_down.insert(*pid, proc.proc);
+                    }
 
-                    if self.processes_shutting_down == 0 {
+                    if self.processes_shutting_down.is_empty() {
                         let _ = resp.send(());
                         self.queue.close();
+                        self.closed = true;
                         return Ok(());
                     }
+
+                    tracing::debug!(
+                        running_procs = self.processes_shutting_down.len(),
+                        "shutdown process started"
+                    );
 
                     self.catalog.clear_running_processes();
                 }
@@ -375,22 +371,26 @@ where
     }
 
     fn handle_terminate(&mut self, id: ProcId, error: Option<eyre::Report>) {
-        if let Some(running) = self.catalog.terminate(id) {
+        if let Some(running) = self.catalog.monitor.remove(&id) {
+            self.catalog.remove(&running);
+
             if let Some(e) = error {
                 tracing::error!(
                     error = %e,
                     id = id,
                     proc = ?running.proc,
+                    closing = self.closing,
                     "process terminated with error",
                 );
             } else {
-                tracing::info!(id = id, proc = ?running.proc,"process terminated");
+                tracing::info!(id = id, proc = ?running.proc, closing = self.closing, "process terminated");
             }
 
             if let Some(resp) = self.requests.remove(&running.last_received_request) {
                 tracing::warn!(
                     id = id,
                     proc = ?running.proc,
+                    closing = self.closing,
                     "process terminated with pending request",
                 );
 
@@ -414,25 +414,29 @@ where
                     {
                         // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
                         // I could rewrite `handle_terminate` to avoid recursion.
-                        tracing::warn!(id = dependent, proc = ?running.proc, "process seems to be terminated");
+                        tracing::warn!(id = dependent, proc = ?running.proc, closing = self.closing, "process seems to be terminated");
                     }
                 }
             }
+        } else if !self.closing {
+            tracing::warn!(
+                proc_id = id,
+                "process is terminated but no runtime info were found"
+            );
         }
 
         if self.closing {
-            self.processes_shutting_down = self
-                .processes_shutting_down
-                .checked_sub(1)
-                .unwrap_or_default();
+            if let Some(proc) = self.processes_shutting_down.remove(&id) {
+                tracing::info!(proc_id = id, ?proc, "process terminated");
+            }
 
-            if self.processes_shutting_down == 0 {
-                tracing::info!("process manager completed shutdown");
+            if self.processes_shutting_down.is_empty() {
                 for resp in self.close_resp.drain(..) {
                     let _ = resp.send(());
                 }
 
                 self.queue.close();
+                self.closed = true;
             }
         }
     }
@@ -478,10 +482,6 @@ pub enum SpawnError {
 }
 
 pub enum ManagerCommand {
-    // Spawn {
-    //     parent: Option<ProcId>,
-    //     resp: oneshot::Sender<ProcId>,
-    // },
     Find {
         proc: Proc,
         resp: oneshot::Sender<Option<ProgramSummary>>,
@@ -764,13 +764,13 @@ pub async fn start_process_manager_with_catalog(
         let container = ChunkContainer::load(storage)?;
         tokio::spawn(async move {
             process_manager(options, mgr_client, catalog, container, queue).await;
-            notify.notify_one();
+            notify.notify_waiters();
         });
     } else {
         let container = load_fs_chunk_container(&options)?;
         tokio::spawn(async move {
             process_manager(options, mgr_client, catalog, container, queue).await;
-            notify.notify_one();
+            notify.notify_waiters();
         });
     }
 
@@ -813,9 +813,10 @@ async fn process_manager<S>(
         proc_id_gen: 1,
         requests: Default::default(),
         closing: false,
+        closed: false,
         close_resp: vec![],
         queue,
-        processes_shutting_down: 0,
+        processes_shutting_down: Default::default(),
     };
 
     while let Some(cmd) = manager.queue.recv().await {
@@ -823,7 +824,13 @@ async fn process_manager<S>(
             tracing::error!("unexpected: {}", e);
             break;
         }
+
+        if manager.closed {
+            break;
+        }
     }
+
+    tracing::info!("process manager terminated");
 }
 
 fn spawn_raw<S, F>(
@@ -849,11 +856,23 @@ where
     let sender = client.inner.clone();
     thread::spawn(move || {
         if let Err(e) = runnable(runtime, env) {
-            tracing::error!("process {:?} terminated with error: {}", proc, e);
-            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: Some(e) });
-        } else {
-            tracing::info!("process {:?} terminated", proc);
-            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: None });
+            let error = e.to_string();
+            if sender
+                .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
+                .is_err()
+            {
+                tracing::error!(
+                    proc_id = id,
+                    ?proc,
+                    error,
+                    "cannot report process terminated with an error"
+                );
+            }
+        } else if sender
+            .send(ManagerCommand::ProcTerminated { id, error: None })
+            .is_err()
+        {
+            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
         }
     });
 
@@ -882,11 +901,23 @@ where
     let sender = client.inner.clone();
     tokio::spawn(async move {
         if let Err(e) = runnable(env).await {
-            tracing::error!("process {:?} terminated with error: {}", proc, e);
-            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: Some(e) });
-        } else {
-            tracing::info!("process {:?} terminated", proc);
-            let _ = sender.send(ManagerCommand::ProcTerminated { id, error: None });
+            let error = e.to_string();
+            if sender
+                .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
+                .is_err()
+            {
+                tracing::error!(
+                    proc_id = id,
+                    ?proc,
+                    error,
+                    "cannot report process terminated with an error"
+                );
+            }
+        } else if sender
+            .send(ManagerCommand::ProcTerminated { id, error: None })
+            .is_err()
+        {
+            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
         }
     });
 

@@ -11,7 +11,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let class: String = Name().fake();
@@ -45,7 +45,6 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
     while let Some(event) = stream.next().await? {
         match event {
             geth_common::SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(pid)) => {
-                tracing::error!(pid = pid, "WTF");
                 id = pid;
             }
 
@@ -71,7 +70,7 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
 
     assert_eq!(count, 10);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
@@ -79,7 +78,7 @@ async fn get_program_stats() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let class: String = Name().fake();
@@ -143,7 +142,7 @@ async fn get_program_stats() -> eyre::Result<()> {
     assert_eq!(count as usize, stats.pushed_events);
     assert_eq!(vec!["foobar".to_string()], stats.subscriptions);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
@@ -151,7 +150,7 @@ async fn stop_program_subscription() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     let mut stream = client
@@ -171,7 +170,7 @@ async fn stop_program_subscription() -> eyre::Result<()> {
 
     assert!(stream.next().await?.is_none());
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
@@ -179,7 +178,7 @@ async fn list_program_subscription() -> eyre::Result<()> {
     let db_dir = TempDir::new()?;
     let options = random_valid_options(&db_dir);
 
-    tokio::spawn(geth_engine::run(options.clone()));
+    let embedded = geth_engine::run_embedded(&options).await?;
     let mut procs = Vec::new();
     let expected_count = 3;
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
@@ -211,5 +210,5 @@ async fn list_program_subscription() -> eyre::Result<()> {
 
     assert_eq!(list.len(), expected_count);
 
-    Ok(())
+    embedded.shutdown().await
 }

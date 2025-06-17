@@ -22,10 +22,6 @@ features = ["full"]
 version = "1"
 features = ["v4"]
 
-[dependencies.rand]
-version = "0.8"
-features = ["small_rng"]
-
 [dependencies.pyro-core]
 git = "https://github.com/YoEight/pyro.git"
 
@@ -36,28 +32,31 @@ git = "https://github.com/YoEight/pyro.git"
 version = "4.5"
 features = ["derive"]
 
+[dependencies.tracing-subscriber]
+version = "0.3"
+features = ["env-filter"]
+
+[dependencies.opentelemetry-otlp]
+version = "0.30"
+features = ["trace", "logs", "grpc-tonic"]
+
 [dependencies]
 tonic = "0.10"
-prost = "0.12"
 tracing = "0.1"
-futures = "*"
+tracing-opentelemetry = "0.31"
+opentelemetry = "0.30"
+opentelemetry_sdk = "0.30"
+opentelemetry-appender-tracing = "0.30"
+
 bytes = "1"
 eyre = "0.6"
-async-stream = "0.3"
 chrono = "0.4"
 serde_json = "1"
 moka = "0.11"
 async-trait = "0.1.71"
 serde = { version = "1", features = ["derive"] }
-strum = "0.26"
-strum_macros = "0.26"
 ctor = "0.2"
-lazy_static = "1.4.0"
 bb8 = "0.9"
 
-[dev-dependencies]
-tracing-subscriber = "0.3"
-
-
 [build-dependencies]
-tonic-build = "0.10"
+built = { version = "0.8", features = ["git2"] }

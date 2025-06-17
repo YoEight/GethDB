@@ -17,9 +17,6 @@ version = "*"
 [dependencies.geth-mikoshi]
 path = "../geth-mikoshi"
 
-[dependencies.geth-consensus]
-path = "../geth-consensus"
-
 [dependencies.geth-common]
 path = "../geth-common"
 
