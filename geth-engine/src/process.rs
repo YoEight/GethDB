@@ -854,7 +854,6 @@ where
     };
 
     let sender = client.inner.clone();
-    let local_proc = proc.clone();
     thread::spawn(move || {
         if let Err(e) = runnable(runtime, env) {
             let error = e.to_string();
@@ -862,15 +861,18 @@ where
                 .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
                 .is_err()
             {
-                tracing::error!(proc_id = id, proc = ?local_proc, error, "cannot report process terminated with an error");
+                tracing::error!(
+                    proc_id = id,
+                    ?proc,
+                    error,
+                    "cannot report process terminated with an error"
+                );
             }
-        } else {
-            if sender
-                .send(ManagerCommand::ProcTerminated { id, error: None })
-                .is_err()
-            {
-                tracing::error!(proc_id = id, proc = ?local_proc, "cannot report process terminated");
-            }
+        } else if sender
+            .send(ManagerCommand::ProcTerminated { id, error: None })
+            .is_err()
+        {
+            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
         }
     });
 
@@ -897,7 +899,6 @@ where
     };
 
     let sender = client.inner.clone();
-    let local_proc = proc.clone();
     tokio::spawn(async move {
         if let Err(e) = runnable(env).await {
             let error = e.to_string();
@@ -905,15 +906,18 @@ where
                 .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
                 .is_err()
             {
-                tracing::error!(proc_id = id, proc = ?local_proc, error, "cannot report process terminated with an error");
+                tracing::error!(
+                    proc_id = id,
+                    ?proc,
+                    error,
+                    "cannot report process terminated with an error"
+                );
             }
-        } else {
-            if sender
-                .send(ManagerCommand::ProcTerminated { id, error: None })
-                .is_err()
-            {
-                tracing::error!(proc_id = id, proc = ?local_proc, "cannot report process terminated");
-            }
+        } else if sender
+            .send(ManagerCommand::ProcTerminated { id, error: None })
+            .is_err()
+        {
+            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
         }
     });
 
