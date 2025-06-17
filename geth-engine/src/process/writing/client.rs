@@ -1,6 +1,6 @@
 use crate::process::{
     messages::{WriteRequests, WriteResponses},
-    ManagerClient, Proc, ProcId, ProcessRawEnv,
+    ManagerClient, Proc, ProcId, ProcessRawEnv, RequestContext,
 };
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
@@ -27,9 +27,10 @@ impl WriterClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc))]
+    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn append(
         &self,
+        context: RequestContext,
         stream: String,
         expected: ExpectedRevision,
         events: Vec<Propose>,
@@ -38,6 +39,7 @@ impl WriterClient {
         let resp = self
             .inner
             .request(
+                context,
                 self.target,
                 WriteRequests::Write {
                     ident: stream.clone(),
@@ -69,7 +71,7 @@ impl WriterClient {
                     next_position: next,
                     next_expected_version,
                 } => {
-                    tracing::debug!("completed successfully");
+                    tracing::debug!(correlation = %context.correlation, "completed successfully");
 
                     Ok(AppendStreamCompleted::Success(WriteResult {
                         next_expected_version,
@@ -85,16 +87,17 @@ impl WriterClient {
         }
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn delete(
         &self,
+        context: RequestContext,
         stream: String,
         expected: ExpectedRevision,
     ) -> eyre::Result<DeleteStreamCompleted> {
-        tracing::debug!("sending delete request to writer process {}", self.target);
         let resp = self
             .inner
             .request(
+                context,
                 self.target,
                 WriteRequests::Delete {
                     ident: stream.clone(),
@@ -124,15 +127,11 @@ impl WriterClient {
                     start_position: start,
                     next_position: next,
                     next_expected_version,
-                } => {
-                    tracing::debug!("completed successfully");
-
-                    Ok(DeleteStreamCompleted::Success(WriteResult {
-                        next_expected_version,
-                        position: start,
-                        next_logical_position: next,
-                    }))
-                }
+                } => Ok(DeleteStreamCompleted::Success(WriteResult {
+                    next_expected_version,
+                    position: start,
+                    next_logical_position: next,
+                })),
 
                 _ => eyre::bail!("unexpected response when appending to stream: '{}'", stream),
             }

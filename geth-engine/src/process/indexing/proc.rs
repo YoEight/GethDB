@@ -2,7 +2,7 @@ use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
-use crate::process::{Item, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessRawEnv, RequestContext, Runtime};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -52,6 +52,7 @@ where
                                 tracing::warn!("empty entries vector received");
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Committed.into(),
@@ -65,6 +66,7 @@ where
                                 tracing::error!("error when storing index entries: {}", e);
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Error.into(),
@@ -73,6 +75,7 @@ where
                                 revision_cache.insert(last.key, last.revision);
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Committed.into(),
@@ -83,6 +86,7 @@ where
                         IndexRequests::LatestRevision { key } => {
                             if let Some(current) = revision_cache.get(&key) {
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::CurrentRevision(CurrentRevision::Revision(
@@ -104,6 +108,7 @@ where
                                 }
 
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::CurrentRevision(value).into(),
@@ -115,6 +120,7 @@ where
                             tracing::error!("read from the index should be a streaming operation");
 
                             env.client.reply(
+                                mail.context,
                                 mail.origin,
                                 mail.correlation,
                                 IndexResponses::Error.into(),
@@ -136,6 +142,7 @@ where
                     let stream_lsm = lsm.clone();
                     env.handle.spawn_blocking(move || {
                         if stream_indexed_read(
+                            stream.context,
                             stream_lsm,
                             stream_cache,
                             key,
@@ -228,6 +235,7 @@ where
 }
 
 fn stream_indexed_read<S>(
+    context: RequestContext,
     lsm: Arc<RwLock<Lsm<S>>>,
     cache: RevisionCache,
     key: u64,

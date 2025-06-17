@@ -1,10 +1,11 @@
 use crate::process::messages::{Messages, ReadRequests, ReadResponses};
 use crate::process::reading::record_try_from;
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
 use geth_mikoshi::wal::LogEntry;
 use std::vec;
 use tokio::sync::mpsc::{self, UnboundedReceiver};
+use tracing::instrument;
 
 pub struct Streaming {
     inner: UnboundedReceiver<Messages>,
@@ -67,8 +68,10 @@ impl ReaderClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
     pub async fn read(
         &self,
+        context: RequestContext,
         stream_name: &str,
         start: Revision<u64>,
         direction: Direction,
@@ -77,6 +80,7 @@ impl ReaderClient {
         let mut mailbox = self
             .inner
             .request_stream(
+                context,
                 self.target,
                 ReadRequests::Read {
                     ident: stream_name.to_string(),
@@ -118,10 +122,15 @@ impl ReaderClient {
         eyre::bail!("reader process is no longer running")
     }
 
-    pub async fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
+    pub async fn read_at(&self, context: RequestContext, position: u64) -> eyre::Result<LogEntry> {
         let resp = self
             .inner
-            .request(self.target, ReadRequests::ReadAt { position }.into())
+            .request(
+                context,
+                self.target,
+                ReadRequests::ReadAt { position }.into(),
+            )
             .await?;
 
         if let Ok(resp) = resp.payload.try_into() {

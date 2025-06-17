@@ -19,7 +19,7 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-use crate::process::{subscription::SubscriptionClient, ProcId};
+use crate::process::{subscription::SubscriptionClient, ProcId, RequestContext};
 
 pub mod worker;
 
@@ -258,6 +258,7 @@ impl PyroRuntime {
 }
 
 pub fn create_pyro_runtime(
+    context: RequestContext,
     client: SubscriptionClient,
     proc_id: ProcId,
     name: &str,
@@ -303,7 +304,7 @@ pub fn create_pyro_runtime(
             tokio::spawn(async move {
                 let mut streaming = local_client
                     .clone()
-                    .subscribe_to_stream(stream_name.as_str())
+                    .subscribe_to_stream(context, stream_name.as_str())
                     .await
                     .inspect_err(|e| {
                         tracing::error!(

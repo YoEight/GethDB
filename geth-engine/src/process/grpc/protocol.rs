@@ -13,11 +13,12 @@ use geth_common::{
     Subscribe, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
 };
 use tonic::{Request, Response, Status};
+use uuid::Uuid;
 
 use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
-use crate::process::ManagerClient;
+use crate::process::{ManagerClient, RequestContext};
 use crate::IndexClient;
 
 #[derive(Clone)]
@@ -26,6 +27,23 @@ pub struct ProtocolImpl {
     reader: ReaderClient,
     sub: SubscriptionClient,
     index: IndexClient,
+}
+
+pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContext, tonic::Status> {
+    let metadata = req.metadata();
+    let correlation = metadata
+        .get("correlation")
+        .ok_or_else(|| tonic::Status::invalid_argument("missing correlation header"))?;
+
+    let correlation = correlation.to_str().map_err(|e| {
+        tonic::Status::invalid_argument(format!("invalid correlation metadata value: {}", e))
+    })?;
+
+    let correlation = Uuid::parse_str(correlation).map_err(|e| {
+        tonic::Status::invalid_argument(format!("invalid correlation UUID value: {}", e))
+    })?;
+
+    Ok(RequestContext { correlation })
 }
 
 impl ProtocolImpl {
@@ -48,6 +66,7 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::AppendStreamRequest>,
     ) -> Result<Response<protocol::AppendStreamResponse>, Status> {
+        let metadata = try_get_request_context_from(&request)?;
         let params: AppendStream = request.into_inner().into();
         match self
             .writer

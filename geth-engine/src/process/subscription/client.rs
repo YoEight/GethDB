@@ -2,7 +2,7 @@ use crate::process::messages::{
     Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
     SubscriptionType,
 };
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv, RequestContext};
 use geth_common::{
     ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
     UnsubscribeReason,
@@ -11,14 +11,20 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
 pub struct Streaming {
+    context: RequestContext,
     stream_name: String,
     id: Option<ProcId>,
     inner: UnboundedReceiver<Messages>,
 }
 
 impl Streaming {
-    pub fn from(stream_name: String, inner: UnboundedReceiver<Messages>) -> Self {
+    pub fn from(
+        context: RequestContext,
+        stream_name: String,
+        inner: UnboundedReceiver<Messages>,
+    ) -> Self {
         Self {
+            context,
             stream_name,
             inner,
             id: None,
@@ -55,11 +61,11 @@ impl Streaming {
                 SubscribeResponses::Confirmed(proc_id) => {
                     let conf = if let Some(id) = proc_id {
                         self.id = Some(id);
-                        tracing::debug!(proc_id = proc_id, "subscription confirmed");
+                        tracing::debug!(proc_id = proc_id, correlation = %self.context.correlation, "subscription confirmed");
                         SubscriptionConfirmation::ProcessId(id)
                     } else {
                         self.id = Some(0);
-                        tracing::debug!(stream_name = self.stream_name, "subscription confirmed");
+                        tracing::debug!(stream_name = self.stream_name, correlation = %self.context.correlation, "subscription confirmed");
                         SubscriptionConfirmation::StreamName(std::mem::take(&mut self.stream_name))
                     };
 
@@ -78,7 +84,7 @@ impl Streaming {
                 }
 
                 x => {
-                    tracing::error!(msg = ?x, "unexpected message");
+                    tracing::error!(msg = ?x, correlation = %self.context.correlation, "unexpected message");
                     eyre::bail!("unexpected message when streaming from the pubsub process");
                 }
             }
@@ -112,10 +118,16 @@ impl SubscriptionClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    pub async fn subscribe_to_stream(&self, stream_name: &str) -> eyre::Result<Streaming> {
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
+    pub async fn subscribe_to_stream(
+        &self,
+        context: RequestContext,
+        stream_name: &str,
+    ) -> eyre::Result<Streaming> {
         let mailbox = self
             .inner
             .request_stream(
+                context,
                 self.target,
                 SubscribeRequests::Subscribe(SubscriptionType::Stream {
                     ident: stream_name.to_string(),
@@ -124,13 +136,20 @@ impl SubscriptionClient {
             )
             .await?;
 
-        Ok(Streaming::from(stream_name.to_string(), mailbox))
+        Ok(Streaming::from(context, stream_name.to_string(), mailbox))
     }
 
-    pub async fn subscribe_to_program(&self, name: &str, code: &str) -> eyre::Result<Streaming> {
+    #[instrument(skip_all, fields(correlation = %context.correlation))]
+    pub async fn subscribe_to_program(
+        &self,
+        context: RequestContext,
+        name: &str,
+        code: &str,
+    ) -> eyre::Result<Streaming> {
         let mailbox = self
             .inner
             .request_stream(
+                context,
                 self.target,
                 SubscribeRequests::Subscribe(SubscriptionType::Program {
                     name: name.to_string(),
@@ -140,13 +159,18 @@ impl SubscriptionClient {
             )
             .await?;
 
-        Ok(Streaming::from(String::default(), mailbox))
+        Ok(Streaming::from(context, String::default(), mailbox))
     }
 
-    pub async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
+    pub async fn list_programs(
+        &self,
+        context: RequestContext,
+    ) -> eyre::Result<Vec<ProgramSummary>> {
         let mailbox = self
             .inner
             .request(
+                context,
                 self.target,
                 SubscribeRequests::Program(ProgramRequests::List).into(),
             )
@@ -171,10 +195,16 @@ impl SubscriptionClient {
         eyre::bail!("pubsub sent an unexpected response")
     }
 
-    pub async fn program_stats(&self, id: ProcId) -> eyre::Result<Option<ProgramStats>> {
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
+    pub async fn program_stats(
+        &self,
+        context: RequestContext,
+        id: ProcId,
+    ) -> eyre::Result<Option<ProgramStats>> {
         let mailbox = self
             .inner
             .request(
+                context,
                 self.target,
                 SubscribeRequests::Program(ProgramRequests::Stats { id }).into(),
             )
@@ -203,10 +233,12 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
-    pub async fn program_stop(&self, id: ProcId) -> eyre::Result<()> {
+    #[instrument(skip(self, context), fields(correlation = %context.correlation))]
+    pub async fn program_stop(&self, context: RequestContext, id: ProcId) -> eyre::Result<()> {
         let mailbox = self
             .inner
             .request(
+                context,
                 self.target,
                 SubscribeRequests::Program(ProgramRequests::Stop { id }).into(),
             )
@@ -231,13 +263,17 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
-    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc))]
-    pub async fn push(&self, events: Vec<Record>) -> eyre::Result<()> {
+    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    pub async fn push(&self, context: RequestContext, events: Vec<Record>) -> eyre::Result<()> {
         tracing::debug!("sending push request to pubsub process {}", self.target);
 
         let resp = self
             .inner
-            .request(self.target, SubscribeRequests::Push { events }.into())
+            .request(
+                context,
+                self.target,
+                SubscribeRequests::Push { events }.into(),
+            )
             .await?;
 
         if let Ok(resp) = resp.payload.try_into() {

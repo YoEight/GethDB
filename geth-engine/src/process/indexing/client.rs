@@ -2,7 +2,7 @@ use std::vec;
 
 use crate::domain::index::CurrentRevision;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages, Requests};
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv};
+use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv, RequestContext};
 use geth_common::{Direction, ReadCompleted};
 use geth_domain::index::BlockEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -32,9 +32,10 @@ impl IndexClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
+    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn read(
         &self,
+        context: RequestContext,
         key: u64,
         start: u64,
         count: usize,
@@ -43,6 +44,7 @@ impl IndexClient {
         let mut inner = self
             .inner
             .request_stream(
+                context,
                 self.target,
                 Messages::Requests(Requests::Index(IndexRequests::Read {
                     key,
@@ -80,11 +82,16 @@ impl IndexClient {
     }
 
     #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc))]
-    pub async fn store(&self, entries: Vec<BlockEntry>) -> eyre::Result<()> {
+    pub async fn store(
+        &self,
+        context: RequestContext,
+        entries: Vec<BlockEntry>,
+    ) -> eyre::Result<()> {
         tracing::debug!("storing entries to the index process...");
         let resp = self
             .inner
             .request(
+                context,
                 self.target,
                 Messages::Requests(Requests::Index(IndexRequests::Store { entries })),
             )
@@ -111,12 +118,17 @@ impl IndexClient {
     }
 
     #[instrument(skip(self), fields(origin = ?self.inner.origin_proc))]
-    pub async fn latest_revision(&self, key: u64) -> eyre::Result<CurrentRevision> {
+    pub async fn latest_revision(
+        &self,
+        context: RequestContext,
+        key: u64,
+    ) -> eyre::Result<CurrentRevision> {
         tracing::debug!("looking up the latest revision for key: {}", key);
 
         let resp = self
             .inner
             .request(
+                context,
                 self.target,
                 Messages::Requests(Requests::Index(IndexRequests::LatestRevision { key })),
             )
