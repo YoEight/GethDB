@@ -1,4 +1,4 @@
-use crate::process::{Item, ManagerClient, Proc, ProcId, ProcessEnv};
+use crate::process::{Item, ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::messages::{Messages, TestSinkRequests, TestSinkResponses};
@@ -40,6 +40,7 @@ impl SinkClient {
         let inner = self
             .inner
             .request_stream(
+                RequestContext::new(),
                 self.target,
                 TestSinkRequests::StreamFrom { low, high }.into(),
             )

@@ -39,6 +39,20 @@ pub mod subscription;
 // mod subscriptions;
 pub mod writing;
 
+#[derive(Debug, Clone, Copy)]
+pub struct RequestContext {
+    pub correlation: Uuid,
+}
+
+impl RequestContext {
+    #[allow(clippy::new_without_default)]
+    pub fn new() -> Self {
+        RequestContext {
+            correlation: Uuid::new_v4(),
+        }
+    }
+}
+
 #[derive(Clone)]
 enum Mailbox {
     Tokio(UnboundedSender<Item>),
@@ -59,6 +73,7 @@ pub type ProcId = u64;
 pub struct Mail {
     pub origin: ProcId,
     pub correlation: Uuid,
+    pub context: RequestContext,
     pub payload: Messages,
     pub created: Instant,
 }
@@ -395,6 +410,7 @@ where
                 );
 
                 let _ = resp.send(Mail {
+                    context: RequestContext::new(),
                     origin: running.id,
                     correlation: running.last_received_request,
                     payload: Messages::Responses(Responses::FatalError),
@@ -406,6 +422,7 @@ where
                 if let Some(running) = self.catalog.monitor.get(&dependent) {
                     if !self.closing
                         && !running.mailbox.send(Item::Mail(Mail {
+                            context: RequestContext::new(),
                             origin: 0,
                             correlation: Uuid::nil(),
                             payload: Notifications::ProcessTerminated(id).into(),
@@ -443,6 +460,7 @@ where
 }
 
 pub struct Stream {
+    context: RequestContext,
     correlation: Uuid,
     payload: Messages,
     sender: UnboundedSender<Messages>,
@@ -557,12 +575,18 @@ impl ManagerClient {
         }
     }
 
-    pub fn send(&self, dest: ProcId, payload: Messages) -> eyre::Result<()> {
-        self.send_with_correlation(dest, Uuid::new_v4(), payload)
+    pub fn send(
+        &self,
+        context: RequestContext,
+        dest: ProcId,
+        payload: Messages,
+    ) -> eyre::Result<()> {
+        self.send_with_correlation(context, dest, Uuid::new_v4(), payload)
     }
 
     pub fn send_with_correlation(
         &self,
+        context: RequestContext,
         dest: ProcId,
         correlation: Uuid,
         payload: Messages,
@@ -572,6 +596,7 @@ impl ManagerClient {
             .send(ManagerCommand::Send {
                 dest,
                 item: Item::Mail(Mail {
+                    context,
                     origin: self.id,
                     correlation,
                     payload,
@@ -587,13 +612,19 @@ impl ManagerClient {
         Ok(())
     }
 
-    pub async fn request_opt(&self, dest: ProcId, payload: Messages) -> eyre::Result<Option<Mail>> {
+    pub async fn request_opt(
+        &self,
+        context: RequestContext,
+        dest: ProcId,
+        payload: Messages,
+    ) -> eyre::Result<Option<Mail>> {
         let (resp, receiver) = oneshot::channel();
         if self
             .inner
             .send(ManagerCommand::Send {
                 dest,
                 item: Item::Mail(Mail {
+                    context,
                     origin: self.id,
                     correlation: Uuid::new_v4(),
                     payload,
@@ -609,8 +640,13 @@ impl ManagerClient {
         Ok(receiver.await.ok())
     }
 
-    pub async fn request(&self, dest: ProcId, payload: Messages) -> eyre::Result<Mail> {
-        if let Some(mail) = self.request_opt(dest, payload).await? {
+    pub async fn request(
+        &self,
+        context: RequestContext,
+        dest: ProcId,
+        payload: Messages,
+    ) -> eyre::Result<Mail> {
+        if let Some(mail) = self.request_opt(context, dest, payload).await? {
             Ok(mail)
         } else {
             eyre::bail!("process manager has shutdown")
@@ -619,6 +655,7 @@ impl ManagerClient {
 
     pub async fn request_stream(
         &self,
+        context: RequestContext,
         dest: ProcId,
         payload: Messages,
     ) -> eyre::Result<UnboundedReceiver<Messages>> {
@@ -628,6 +665,7 @@ impl ManagerClient {
             .send(ManagerCommand::Send {
                 dest,
                 item: Item::Stream(Stream {
+                    context,
                     correlation: Uuid::new_v4(),
                     payload,
                     sender,
@@ -642,12 +680,19 @@ impl ManagerClient {
         Ok(receiver)
     }
 
-    pub fn reply(&self, dest: ProcId, correlation: Uuid, payload: Messages) -> eyre::Result<()> {
+    pub fn reply(
+        &self,
+        context: RequestContext,
+        dest: ProcId,
+        correlation: Uuid,
+        payload: Messages,
+    ) -> eyre::Result<()> {
         if self
             .inner
             .send(ManagerCommand::Send {
                 dest,
                 item: Item::Mail(Mail {
+                    context,
                     origin: self.id,
                     correlation,
                     payload,

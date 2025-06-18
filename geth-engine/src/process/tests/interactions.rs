@@ -3,7 +3,7 @@ use crate::{
         messages::TestSinkResponses, sink::SinkClient, start_process_manager_with_catalog, Catalog,
         Mail, Proc,
     },
-    Options,
+    Options, RequestContext,
 };
 use bytes::{BufMut, BytesMut};
 
@@ -33,7 +33,11 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
         buffer.put_u64_le(count);
 
         let resp = manager
-            .request(echo_proc_id, TestSinkResponses::Stream(count).into())
+            .request(
+                RequestContext::new(),
+                echo_proc_id,
+                TestSinkResponses::Stream(count).into(),
+            )
             .await?;
 
         assert_eq!(echo_proc_id, resp.origin);
@@ -79,7 +83,11 @@ async fn test_shutdown_reported_properly() -> eyre::Result<()> {
 
     let num = 42;
     let resp = manager
-        .request(proc_id, TestSinkResponses::Stream(num).into())
+        .request(
+            RequestContext::new(),
+            proc_id,
+            TestSinkResponses::Stream(num).into(),
+        )
         .await?;
 
     assert_eq!(proc_id, resp.origin);
@@ -98,7 +106,11 @@ async fn test_request_returns_when_proc_panicked() -> eyre::Result<()> {
     let proc_id = manager.wait_for(Proc::Panic).await?.must_succeed()?;
 
     let resp = manager
-        .request(proc_id, TestSinkResponses::Stream(42).into())
+        .request(
+            RequestContext::new(),
+            proc_id,
+            TestSinkResponses::Stream(42).into(),
+        )
         .await?;
 
     assert!(resp.payload.is_fatal_error());
@@ -112,7 +124,11 @@ async fn test_stream_returns_when_proc_panicked() -> eyre::Result<()> {
     let proc_id = manager.wait_for(Proc::Panic).await?.must_succeed()?;
 
     let mut resp = manager
-        .request_stream(proc_id, TestSinkResponses::Stream(42).into())
+        .request_stream(
+            RequestContext::new(),
+            proc_id,
+            TestSinkResponses::Stream(42).into(),
+        )
         .await?;
 
     assert!(resp.recv().await.is_none());

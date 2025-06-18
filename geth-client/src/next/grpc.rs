@@ -2,7 +2,9 @@ use std::time::Duration;
 
 use geth_common::generated::protocol::protocol_client::ProtocolClient;
 use geth_common::protocol::ProgramStatsRequest;
-use tonic::transport::Channel;
+use tonic::service::interceptor::InterceptedService;
+use tonic::service::Interceptor;
+use tonic::transport::{Channel, Uri};
 use tonic::{Code, Request};
 
 use geth_common::{
@@ -14,14 +16,30 @@ use geth_common::{
 
 use crate::{Client, ReadStreaming, SubscriptionStreaming};
 
+#[derive(Debug, Clone, Copy)]
+struct CorrelationInjectionInterceptor;
+
+impl Interceptor for CorrelationInjectionInterceptor {
+    fn call(
+        &mut self,
+        mut request: tonic::Request<()>,
+    ) -> Result<tonic::Request<()>, tonic::Status> {
+        request.metadata_mut().insert(
+            "correlation",
+            uuid::Uuid::new_v4().to_string().parse().unwrap(),
+        );
+
+        Ok(request)
+    }
+}
+
 #[derive(Clone)]
 pub struct GrpcClient {
-    inner: ProtocolClient<Channel>,
+    inner: ProtocolClient<InterceptedService<Channel, CorrelationInjectionInterceptor>>,
 }
 
 impl GrpcClient {
     pub async fn connect(endpoint: EndPoint) -> eyre::Result<Self> {
-        let endpoint_str = format!("http://{}", endpoint);
         let max_attempts = 10;
         let mut attempt = 1;
 
@@ -33,7 +51,8 @@ impl GrpcClient {
                 "connecting to node"
             );
 
-            match ProtocolClient::connect(endpoint_str.clone()).await {
+            let uri = format!("http://{}:{}", endpoint.host, endpoint.port).parse::<Uri>()?;
+            match Channel::builder(uri.clone()).connect().await {
                 Err(e) => {
                     tracing::warn!(attempt = attempt, max_attempts = max_attempts, error = %e, "failed to connect to node");
                     attempt += 1;
@@ -41,8 +60,10 @@ impl GrpcClient {
                     tokio::time::sleep(Duration::from_millis(500)).await;
                 }
 
-                Ok(inner) => {
+                Ok(channel) => {
                     tracing::debug!(attempt = attempt, max_attempts = max_attempts, endpoint = %endpoint, "connected to node");
+                    let inner =
+                        ProtocolClient::with_interceptor(channel, CorrelationInjectionInterceptor);
                     return Ok(Self { inner });
                 }
             }

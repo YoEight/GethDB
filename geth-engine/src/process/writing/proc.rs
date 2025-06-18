@@ -26,12 +26,7 @@ where
 
     while let Ok(item) = env.queue.recv() {
         match item {
-            Item::Stream(stream) => {
-                tracing::error!(
-                    "request {}: writer process doesn't support any stream operation",
-                    stream.correlation
-                );
-
+            Item::Stream(_) => {
                 continue;
             }
 
@@ -64,11 +59,13 @@ where
                     };
 
                     let key = mikoshi_hash(&ident);
-                    let current_revision =
-                        env.handle.block_on(index_client.latest_revision(key))?;
+                    let current_revision = env
+                        .handle
+                        .block_on(index_client.latest_revision(mail.context, key))?;
 
                     if current_revision.is_deleted() {
                         env.client.reply(
+                            mail.context,
                             mail.origin,
                             mail.correlation,
                             WriteResponses::StreamDeleted.into(),
@@ -79,6 +76,7 @@ where
 
                     if let Some(e) = optimistic_concurrency_check(expected, current_revision) {
                         env.client.reply(
+                            mail.context,
                             mail.origin,
                             mail.correlation,
                             WriteResponses::WrongExpectedRevision {
@@ -93,11 +91,13 @@ where
 
                     let revision = current_revision.next_revision();
                     let mut entries = ProposeEntries::new(ident, revision, events);
+                    let span = tracing::info_span!("append_entries_to_log", correlation = %mail.context.correlation);
 
-                    match log_writer.append(&mut entries) {
+                    match span.in_scope(|| log_writer.append(&mut entries)) {
                         Err(e) => {
                             tracing::error!("error when appending to stream: {}", e);
                             env.client.reply(
+                                mail.context,
                                 mail.origin,
                                 mail.correlation,
                                 WriteResponses::Error.into(),
@@ -105,9 +105,11 @@ where
                         }
 
                         Ok(receipt) => {
-                            env.handle.block_on(index_client.store(entries.indexes))?;
+                            env.handle
+                                .block_on(index_client.store(mail.context, entries.indexes))?;
 
                             env.client.reply(
+                                mail.context,
                                 mail.origin,
                                 mail.correlation,
                                 WriteResponses::Committed {
@@ -120,14 +122,15 @@ where
                                 .into(),
                             )?;
 
-                            env.handle.block_on(sub_client.push(entries.committed))?;
+                            env.handle
+                                .block_on(sub_client.push(mail.context, entries.committed))?;
                         }
                     }
 
                     continue;
                 }
 
-                tracing::warn!("request was not handled");
+                tracing::warn!(correlation = %mail.correlation, "request was not handled");
             }
         }
     }

@@ -1,10 +1,11 @@
 use geth_common::ProgramStats;
 use tokio::sync::mpsc::UnboundedSender;
+use tracing::instrument;
 
 use crate::{
     process::{
         messages::{Messages, ProgramRequests, ProgramResponses},
-        ProcId,
+        ProcId, RequestContext,
     },
     ManagerClient,
 };
@@ -29,8 +30,10 @@ impl ProgramClient {
         self.target
     }
 
+    #[instrument(skip_all, fields(correlation = %context.correlation))]
     pub async fn start(
         &self,
+        context: RequestContext,
         name: String,
         code: String,
         output: UnboundedSender<Messages>,
@@ -38,6 +41,7 @@ impl ProgramClient {
         let mailbox = self
             .inner
             .request_opt(
+                context,
                 self.target,
                 ProgramRequests::Start {
                     name,
@@ -73,10 +77,15 @@ impl ProgramClient {
         eyre::bail!("protocol error when communicating with the pyro-worker process");
     }
 
-    pub async fn stats(&self) -> eyre::Result<Option<ProgramStats>> {
+    #[instrument(skip_all, fields(correlation = %context.correlation))]
+    pub async fn stats(&self, context: RequestContext) -> eyre::Result<Option<ProgramStats>> {
         let mailbox = self
             .inner
-            .request_opt(self.target, ProgramRequests::Stats { id: 0 }.into())
+            .request_opt(
+                context,
+                self.target,
+                ProgramRequests::Stats { id: 0 }.into(),
+            )
             .await?;
 
         let mailbox = if let Some(mailbox) = mailbox {
@@ -100,10 +109,11 @@ impl ProgramClient {
         eyre::bail!("protocol error when communicating with the pyro-worker process");
     }
 
-    pub async fn stop(self) -> eyre::Result<()> {
+    #[instrument(skip_all, fields(correlation = %context.correlation))]
+    pub async fn stop(self, context: RequestContext) -> eyre::Result<()> {
         let mailbox = self
             .inner
-            .request_opt(self.target, ProgramRequests::Stop { id: 0 }.into())
+            .request_opt(context, self.target, ProgramRequests::Stop { id: 0 }.into())
             .await?;
 
         let mailbox = if let Some(mailbox) = mailbox {

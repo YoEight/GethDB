@@ -2,7 +2,7 @@ use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
-use crate::process::{Item, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessRawEnv, RequestContext, Runtime};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -52,6 +52,7 @@ where
                                 tracing::warn!("empty entries vector received");
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Committed.into(),
@@ -65,6 +66,7 @@ where
                                 tracing::error!("error when storing index entries: {}", e);
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Error.into(),
@@ -73,6 +75,7 @@ where
                                 revision_cache.insert(last.key, last.revision);
 
                                 let _ = env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::Committed.into(),
@@ -83,6 +86,7 @@ where
                         IndexRequests::LatestRevision { key } => {
                             if let Some(current) = revision_cache.get(&key) {
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::CurrentRevision(CurrentRevision::Revision(
@@ -104,6 +108,7 @@ where
                                 }
 
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     IndexResponses::CurrentRevision(value).into(),
@@ -115,6 +120,7 @@ where
                             tracing::error!("read from the index should be a streaming operation");
 
                             env.client.reply(
+                                mail.context,
                                 mail.origin,
                                 mail.correlation,
                                 IndexResponses::Error.into(),
@@ -135,15 +141,16 @@ where
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
                     env.handle.spawn_blocking(move || {
-                        if stream_indexed_read(
-                            stream_lsm,
-                            stream_cache,
+                        if stream_indexed_read(IndexRead {
+                            context: stream.context,
+                            lsm: stream_lsm,
+                            cache: stream_cache,
                             key,
                             start,
                             count,
                             dir,
-                            &stream.sender,
-                        )
+                            stream: &stream.sender,
+                        })
                         .is_err()
                         {
                             let _ = stream.sender.send(IndexResponses::Error.into());
@@ -227,39 +234,50 @@ where
     Ok(())
 }
 
-fn stream_indexed_read<S>(
+struct IndexRead<'a, S> {
+    context: RequestContext,
     lsm: Arc<RwLock<Lsm<S>>>,
     cache: RevisionCache,
     key: u64,
     start: u64,
     count: usize,
     dir: Direction,
-    stream: &UnboundedSender<Messages>,
-) -> eyre::Result<()>
+    stream: &'a UnboundedSender<Messages>,
+}
+
+#[instrument(skip(params), fields(correlation = %params.context.correlation, key = params.key, start = params.start, count = params.count, direction = ?params.dir))]
+fn stream_indexed_read<S>(params: IndexRead<'_, S>) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
-    let lsm = lsm
+    let lsm = params
+        .lsm
         .read()
         .map_err(|e| eyre::eyre!("poisoned lock when reading the index: {}", e))?;
 
-    let current_revision = key_latest_revision(&lsm, cache, key)?;
+    let current_revision = key_latest_revision(&lsm, params.cache, params.key)?;
 
-    if current_revision.is_deleted() && stream.send(IndexResponses::StreamDeleted.into()).is_err() {
+    if current_revision.is_deleted()
+        && params
+            .stream
+            .send(IndexResponses::StreamDeleted.into())
+            .is_err()
+    {
         return Ok(());
     }
 
-    let mut iter: Box<dyn IteratorIO<Item = BlockEntry>> = match dir {
-        Direction::Forward => Box::new(lsm.scan_forward(key, start, count)),
-        Direction::Backward => Box::new(lsm.scan_backward(key, start, count)),
+    let mut iter: Box<dyn IteratorIO<Item = BlockEntry>> = match params.dir {
+        Direction::Forward => Box::new(lsm.scan_forward(params.key, params.start, params.count)),
+        Direction::Backward => Box::new(lsm.scan_backward(params.key, params.start, params.count)),
     };
 
-    let batch_size = min(count, 500);
+    let batch_size = min(params.count, 500);
     let mut batch = Vec::with_capacity(batch_size);
     while let Some(item) = iter.next()? {
         if batch.len() >= batch_size {
             let entries = mem::replace(&mut batch, Vec::with_capacity(batch_size));
-            if stream
+            if params
+                .stream
                 .send(IndexResponses::Entries(entries).into())
                 .is_err()
             {
@@ -271,7 +289,7 @@ where
     }
 
     if !batch.is_empty() {
-        let _ = stream.send(IndexResponses::Entries(batch).into());
+        let _ = params.stream.send(IndexResponses::Entries(batch).into());
     }
 
     Ok(())

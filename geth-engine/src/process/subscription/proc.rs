@@ -71,14 +71,14 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                     continue;
                                 }
 
-                                tracing::warn!(stream = ident, "subscription wasn't registered because nothing is listening to it");
+                                tracing::warn!(stream = ident, correlation = %stream.context.correlation, "subscription wasn't registered because nothing is listening to it");
                             }
 
                             SubscriptionType::Program { name, code } => {
                                 let result = env.client.wait_for(Proc::PyroWorker).await?;
                                 let id = match result.must_succeed() {
                                     Err(e) => {
-                                        tracing::error!(error = %e, "error when spawning a pyro worker");
+                                        tracing::error!(error = %e, correlation = %stream.context.correlation, "error when spawning a pyro worker");
 
                                         let _ =
                                             stream.sender.send(SubscribeResponses::Error(e).into());
@@ -94,17 +94,24 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 tracing::debug!(
                                     id = %id,
                                     name = name,
+                                    correlation = %stream.context.correlation,
                                     "program is starting"
                                 );
 
                                 match client
-                                    .start(name.clone(), code, stream.sender.clone())
+                                    .start(
+                                        stream.context,
+                                        name.clone(),
+                                        code,
+                                        stream.sender.clone(),
+                                    )
                                     .await?
                                 {
                                     ProgramStartResult::Started => {
                                         tracing::debug!(
                                             id = %id,
                                             name = name,
+                                            correlation = %stream.context.correlation,
                                             "program has started successfully"
                                         );
 
@@ -113,7 +120,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                             .send(SubscribeResponses::Confirmed(Some(id)).into())
                                             .is_ok()
                                         {
-                                            tracing::debug!(id = %id, name = name, "program was registered successfully");
+                                            tracing::debug!(id = %id, name = name, correlation = %stream.context.correlation, "program was registered successfully");
 
                                             programs.insert(
                                                 id,
@@ -128,8 +135,8 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                             continue;
                                         }
 
-                                        client.stop().await?;
-                                        tracing::warn!(id = %id,  name = name, "program wasn't registered because nothing is listening to it");
+                                        client.stop(stream.context).await?;
+                                        tracing::warn!(id = %id,  name = name, correlation = %stream.context.correlation, "program wasn't registered because nothing is listening to it");
                                     }
 
                                     ProgramStartResult::Failed(e) => {
@@ -142,7 +149,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                         },
                         _ => {
                             tracing::warn!(
-                                correlation = stream.correlation.to_string(),
+                                correlation = %stream.context.correlation,
                                 "unsupported subscription streaming request",
                             );
                         }
@@ -152,8 +159,8 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                 }
 
                 tracing::warn!(
-                    "malformed reader request from stream request {}",
-                    stream.correlation
+                    correlation = %stream.context.correlation,
+                    "malformed reader request from stream request",
                 );
             }
 
@@ -174,6 +181,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                         SubscribeRequests::Push { events } => {
                             // We don't really to confirm to the entity that sent us the push request to deliver those events first.
                             env.client.reply(
+                                mail.context,
                                 mail.origin,
                                 mail.correlation,
                                 SubscribeResponses::Pushed.into(),
@@ -187,8 +195,9 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                         SubscribeRequests::Program(req) => match req {
                             ProgramRequests::Stats { id } => {
                                 if let Some(prog) = programs.get(&id) {
-                                    if let Some(stats) = prog.client.stats().await? {
+                                    if let Some(stats) = prog.client.stats(mail.context).await? {
                                         env.client.reply(
+                                            mail.context,
                                             mail.origin,
                                             mail.correlation,
                                             SubscribeResponses::Programs(ProgramResponses::Stats(
@@ -202,6 +211,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 }
 
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     SubscribeResponses::Programs(ProgramResponses::NotFound).into(),
@@ -220,6 +230,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                                 }
 
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     SubscribeResponses::Programs(ProgramResponses::List(summaries))
@@ -229,10 +240,11 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
 
                             ProgramRequests::Stop { id } => {
                                 if let Some(prog) = programs.remove(&id) {
-                                    prog.client.stop().await?;
+                                    prog.client.stop(mail.context).await?;
                                 }
 
                                 env.client.reply(
+                                    mail.context,
                                     mail.origin,
                                     mail.correlation,
                                     SubscribeResponses::Programs(ProgramResponses::Stopped).into(),
@@ -240,12 +252,12 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                             }
 
                             _ => {
-                                tracing::warn!("unsupported program request {}", mail.correlation);
+                                tracing::warn!(correlation = %mail.context.correlation, request = %mail.correlation, "unsupported program request");
                             }
                         },
 
                         _ => {
-                            tracing::warn!("unsupported subscription request {}", mail.correlation);
+                            tracing::warn!(correlation = %mail.context.correlation, request = %mail.correlation, "unsupported subscription request");
                         }
                     }
                     continue;

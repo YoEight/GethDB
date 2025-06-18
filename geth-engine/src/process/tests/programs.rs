@@ -2,12 +2,13 @@ use std::any::type_name;
 
 use geth_common::{ExpectedRevision, Propose, SubscriptionConfirmation, SubscriptionEvent};
 
-use crate::{process::tests::Foo, start_process_manager, Options};
+use crate::{process::tests::Foo, start_process_manager, Options, RequestContext};
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let client = manager.new_subscription_client().await?;
+    let ctx = RequestContext::new();
     let writer = manager.new_writer_client().await?;
 
     let mut expected = vec![];
@@ -18,11 +19,12 @@ pub async fn test_program_created() -> eyre::Result<()> {
 
     let stream_name = "foobar";
     let mut streaming = client
-        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
     writer
         .append(
+            ctx,
             stream_name.to_string(),
             ExpectedRevision::Any,
             expected.clone(),
@@ -64,13 +66,14 @@ pub async fn test_program_created() -> eyre::Result<()> {
 #[tokio::test]
 pub async fn test_program_list() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
+    let ctx = RequestContext::new();
     let client = manager.new_subscription_client().await?;
 
     let mut _ignored = client
-        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
-    let programs = client.list_programs().await?;
+    let programs = client.list_programs(ctx).await?;
     assert_eq!(programs.len(), 1);
     assert_eq!(programs[0].name, "echo");
 
@@ -81,13 +84,14 @@ pub async fn test_program_list() -> eyre::Result<()> {
 pub async fn test_program_stats() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let client = manager.new_subscription_client().await?;
+    let ctx = RequestContext::new();
 
     let mut _ignored = client
-        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
-    let programs = client.list_programs().await?;
-    let program = client.program_stats(programs[0].id).await?;
+    let programs = client.list_programs(ctx).await?;
+    let program = client.program_stats(ctx, programs[0].id).await?;
     assert!(program.is_some());
 
     let program = program.unwrap();
@@ -108,6 +112,7 @@ pub async fn test_program_stop() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let client = manager.new_subscription_client().await?;
     let writer = manager.new_writer_client().await?;
+    let ctx = RequestContext::new();
 
     let mut expected = vec![];
 
@@ -117,13 +122,14 @@ pub async fn test_program_stop() -> eyre::Result<()> {
 
     let stream_name = "foobar";
     let mut streaming = client
-        .subscribe_to_program("echo", include_str!("./resources/programs/echo.pyro"))
+        .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
     streaming.wait_until_confirmation().await?;
 
     writer
         .append(
+            ctx,
             stream_name.to_string(),
             ExpectedRevision::Any,
             expected.clone(),
@@ -142,10 +148,10 @@ pub async fn test_program_stop() -> eyre::Result<()> {
 
     assert_eq!(count, expected.len());
 
-    let programs = client.list_programs().await?;
-    client.program_stop(programs[0].id).await?;
+    let programs = client.list_programs(ctx).await?;
+    client.program_stop(ctx, programs[0].id).await?;
 
-    let result = client.program_stats(programs[0].id).await?;
+    let result = client.program_stats(ctx, programs[0].id).await?;
     assert!(result.is_none());
 
     let result = streaming.next().await?;

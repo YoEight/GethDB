@@ -3,7 +3,7 @@ use geth_common::{
     AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
     ProgramSummary, Propose, ReadStreamCompleted, Revision,
 };
-use geth_engine::{ManagerClient, ReaderClient, WriterClient};
+use geth_engine::{ManagerClient, ReaderClient, RequestContext, WriterClient};
 
 #[derive(Clone)]
 pub struct LocalClient {
@@ -29,7 +29,12 @@ impl Client for LocalClient {
         proposes: Vec<Propose>,
     ) -> eyre::Result<AppendStreamCompleted> {
         self.writer
-            .append(stream_id.to_string(), expected_revision, proposes)
+            .append(
+                RequestContext::new(),
+                stream_id.to_string(),
+                expected_revision,
+                proposes,
+            )
             .await
     }
 
@@ -42,7 +47,13 @@ impl Client for LocalClient {
     ) -> eyre::Result<ReadStreamCompleted<ReadStreaming>> {
         let outcome = self
             .reader
-            .read(stream_id, revision, direction, max_count as usize)
+            .read(
+                RequestContext::new(),
+                stream_id,
+                revision,
+                direction,
+                max_count as usize,
+            )
             .await?;
 
         match outcome {
