@@ -44,7 +44,7 @@ pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContex
         return Ok(RequestContext { correlation });
     }
 
-    return Ok(RequestContext::new());
+    Ok(RequestContext::new())
 }
 
 impl ProtocolImpl {
