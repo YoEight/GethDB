@@ -1,0 +1,42 @@
+     TIMEOUT [  15.003s] geth-client-tests append_read_tests::simple_append_expecting_no_stream_on_non_existing_stream
+  stdout ───
+
+    running 1 test
+    2025-06-17T23:49:18.413334Z DEBUG wait_for{proc=Grpc origin=Root}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Grpc
+    2025-06-17T23:49:18.413562Z DEBUG wait_for{proc=Writing origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Writing
+    2025-06-17T23:49:18.413693Z  INFO wait_for{proc=Writing origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Writing id=2
+    2025-06-17T23:49:18.413792Z DEBUG wait_for{proc=Reading origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Reading
+    2025-06-17T23:49:18.413908Z  INFO wait_for{proc=Reading origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Reading id=3
+    2025-06-17T23:49:18.413981Z DEBUG wait_for{proc=PubSub origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=PubSub
+    2025-06-17T23:49:18.414116Z  INFO wait_for{proc=PubSub origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=PubSub id=4
+    2025-06-17T23:49:18.414184Z DEBUG wait_for{proc=Indexing origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Indexing
+    2025-06-17T23:49:18.414304Z  INFO wait_for{proc=Indexing origin=Grpc}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Indexing id=5
+    2025-06-17T23:49:18.414360Z  INFO geth_engine::process::grpc: geth-engine/src/process/grpc/mod.rs:24: GethDB is listening addr=127.0.0.1:1807 db="/tmp/t2952-0"
+    2025-06-17T23:49:18.414611Z  INFO wait_for{proc=Grpc origin=Root}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Grpc id=1
+    2025-06-17T23:49:18.414668Z DEBUG geth_client::next::grpc: geth-client/src/next/grpc.rs:47: connecting to node endpoint=127.0.0.1:1807 attempt=1 max_attempts=10
+    2025-06-17T23:49:18.415325Z DEBUG geth_client::next::grpc: geth-client/src/next/grpc.rs:64: connected to node attempt=1 max_attempts=10 endpoint=127.0.0.1:1807
+    2025-06-17T23:49:18.416077Z DEBUG wait_for{proc=Indexing origin=Reading}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Indexing
+    2025-06-17T23:49:18.416758Z DEBUG wait_for{proc=Indexing origin=Writing}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=Indexing
+    2025-06-17T23:49:18.416862Z  INFO wait_for{proc=Indexing origin=Reading}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Indexing id=5
+    2025-06-17T23:49:18.416950Z  INFO wait_for{proc=Indexing origin=Writing}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=Indexing id=5
+    2025-06-17T23:49:18.417018Z DEBUG wait_for{proc=PubSub origin=Writing}: geth_engine::process: geth-engine/src/process.rs:726: waiting for process to be available... proc=PubSub
+    2025-06-17T23:49:18.417082Z  INFO wait_for{proc=PubSub origin=Writing}: geth_engine::process: geth-engine/src/process.rs:731: process resolved proc=PubSub id=4
+    2025-06-17T23:49:18.418329Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:39: rebuilding index...
+    2025-06-17T23:49:18.420019Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:41: index rebuilt successfully
+    2025-06-17T23:49:18.421957Z DEBUG append{context=RequestContext { correlation: bc69fee5-0b35-4c96-b559-555167fbedf4 } stream="Gardner Morar" expected=NoStream origin=Grpc correlation=bc69fee5-0b35-4c96-b559-555167fbedf4}: geth_engine::process::writing::client: geth-engine/src/process/writing/client.rs:73: completed successfully correlation=bc69fee5-0b35-4c96-b559-555167fbedf4
+    2025-06-17T23:49:18.422117Z DEBUG push{context=RequestContext { correlation: bc69fee5-0b35-4c96-b559-555167fbedf4 } origin=Writing correlation=bc69fee5-0b35-4c96-b559-555167fbedf4}: geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:268: sending push request to pubsub process 4
+    2025-06-17T23:49:18.422920Z  INFO geth_engine::process: geth-engine/src/process.rs:358: received shutdown request, initiating shutdown process
+    2025-06-17T23:49:18.422947Z DEBUG geth_engine::process: geth-engine/src/process.rs:373: shutdown process started running_procs=5
+    2025-06-17T23:49:18.422965Z DEBUG geth_engine::process: geth-engine/src/process.rs:162: process cleared from the monitor and the catalog proc_id=3 proc=Reading
+    2025-06-17T23:49:18.423072Z DEBUG geth_engine::process: geth-engine/src/process.rs:162: process cleared from the monitor and the catalog proc_id=2 proc=Writing
+    2025-06-17T23:49:18.423097Z DEBUG geth_engine::process: geth-engine/src/process.rs:162: process cleared from the monitor and the catalog proc_id=5 proc=Indexing
+    2025-06-17T23:49:18.423122Z DEBUG geth_engine::process: geth-engine/src/process.rs:162: process cleared from the monitor and the catalog proc_id=1 proc=Grpc
+    2025-06-17T23:49:18.423146Z DEBUG geth_engine::process: geth-engine/src/process.rs:162: process cleared from the monitor and the catalog proc_id=4 proc=PubSub
+    2025-06-17T23:49:18.423172Z  INFO geth_engine::process: geth-engine/src/process.rs:447: process terminated proc_id=3 proc=Reading
+    2025-06-17T23:49:18.423287Z  INFO run{host="127.0.0.1" port=1807 proc=Grpc}:shutdown: geth_engine::process::grpc: geth-engine/src/process/grpc/mod.rs:50: initate gRPC shutdown
+    2025-06-17T23:49:18.423357Z  INFO geth_engine::process: geth-engine/src/process.rs:447: process terminated proc_id=4 proc=PubSub
+    2025-06-17T23:49:18.423377Z  INFO geth_engine::process: geth-engine/src/process.rs:447: process terminated proc_id=5 proc=Indexing
+    2025-06-17T23:49:18.423880Z  INFO run{host="127.0.0.1" port=1807 proc=Grpc}:shutdown: geth_engine::process::grpc: geth-engine/src/process/grpc/mod.rs:53: completed
+    2025-06-17T23:49:18.423962Z  INFO geth_engine::process: geth-engine/src/process.rs:447: process terminated proc_id=1 proc=Grpc
+
+    (test timed out)
