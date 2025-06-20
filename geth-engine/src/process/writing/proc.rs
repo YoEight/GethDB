@@ -4,7 +4,7 @@ use crate::process::indexing::IndexClient;
 use crate::process::messages::{WriteRequests, WriteResponses};
 use crate::process::subscription::SubscriptionClient;
 use crate::process::{Item, ProcessRawEnv, Runtime};
-use bytes::Bytes;
+use bytes::{Bytes, BytesMut};
 use geth_common::{ContentType, ExpectedRevision, Propose, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
@@ -17,12 +17,10 @@ pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
 where
     S: Storage + 'static,
 {
-    let pool = env.client.pool.clone();
-    let mut buffer = env.handle.block_on(pool.get()).unwrap();
-    let mut log_writer = LogWriter::load(runtime.container().clone(), buffer.split())?;
+    let mut log_writer =
+        LogWriter::load(runtime.container().clone(), BytesMut::with_capacity(4_096))?;
     let index_client = IndexClient::resolve_raw(&env)?;
     let sub_client = SubscriptionClient::resolve_raw(&env)?;
-    std::mem::drop(buffer);
 
     while let Ok(item) = env.queue.recv() {
         match item {
