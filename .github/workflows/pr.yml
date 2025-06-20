@@ -51,14 +51,8 @@ jobs:
           locked: true
 
       - name: Run tests
-        id: run_tests
         run: cargo nextest run --no-fail-fast --hide-progress-bar
         continue-on-error: ${{ matrix.os == 'windows-latest' }}
-
-      - name: Report warnings
-        if: matrix.os == 'windows-latest' && steps.run_tests.outcome == 'failure'
-        run: |
-          echo "::warning running tests was unsuccessful"
 
   linting:
     needs: build
