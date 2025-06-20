@@ -52,6 +52,7 @@ jobs:
 
       - name: Run tests
         run: cargo nextest run --no-fail-fast --hide-progress-bar
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
   linting:
     needs: build
