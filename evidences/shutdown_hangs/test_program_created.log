@@ -1,0 +1,40 @@
+TERMINATING [> 15.000s] geth-engine process::tests::programs::test_program_created
+     TIMEOUT [  15.041s] geth-engine process::tests::programs::test_program_created
+  stdout ───
+
+    running 1 test
+    2025-06-20T03:59:16.145737Z DEBUG wait_for{proc=PubSub origin=Root}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=PubSub
+    2025-06-20T03:59:16.150350Z  INFO wait_for{proc=PubSub origin=Root}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=PubSub id=1
+    2025-06-20T03:59:16.150389Z DEBUG wait_for{proc=Writing origin=Root}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=Writing
+    2025-06-20T03:59:16.150512Z DEBUG wait_for{proc=Indexing origin=Writing}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=Indexing
+    2025-06-20T03:59:16.150592Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:39: rebuilding index...
+    2025-06-20T03:59:16.150825Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:41: index rebuilt successfully
+    2025-06-20T03:59:16.150896Z  INFO wait_for{proc=Indexing origin=Writing}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=Indexing id=3
+    2025-06-20T03:59:16.150916Z DEBUG wait_for{proc=PubSub origin=Writing}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=PubSub
+    2025-06-20T03:59:16.150946Z  INFO wait_for{proc=PubSub origin=Writing}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=PubSub id=1
+    2025-06-20T03:59:16.150980Z  INFO wait_for{proc=Writing origin=Root}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=Writing id=2
+    2025-06-20T03:59:16.155384Z DEBUG push{context=RequestContext { correlation: e439b2ef-2798-4b42-9b12-428e8105a10c } origin=Writing correlation=e439b2ef-2798-4b42-9b12-428e8105a10c}: geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:268: sending push request to pubsub process 1
+    2025-06-20T03:59:16.155471Z DEBUG run{proc_id=1 proc="pubsub"}:wait_for{proc=PyroWorker origin=PubSub}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=PyroWorker
+    2025-06-20T03:59:16.155736Z DEBUG run{proc_id=4 proc="pyro-worker"}:wait_for{proc=PubSub origin=PyroWorker}: geth_engine::process: geth-engine/src/process.rs:722: waiting for process to be available... proc=PubSub
+    2025-06-20T03:59:16.155765Z  INFO run{proc_id=1 proc="pubsub"}:wait_for{proc=PyroWorker origin=PubSub}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=PyroWorker id=4
+    2025-06-20T03:59:16.155790Z DEBUG run{proc_id=1 proc="pubsub"}: geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:94: program is starting id=4 name="echo" correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.155826Z  INFO run{proc_id=4 proc="pyro-worker"}:wait_for{proc=PubSub origin=PyroWorker}: geth_engine::process: geth-engine/src/process.rs:727: process resolved proc=PubSub id=1
+    2025-06-20T03:59:16.155849Z DEBUG run{proc_id=4 proc="pyro-worker"}: geth_engine::process::subscription::program::pyro::worker: geth-engine/src/process/subscription/program/pyro/worker.rs:19: computation unit allocated, waiting for program instructions
+    2025-06-20T03:59:16.156463Z  INFO run{proc_id=4 proc="pyro-worker"}: geth_engine::process::subscription::program::pyro::worker: geth-engine/src/process/subscription/program/pyro/worker.rs:80: ready to do work name="echo" correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156548Z DEBUG run{proc_id=1 proc="pubsub"}: geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:111: program has started successfully id=4 name="echo" correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156569Z DEBUG run{proc_id=1 proc="pubsub"}: geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:123: program was registered successfully id=4 name="echo" correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156627Z DEBUG push{context=RequestContext { correlation: e439b2ef-2798-4b42-9b12-428e8105a10c } origin=Writing correlation=e439b2ef-2798-4b42-9b12-428e8105a10c}: geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:286: push request confirmed by the pubsub process
+    2025-06-20T03:59:16.156678Z DEBUG geth_engine::process::subscription::program::pyro: geth-engine/src/process/subscription/program/pyro/mod.rs:291: program emitted a subscription request name="echo" proc_id=4 stream_name="foobar"
+    2025-06-20T03:59:16.156779Z DEBUG geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:68: subscription confirmed stream_name="foobar" correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156797Z DEBUG geth_engine::process::subscription::program::pyro: geth-engine/src/process/subscription/program/pyro/mod.rs:357: subscription is confirmed name="echo" proc_id=4 target="subscription" kind="pyro" stream_name="foobar"
+    2025-06-20T03:59:16.156831Z DEBUG append{context=RequestContext { correlation: e439b2ef-2798-4b42-9b12-428e8105a10c } stream="foobar" expected=Any origin=Root correlation=e439b2ef-2798-4b42-9b12-428e8105a10c}: geth_engine::process::writing::client: geth-engine/src/process/writing/client.rs:73: completed successfully correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156854Z DEBUG geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:64: subscription confirmed proc_id=4 correlation=e439b2ef-2798-4b42-9b12-428e8105a10c
+    2025-06-20T03:59:16.156869Z DEBUG geth_engine::process::tests::programs: geth-engine/src/process/tests/programs.rs:39: subscription to program is confirmed id=4
+
+    (test timed out)
+
+────────────
+     Summary [  15.864s] 90 tests run: 89 passed, 1 timed out, 0 skipped
+     TIMEOUT [  15.041s] geth-engine process::tests::programs::test_program_created
+error: test run failed
+Error: Process completed with exit code 100.

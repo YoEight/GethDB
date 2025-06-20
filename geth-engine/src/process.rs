@@ -1,11 +1,9 @@
-use bb8::Pool;
 use chrono::Utc;
 use geth_common::ProgramSummary;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
 use messages::{Messages, Responses};
-use resource::{create_buffer_pool, BufferManager};
 use std::collections::{HashMap, HashSet};
 use std::future::Future;
 use std::sync::Arc;
@@ -32,7 +30,6 @@ mod messages;
 #[cfg(test)]
 mod panic;
 pub mod reading;
-mod resource;
 #[cfg(test)]
 mod sink;
 pub mod subscription;
@@ -553,7 +550,6 @@ pub struct ProcessRawEnv {
 pub struct ManagerClient {
     id: ProcId,
     origin_proc: Proc,
-    pool: Pool<BufferManager>,
     inner: UnboundedSender<ManagerCommand>,
     notify: Arc<Notify>,
 }
@@ -790,12 +786,10 @@ pub async fn start_process_manager_with_catalog(
     catalog: Catalog,
 ) -> eyre::Result<ManagerClient> {
     let notify = Arc::new(Notify::new());
-    let pool = create_buffer_pool().await?;
     let (sender, queue) = unbounded_channel();
     let client = ManagerClient {
         id: 0,
         origin_proc: Proc::Root,
-        pool: pool.clone(),
         inner: sender.clone(),
         notify: notify.clone(),
     };
