@@ -22,21 +22,21 @@ pub async fn test_program_created() -> eyre::Result<()> {
         .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
-    writer
-        .append(
-            ctx,
-            stream_name.to_string(),
-            ExpectedRevision::Any,
-            expected.clone(),
-        )
-        .await?;
-
     let mut count = 0usize;
 
     while let Some(event) = streaming.next().await? {
         match event {
             SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(id)) => {
                 tracing::debug!(id = id, "subscription to program is confirmed");
+
+                writer
+                    .append(
+                        ctx,
+                        stream_name.to_string(),
+                        ExpectedRevision::Any,
+                        expected.clone(),
+                    )
+                    .await?;
             }
 
             SubscriptionEvent::EventAppeared(event) => {

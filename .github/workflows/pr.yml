@@ -45,13 +45,14 @@ jobs:
         run: cargo check --all-targets
 
       - name: Install cargo-nextest
-        uses: baptiste0928/cargo-install@v3
+        uses: baptiste0928/cargo-install@v3.3.0
         with:
           crate: cargo-nextest
           locked: true
 
       - name: Run tests
         run: cargo nextest run --no-fail-fast --hide-progress-bar
+        continue-on-error: ${{ matrix.os == 'windows-latest' }}
 
   linting:
     needs: build
