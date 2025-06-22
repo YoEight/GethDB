@@ -50,7 +50,7 @@ impl ProcessEnv<Managed> {
 
 impl ProcessEnv<Raw> {
     pub fn recv(&self) -> Option<Item> {
-        if let Some(item) = self.inner.queue.recv().ok() {
+        if let Ok(item) = self.inner.queue.recv() {
             if item.is_shutdown() {
                 return None;
             }
