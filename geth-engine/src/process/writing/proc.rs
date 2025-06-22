@@ -1,9 +1,7 @@
 use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
-use crate::process::indexing::IndexClient;
 use crate::process::messages::{WriteRequests, WriteResponses};
-use crate::process::subscription::SubscriptionClient;
-use crate::process::{Item, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessEnv, Raw, Runtime};
 use bytes::{Bytes, BytesMut};
 use geth_common::{ContentType, ExpectedRevision, Propose, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
@@ -13,16 +11,16 @@ use uuid::Uuid;
 
 use super::entries::ProposeEntries;
 
-pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
+pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
 where
     S: Storage + 'static,
 {
     let mut log_writer =
         LogWriter::load(runtime.container().clone(), BytesMut::with_capacity(4_096))?;
-    let index_client = IndexClient::resolve_raw(&env)?;
-    let sub_client = SubscriptionClient::resolve_raw(&env)?;
+    let index_client = env.new_index_client()?;
+    let sub_client = env.new_subscription_client()?;
 
-    while let Ok(item) = env.queue.recv() {
+    while let Some(item) = env.recv() {
         match item {
             Item::Stream(_) => {
                 continue;
@@ -57,9 +55,8 @@ where
                     };
 
                     let key = mikoshi_hash(&ident);
-                    let current_revision = env
-                        .handle
-                        .block_on(index_client.latest_revision(mail.context, key))?;
+                    let current_revision =
+                        env.block_on(index_client.latest_revision(mail.context, key))?;
 
                     if current_revision.is_deleted() {
                         env.client.reply(
@@ -103,8 +100,7 @@ where
                         }
 
                         Ok(receipt) => {
-                            env.handle
-                                .block_on(index_client.store(mail.context, entries.indexes))?;
+                            env.block_on(index_client.store(mail.context, entries.indexes))?;
 
                             env.client.reply(
                                 mail.context,
@@ -120,8 +116,7 @@ where
                                 .into(),
                             )?;
 
-                            env.handle
-                                .block_on(sub_client.push(mail.context, entries.committed))?;
+                            env.block_on(sub_client.push(mail.context, entries.committed))?;
                         }
                     }
 

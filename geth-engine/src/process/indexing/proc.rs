@@ -2,7 +2,7 @@ use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
-use crate::process::{Item, ProcessRawEnv, RequestContext, Runtime};
+use crate::process::{Item, ProcessEnv, Raw, RequestContext, Runtime};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -27,7 +27,7 @@ fn new_revision_cache() -> RevisionCache {
 }
 
 #[instrument(skip(runtime, env), fields(origin = ?env.proc))]
-pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
+pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
@@ -42,7 +42,7 @@ where
 
     let lsm = Arc::new(RwLock::new(lsm));
 
-    while let Ok(item) = env.queue.recv() {
+    while let Some(item) = env.recv() {
         match item {
             Item::Mail(mail) => {
                 if let Ok(req) = mail.payload.try_into() {
@@ -140,7 +140,7 @@ where
                 {
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
-                    env.handle.spawn_blocking(move || {
+                    env.spawn_blocking(move || {
                         if stream_indexed_read(IndexRead {
                             context: stream.context,
                             lsm: stream_lsm,

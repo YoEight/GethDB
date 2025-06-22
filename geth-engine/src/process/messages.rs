@@ -12,6 +12,7 @@ pub enum Messages {
     Requests(Requests),
     Responses(Responses),
     Notifications(Notifications),
+    Shutdown,
 }
 
 #[cfg(test)]

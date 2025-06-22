@@ -1,10 +1,10 @@
-use crate::process::{Item, ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
+use crate::process::{Item, Managed, ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use super::messages::{Messages, TestSinkRequests, TestSinkResponses};
 
-pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
-    while let Some(item) = env.queue.recv().await {
+pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
+    while let Some(item) = env.recv().await {
         if let Item::Stream(stream) = item {
             if let Ok(TestSinkRequests::StreamFrom { low, high }) = stream.payload.try_into() {
                 for num in low..high {

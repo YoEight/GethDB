@@ -1,6 +1,6 @@
 use crate::process::{
     messages::{WriteRequests, WriteResponses},
-    ManagerClient, Proc, ProcId, ProcessRawEnv, RequestContext,
+    ManagerClient, ProcId, RequestContext,
 };
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,
@@ -19,15 +19,7 @@ impl WriterClient {
         Self { target, inner }
     }
 
-    pub fn from(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env
-            .handle
-            .block_on(env.client.wait_for(Proc::Writing))?
-            .must_succeed()?;
-        Ok(Self::new(proc_id, env.client.clone()))
-    }
-
-    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn append(
         &self,
         context: RequestContext,
@@ -86,7 +78,7 @@ impl WriterClient {
         }
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn delete(
         &self,
         context: RequestContext,

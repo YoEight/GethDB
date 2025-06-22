@@ -6,7 +6,10 @@ use tonic::transport::Server;
 use geth_common::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
-use crate::{process::ProcessEnv, ManagerClient, Options, Proc};
+use crate::{
+    process::{Managed, ProcessEnv},
+    ManagerClient, Options, Proc,
+};
 
 mod protocol;
 
@@ -32,11 +35,15 @@ pub async fn start_server(
 }
 
 #[instrument(skip_all, fields(host = env.options.host, port = env.options.port, proc = ?Proc::Grpc))]
-pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
+pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let notify = Arc::new(Notify::new());
-    let handle = tokio::spawn(start_server(env.client, env.options, notify.clone()));
+    let handle = tokio::spawn(start_server(
+        env.client.clone(),
+        env.options.clone(),
+        notify.clone(),
+    ));
 
-    while env.queue.recv().await.is_some() {
+    while env.recv().await.is_some() {
         // we don't care about any message from the process manager
     }
 

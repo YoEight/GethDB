@@ -2,7 +2,7 @@ use crate::process::messages::{
     Messages, ProgramRequests, ProgramResponses, SubscribeRequests, SubscribeResponses,
     SubscriptionType,
 };
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv, RequestContext};
+use crate::process::{ManagerClient, ProcId, RequestContext};
 use geth_common::{
     ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
     UnsubscribeReason,
@@ -103,19 +103,6 @@ pub struct SubscriptionClient {
 impl SubscriptionClient {
     pub fn new(target: ProcId, inner: ManagerClient) -> Self {
         Self { target, inner }
-    }
-
-    pub async fn resolve(env: &ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for(Proc::PubSub).await?.must_succeed()?;
-        Ok(Self::new(proc_id, env.client.clone()))
-    }
-
-    pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env
-            .handle
-            .block_on(env.client.wait_for(Proc::PubSub))?
-            .must_succeed()?;
-        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     #[instrument(skip(self, context), fields(correlation = %context.correlation))]
@@ -263,7 +250,7 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
-    #[instrument(skip(self, events), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
     pub async fn push(&self, context: RequestContext, events: Vec<Record>) -> eyre::Result<()> {
         tracing::debug!("sending push request to pubsub process {}", self.target);
 
