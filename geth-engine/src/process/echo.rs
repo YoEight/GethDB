@@ -1,7 +1,7 @@
-use crate::process::{Item, ProcessEnv};
+use crate::process::{env::Managed, Item, ProcessEnv};
 
-pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
-    while let Some(item) = env.queue.recv().await {
+pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
+    while let Some(item) = env.recv().await {
         if let Item::Mail(mail) = item {
             env.client
                 .reply(mail.context, mail.origin, mail.correlation, mail.payload)?;

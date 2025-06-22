@@ -4,7 +4,7 @@ use crate::process::messages::{
     SubscribeResponses, SubscriptionType,
 };
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
-use crate::process::{Item, ProcessEnv};
+use crate::process::{Item, Managed, ProcessEnv};
 use crate::Proc;
 use chrono::{DateTime, Utc};
 use geth_common::{ProgramSummary, Record};
@@ -51,11 +51,11 @@ impl Register {
 }
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pubsub"))]
-pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
+pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut reg = Register::default();
     let mut programs = HashMap::new();
 
-    while let Some(item) = env.queue.recv().await {
+    while let Some(item) = env.recv().await {
         match item {
             Item::Stream(stream) => {
                 if let Ok(req) = stream.payload.try_into() {

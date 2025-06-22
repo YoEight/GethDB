@@ -24,6 +24,7 @@ mod tests;
 
 #[cfg(test)]
 mod echo;
+mod env;
 pub mod grpc;
 pub mod indexing;
 mod messages;
@@ -35,6 +36,8 @@ mod sink;
 pub mod subscription;
 // mod subscriptions;
 pub mod writing;
+
+pub use env::{Managed, ProcessEnv, Raw};
 
 #[derive(Debug, Clone, Copy)]
 pub struct RequestContext {
@@ -308,17 +311,32 @@ where
                 client.origin_proc = proc;
 
                 let mut running_proc = match proc {
-                    Proc::Writing => {
-                        spawn_raw(client, runtime, Handle::current(), proc, writing::run)
-                    }
+                    Proc::Writing => spawn_raw(
+                        options,
+                        client,
+                        runtime,
+                        Handle::current(),
+                        proc,
+                        writing::run,
+                    ),
 
-                    Proc::Reading => {
-                        spawn_raw(client, runtime, Handle::current(), proc, reading::run)
-                    }
+                    Proc::Reading => spawn_raw(
+                        options,
+                        client,
+                        runtime,
+                        Handle::current(),
+                        proc,
+                        reading::run,
+                    ),
 
-                    Proc::Indexing => {
-                        spawn_raw(client, runtime, Handle::current(), proc, indexing::run)
-                    }
+                    Proc::Indexing => spawn_raw(
+                        options,
+                        client,
+                        runtime,
+                        Handle::current(),
+                        proc,
+                        indexing::run,
+                    ),
 
                     Proc::PubSub => spawn(options, client, proc, subscription::run),
                     Proc::Grpc => spawn(options, client, proc, grpc::run),
@@ -468,6 +486,28 @@ pub enum Item {
     Stream(Stream),
 }
 
+impl Item {
+    pub fn is_shutdown(&self) -> bool {
+        match self {
+            Item::Mail(mail) => {
+                if let Messages::Shutdown = &mail.payload {
+                    true
+                } else {
+                    false
+                }
+            }
+
+            Item::Stream(stream) => {
+                if let Messages::Shutdown = &stream.payload {
+                    true
+                } else {
+                    false
+                }
+            }
+        }
+    }
+}
+
 pub enum SpawnResult {
     Success(ProcId),
     Failure { proc: Proc, error: SpawnError },
@@ -531,19 +571,6 @@ impl ManagerCommand {
             ManagerCommand::ProcTerminated { .. } | ManagerCommand::Shutdown { .. }
         )
     }
-}
-
-pub struct ProcessEnv {
-    queue: UnboundedReceiver<Item>,
-    client: ManagerClient,
-    options: Options,
-}
-
-pub struct ProcessRawEnv {
-    proc: Proc,
-    queue: std::sync::mpsc::Receiver<Item>,
-    client: ManagerClient,
-    handle: Handle,
 }
 
 #[derive(Clone, Debug)]
@@ -873,6 +900,7 @@ async fn process_manager<S>(
 }
 
 fn spawn_raw<S, F>(
+    options: Options,
     client: ManagerClient,
     runtime: Runtime<S>,
     handle: Handle,
@@ -881,16 +909,19 @@ fn spawn_raw<S, F>(
 ) -> RunningProc
 where
     S: Storage + Send + Sync + 'static,
-    F: FnOnce(Runtime<S>, ProcessRawEnv) -> eyre::Result<()> + Send + Sync + 'static,
+    F: FnOnce(Runtime<S>, ProcessEnv<Raw>) -> eyre::Result<()> + Send + Sync + 'static,
 {
     let id = client.id;
     let (proc_sender, proc_queue) = std::sync::mpsc::channel();
-    let env = ProcessRawEnv {
+    let env = ProcessEnv::new(
         proc,
-        queue: proc_queue,
-        client: client.clone(),
-        handle,
-    };
+        client.clone(),
+        options,
+        Raw {
+            queue: proc_queue,
+            handle,
+        },
+    );
 
     let sender = client.inner.clone();
     thread::spawn(move || {
@@ -926,17 +957,12 @@ where
 
 fn spawn<F, Fut>(options: Options, client: ManagerClient, proc: Proc, runnable: F) -> RunningProc
 where
-    F: FnOnce(ProcessEnv) -> Fut + Send + Sync + 'static,
+    F: FnOnce(ProcessEnv<Managed>) -> Fut + Send + Sync + 'static,
     Fut: Future<Output = eyre::Result<()>> + Send + 'static,
 {
     let id = client.id;
     let (proc_sender, proc_queue) = unbounded_channel();
-    let env = ProcessEnv {
-        queue: proc_queue,
-        client: client.clone(),
-        options,
-    };
-
+    let env = ProcessEnv::new(proc, client.clone(), options, Managed { queue: proc_queue });
     let sender = client.inner.clone();
     tokio::spawn(async move {
         if let Err(e) = runnable(env).await {

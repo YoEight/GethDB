@@ -1,22 +1,21 @@
 use std::cmp::min;
 use std::mem;
 
-use crate::process::indexing::IndexClient;
 use crate::process::messages::{ReadRequests, ReadResponses};
-use crate::process::{Item, ProcessRawEnv, Runtime};
+use crate::process::{Item, ProcessEnv, Raw, Runtime};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::LogReader;
 
-pub fn run<S>(runtime: Runtime<S>, env: ProcessRawEnv) -> eyre::Result<()>
+pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
 where
     S: Storage + Send + Sync + 'static,
 {
     let reader = LogReader::new(runtime.container().clone());
-    let index_client = IndexClient::resolve_raw(&env)?;
+    let index_client = env.new_index_client()?;
 
-    while let Ok(item) = env.queue.recv() {
+    while let Some(item) = env.recv() {
         match item {
             Item::Stream(stream) => {
                 if let Ok(ReadRequests::Read {
@@ -26,7 +25,7 @@ where
                     count,
                 }) = stream.payload.try_into()
                 {
-                    let index_stream = env.handle.block_on(index_client.read(
+                    let index_stream = env.block_on(index_client.read(
                         stream.context,
                         mikoshi_hash(ident),
                         start,
@@ -49,7 +48,7 @@ where
                         tracing::info_span!("read_from_log", correlation = %stream.correlation);
 
                     let result: eyre::Result<()> = span.in_scope(|| {
-                        while let Some(entry) = env.handle.block_on(index_stream.next())? {
+                        while let Some(entry) = env.block_on(index_stream.next())? {
                             let entry = reader.read_at(entry.position)?;
                             batch.push(entry);
 

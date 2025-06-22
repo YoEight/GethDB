@@ -8,16 +8,16 @@ use crate::process::{
         pyro::{create_pyro_runtime, from_runtime_value_to_json},
         ProgramArgs,
     },
-    Item, ProcessEnv,
+    Item, Managed, ProcessEnv,
 };
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pyro-worker"))]
-pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
+pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let sub_client = env.client.new_subscription_client().await?;
     let mut args = None;
 
     tracing::debug!("computation unit allocated, waiting for program instructions");
-    while let Some(item) = env.queue.recv().await {
+    while let Some(item) = env.recv().await {
         if let Item::Mail(message) = item {
             if let Ok(ProgramRequests::Start { name, code, sender }) = message.payload.try_into() {
                 args = Some((
@@ -94,7 +94,7 @@ pub async fn run(mut env: ProcessEnv) -> eyre::Result<()> {
                 break;
             }
 
-            Some(item) = env.queue.recv() => {
+            Some(item) = env.recv() => {
                 if let Item::Mail(mail) = item {
                     if let Ok(req) = mail.payload.try_into() {
                         match req {

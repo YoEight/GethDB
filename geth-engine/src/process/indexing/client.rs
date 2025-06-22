@@ -2,7 +2,7 @@ use std::vec;
 
 use crate::domain::index::CurrentRevision;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages, Requests};
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, ProcessRawEnv, RequestContext};
+use crate::process::{ManagerClient, ProcId, RequestContext};
 use geth_common::{Direction, ReadCompleted};
 use geth_domain::index::BlockEntry;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -17,19 +17,6 @@ pub struct IndexClient {
 impl IndexClient {
     pub fn new(target: ProcId, inner: ManagerClient) -> Self {
         Self { target, inner }
-    }
-
-    pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
-        let proc_id = env.client.wait_for(Proc::Indexing).await?.must_succeed()?;
-        Ok(Self::new(proc_id, env.client.clone()))
-    }
-
-    pub fn resolve_raw(env: &ProcessRawEnv) -> eyre::Result<Self> {
-        let proc_id = env
-            .handle
-            .block_on(env.client.wait_for(Proc::Indexing))?
-            .must_succeed()?;
-        Ok(Self::new(proc_id, env.client.clone()))
     }
 
     #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]

@@ -1,6 +1,6 @@
 use crate::process::messages::{Messages, ReadRequests, ReadResponses};
 use crate::process::reading::record_try_from;
-use crate::process::{ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
+use crate::process::{Managed, ManagerClient, Proc, ProcId, ProcessEnv, RequestContext};
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
 use geth_mikoshi::wal::LogEntry;
 use std::vec;
@@ -60,7 +60,7 @@ impl ReaderClient {
         Self { target, inner }
     }
 
-    pub async fn resolve(env: &mut ProcessEnv) -> eyre::Result<Self> {
+    pub async fn resolve(env: &mut ProcessEnv<Managed>) -> eyre::Result<Self> {
         tracing::debug!("waiting for the reader process to be available...");
         let proc_id = env.client.wait_for(Proc::Reading).await?.must_succeed()?;
         tracing::debug!("reader process available on {}", proc_id);
