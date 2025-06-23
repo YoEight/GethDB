@@ -112,8 +112,7 @@ pub async fn test_program_stats() -> eyre::Result<()> {
         .await?
         .success()?;
 
-    if let Some(e) = program_out.next().await? {
-        tracing::warn!(">>>>>>>> {:?}", e);
+    if program_out.next().await?.is_some() {
     } else {
         panic!("was expecting the program to send something");
     }
@@ -166,7 +165,11 @@ pub async fn test_program_stop() -> eyre::Result<()> {
 
     let mut count = 0usize;
 
-    while streaming.next().await?.is_some() {
+    while let Some(event) = streaming.next().await? {
+        if !event.is_event_appeared() {
+            continue;
+        }
+
         count += 1;
 
         if count >= expected.len() {

@@ -22,13 +22,19 @@ struct CatchingUp {
 struct PlayHistory {
     history: VecDeque<Record>,
     sub: subscription::Streaming,
+    end: u64,
+}
+
+struct Live {
+    sub: subscription::Streaming,
+    end: u64,
 }
 
 enum State {
     Init,
     CatchingUp(CatchingUp),
     PlayHistory(PlayHistory),
-    Live(subscription::Streaming),
+    Live(Live),
 }
 
 impl Display for State {
@@ -145,9 +151,9 @@ impl ConsumerClient {
                                     return Ok(Some(SubscriptionEvent::EventAppeared(event)))
                                 } else {
                                     if c.history.is_empty() {
-                                        self.state = State::Live(c.sub);
+                                        self.state = State::Live(Live { sub: c.sub, end: c.end });
                                     } else {
-                                        self.state = State::PlayHistory(PlayHistory { history: c.history, sub: c.sub });
+                                        self.state = State::PlayHistory(PlayHistory { history: c.history, sub: c.sub, end: c.end });
                                     }
 
                                     return Ok(Some(SubscriptionEvent::CaughtUp));
@@ -187,15 +193,25 @@ impl ConsumerClient {
 
                 State::PlayHistory(mut h) => {
                     if let Some(record) = h.history.pop_front() {
+                        h.end = record.revision;
                         self.state = State::PlayHistory(h);
                         return Ok(Some(SubscriptionEvent::EventAppeared(record)));
                     }
 
-                    self.state = State::Live(h.sub);
+                    self.state = State::Live(Live {
+                        sub: h.sub,
+                        end: h.end,
+                    });
                 }
 
-                State::Live(mut sub) => {
-                    if let Some(event) = sub.next().await? {
+                State::Live(mut l) => {
+                    if let Some(event) = l.sub.next().await? {
+                        if let SubscriptionEvent::EventAppeared(temp) = &event {
+                            if temp.revision <= l.end {
+                                continue;
+                            }
+                        }
+
                         return Ok(Some(event));
                     }
 
