@@ -1,3 +1,5 @@
+use std::usize;
+
 use crate::Options;
 use crate::{process::start_process_manager, RequestContext};
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
@@ -55,6 +57,29 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
     }
 
     assert_eq!(expected.len(), count as usize);
+
+    Ok(())
+}
+
+#[tokio::test]
+async fn test_empty_read_does_not_hang() -> eyre::Result<()> {
+    let manager = start_process_manager(Options::in_mem()).await?;
+    let client = manager.new_reader_client().await?;
+    let ctx = RequestContext::new();
+    let stream_name = Uuid::new_v4().to_string();
+
+    let mut streaming = client
+        .read(
+            ctx,
+            &stream_name,
+            Revision::Start,
+            Direction::Forward,
+            usize::MAX,
+        )
+        .await?
+        .success()?;
+
+    while let Some(_) = streaming.next().await? {}
 
     Ok(())
 }
