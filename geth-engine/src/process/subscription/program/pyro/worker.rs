@@ -13,7 +13,9 @@ use crate::process::{
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pyro-worker"))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
-    let sub_client = env.client.new_subscription_client().await?;
+    let reader = env.client.new_reader_client().await?;
+    let sub = env.client.new_subscription_client().await?;
+    let index = env.client.new_index_client().await?;
     let mut args = None;
 
     tracing::debug!("computation unit allocated, waiting for program instructions");
@@ -54,7 +56,14 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
         correlation = %context.correlation
     )
     .entered();
-    let mut runtime = match create_pyro_runtime(context, sub_client, env.client.id, &args.name) {
+    let mut runtime = match create_pyro_runtime(
+        context,
+        reader,
+        sub,
+        index,
+        env.client.id,
+        &args.name,
+    ) {
         Ok(runtime) => runtime,
         Err(e) => {
             tracing::error!(correlation = %context.correlation, error = %e, "error when creating a pyro runtime");

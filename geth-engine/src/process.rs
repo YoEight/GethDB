@@ -23,6 +23,7 @@ use crate::{IndexClient, Options, ReaderClient, WriterClient};
 #[cfg(test)]
 mod tests;
 
+pub mod consumer;
 #[cfg(test)]
 mod echo;
 mod env;
@@ -35,7 +36,6 @@ pub mod reading;
 #[cfg(test)]
 mod sink;
 pub mod subscription;
-// mod subscriptions;
 pub mod writing;
 
 pub use env::{Managed, ProcessEnv, Raw};

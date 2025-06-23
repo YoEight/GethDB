@@ -7,7 +7,7 @@ use std::{
 };
 
 use chrono::{DateTime, Utc};
-use geth_common::{Record, SubscriptionConfirmation, SubscriptionEvent};
+use geth_common::{Record, Revision, SubscriptionConfirmation, SubscriptionEvent};
 use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
 use pyro_runtime::{
     helpers::{Declared, TypeBuilder},
@@ -19,7 +19,10 @@ use tokio::sync::{
     Mutex, RwLock,
 };
 
-use crate::process::{subscription::SubscriptionClient, ProcId, RequestContext};
+use crate::{
+    process::{consumer::ConsumerClient, subscription::SubscriptionClient, ProcId, RequestContext},
+    IndexClient, ReaderClient,
+};
 
 pub mod worker;
 
@@ -259,7 +262,9 @@ impl PyroRuntime {
 
 pub fn create_pyro_runtime(
     context: RequestContext,
-    client: SubscriptionClient,
+    reader: ReaderClient,
+    sub: SubscriptionClient,
+    index: IndexClient,
     proc_id: ProcId,
     name: &str,
 ) -> eyre::Result<PyroRuntime> {
@@ -297,39 +302,21 @@ pub fn create_pyro_runtime(
 
             let (input, recv) = unbounded_channel();
 
-            let local_client = client.clone();
+            let mut consumer = ConsumerClient::new(
+                context,
+                stream_name.clone(),
+                Revision::Start,
+                reader.clone(),
+                sub.clone(),
+                index.clone(),
+            );
+
             let name_subscribe_local = name_subscribe.clone();
             let subs_subscribe_local = subs_subscribe.clone();
             let pushed_events_subscribe_local = pushed_events_subscribe.clone();
             tokio::spawn(async move {
-                let mut streaming = local_client
-                    .clone()
-                    .subscribe_to_stream(context, stream_name.as_str())
-                    .await
-                    .inspect_err(|e| {
-                        tracing::error!(
-                            name = name_subscribe_local,
-                            proc_id = proc_id,
-                            target = "subscription",
-                            kind = "pyro",
-                            error = %e,
-                            stream_name = stream_name,
-                            "error when subscribing to stream",
-                        );
-                    })?;
-
-                // let mut streaming = local_reader_client
-                //     .read(
-                //         &stream_name,
-                //         Revision::Start,
-                //         Direction::Forward,
-                //         usize::MAX,
-                //     )
-                //     .await?
-                //     .success()?;
-
                 loop {
-                    match streaming.next().await {
+                    match consumer.next().await {
                         Err(e) => {
                             tracing::error!(
                                 name = name_subscribe_local,

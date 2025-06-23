@@ -1,20 +1,17 @@
-use std::collections::VecDeque;
-
 use geth_common::protocol::protocol_server::Protocol;
 use geth_common::protocol::{self, SubscribeResponse};
-use geth_mikoshi::hashing::mikoshi_hash;
-use tokio::select;
 use tokio::sync::mpsc::unbounded_channel;
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 
 use geth_common::{
-    AppendStream, DeleteStream, Direction, GetProgramStats, KillProgram, ProgramKilled,
-    ProgramListed, ProgramObtained, ReadStream, ReadStreamCompleted, ReadStreamResponse, Record,
-    Subscribe, SubscribeToStream, SubscriptionEvent, UnsubscribeReason,
+    AppendStream, DeleteStream, GetProgramStats, KillProgram, ProgramKilled, ProgramListed,
+    ProgramObtained, ReadStream, ReadStreamCompleted, ReadStreamResponse, Subscribe,
+    SubscriptionEvent, UnsubscribeReason,
 };
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+use crate::process::consumer::ConsumerClient;
 use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
@@ -158,54 +155,51 @@ impl Protocol for ProtocolImpl {
 
         match request.into_inner().into() {
             Subscribe::ToStream(params) => {
-                match CatchupSubscription::init(ctx, self, params).await {
-                    Err(e) => return Err(Status::internal(e.to_string())),
-                    Ok(catchup) => {
-                        if let Some(mut catchup) = catchup {
-                            tokio::spawn(async move {
-                                loop {
-                                    match catchup.next().await {
-                                        Err(e) => {
-                                            let _ =
-                                                sender.send(Err(Status::internal(e.to_string())));
+                let mut consumer = ConsumerClient::new(
+                    ctx,
+                    params.stream_name.clone(),
+                    params.start,
+                    self.reader.clone(),
+                    self.sub.clone(),
+                    self.index.clone(),
+                );
 
-                                            break;
-                                        }
+                tokio::spawn(async move {
+                    loop {
+                        match consumer.next().await {
+                            Err(e) => {
+                                let _ = sender.send(Err(Status::internal(e.to_string())));
 
-                                        Ok(event) => {
-                                            if let Some(event) = event {
-                                                if sender.send(Ok(event.into())).is_err() {
-                                                    tracing::debug!(
-                                                        stream = catchup.params.stream_name,
-                                                        "user disconnected from catchup subscription"
-                                                    );
+                                break;
+                            }
 
-                                                    break;
-                                                }
-                                            } else {
-                                                tracing::debug!(
-                                                    stream = catchup.params.stream_name,
-                                                    "server ended catchup subscription"
-                                                );
+                            Ok(event) => {
+                                if let Some(event) = event {
+                                    if sender.send(Ok(event.into())).is_err() {
+                                        tracing::debug!(
+                                            stream = params.stream_name,
+                                            "user disconnected from catchup subscription"
+                                        );
 
-                                                let _ = sender.send(Ok(
-                                                    SubscriptionEvent::Unsubscribed(
-                                                        UnsubscribeReason::Server,
-                                                    )
-                                                    .into(),
-                                                ));
-
-                                                break;
-                                            }
-                                        }
+                                        break;
                                     }
+                                } else {
+                                    tracing::debug!(
+                                        stream = params.stream_name,
+                                        "server ended catchup subscription"
+                                    );
+
+                                    let _ = sender.send(Ok(SubscriptionEvent::Unsubscribed(
+                                        UnsubscribeReason::Server,
+                                    )
+                                    .into()));
+
+                                    break;
                                 }
-                            });
-                        } else {
-                            return Err(Status::failed_precondition("stream-deleted"));
+                            }
                         }
                     }
-                };
+                });
             }
 
             Subscribe::ToProgram(params) => {
@@ -300,164 +294,5 @@ impl Protocol for ProtocolImpl {
         }
 
         Ok(Response::new(ProgramKilled::Success.into()))
-    }
-}
-
-struct CatchupSubscription {
-    params: SubscribeToStream,
-    catching_up: bool,
-    history: VecDeque<Record>,
-    end_revision: u64,
-    done: bool,
-    confirmed: bool,
-    read_stream: crate::process::reading::Streaming,
-    sub_stream: crate::process::subscription::Streaming,
-}
-
-impl CatchupSubscription {
-    async fn init(
-        context: RequestContext,
-        internal: &ProtocolImpl,
-        params: SubscribeToStream,
-    ) -> eyre::Result<Option<Self>> {
-        let sub_stream = internal
-            .sub
-            .subscribe_to_stream(context, &params.stream_name)
-            .await?;
-
-        let mut read_stream = match internal
-            .reader
-            .read(
-                context,
-                &params.stream_name,
-                params.start,
-                Direction::Forward,
-                usize::MAX,
-            )
-            .await?
-        {
-            ReadStreamCompleted::StreamDeleted => {
-                return Ok(None);
-            }
-
-            ReadStreamCompleted::Success(stream) => stream,
-        };
-
-        let current_revision = internal
-            .index
-            .latest_revision(context, mikoshi_hash(&params.stream_name))
-            .await?;
-
-        if current_revision.is_deleted() {
-            return Ok(None);
-        }
-
-        let mut end_revision = 0;
-
-        if let Some(revision) = current_revision.revision() {
-            end_revision = revision;
-        } else {
-            read_stream = crate::process::reading::Streaming::empty();
-        }
-
-        Ok(Some(Self {
-            params,
-            catching_up: false,
-            history: VecDeque::new(),
-            done: false,
-            confirmed: false,
-            end_revision,
-            read_stream,
-            sub_stream,
-        }))
-    }
-
-    // CAUTION: a situation where an user is reading very far away from the head of the stream and while that stream is actively being writen on could lead
-    // to uncheck memory usage as everything will be stored in the history buffer.
-    //
-    // TODO: Implement a mechanism to limit the size of the history buffer by implementing a backpressure mechanism.
-    async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
-        if self.done {
-            return Ok(None);
-        }
-
-        if !self.confirmed {
-            if let Some(SubscriptionEvent::Confirmed(conf)) = self.sub_stream.next().await? {
-                self.confirmed = true;
-                tracing::debug!(conf = ?conf, "subscription is confirmed");
-                return Ok(Some(SubscriptionEvent::Confirmed(conf)));
-            }
-
-            eyre::bail!("subscription was not confirmed");
-        }
-
-        if self.catching_up {
-            loop {
-                select! {
-                    outcome = self.read_stream.next() => {
-                        match outcome {
-                            Err(e) => return Err(e),
-                            Ok(outcome) => if let Some(event) = outcome {
-                                tracing::debug!("subscription caught up process yield an event");
-                                return Ok(Some(SubscriptionEvent::EventAppeared(event)));
-                            } else {
-                                self.catching_up = false;
-                                tracing::debug!("subscription has caught up");
-                                return Ok(Some(SubscriptionEvent::CaughtUp));
-                            }
-                        }
-                    }
-
-                    outcome = self.sub_stream.next() => {
-                        match outcome {
-                            Err(e) => return Err(e),
-                            Ok(outcome) => if let Some(event) = outcome {
-                                match event {
-                                    SubscriptionEvent::EventAppeared(event)=> {
-                                        tracing::debug!("event appeared before catching up");
-                                        if event.revision <= self.end_revision {
-                                            tracing::debug!("event appeared before catching up but ignore because it will be processed by the catchup process");
-                                            continue;
-                                        }
-
-                                        self.history.push_back(event);
-                                    }
-
-                                    SubscriptionEvent::Unsubscribed(reason) => {
-                                        self.done = true;
-                                        tracing::error!(reason = ?reason, "unsubscribed");
-                                        return Ok(Some(SubscriptionEvent::Unsubscribed(reason)));
-                                    },
-
-                                    _ => {
-                                        tracing::error!("WTF unreachable!");
-                                        unreachable!();
-                                    }
-                                }
-                            } else {
-                                self.done = true;
-                                tracing::error!("WTF subscription stream closed");
-                                return Ok(None);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        if let Some(event) = self.history.pop_front() {
-            tracing::debug!("pushing events from the history buffer");
-            return Ok(Some(SubscriptionEvent::EventAppeared(event)));
-        }
-
-        if let Some(event) = self.sub_stream.next().await? {
-            tracing::debug!("live subscription produced an event");
-            return Ok(Some(event));
-        }
-
-        self.done = true;
-        tracing::warn!("live subscription stopped for some reason");
-
-        Ok(None)
     }
 }
