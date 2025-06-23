@@ -10,6 +10,7 @@ use geth_common::{
 use tokio::sync::mpsc::UnboundedReceiver;
 use tracing::instrument;
 
+#[derive(Debug)]
 pub struct Streaming {
     context: RequestContext,
     stream_name: String,

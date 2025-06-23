@@ -6,8 +6,9 @@ use std::{
     },
 };
 
+use base64::Engine as _;
 use chrono::{DateTime, Utc};
-use geth_common::{Record, Revision, SubscriptionConfirmation, SubscriptionEvent};
+use geth_common::{ContentType, Record, Revision, SubscriptionConfirmation, SubscriptionEvent};
 use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
 use pyro_runtime::{
     helpers::{Declared, TypeBuilder},
@@ -57,6 +58,16 @@ impl PyroValue for EventRecord {
 
     fn serialize(self) -> eyre::Result<RuntimeValue> {
         let record = self.0;
+
+        let payload = if record.data.is_empty() {
+            serde_json::Value::Array(vec![])
+        } else if record.content_type != ContentType::Json {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&record.data);
+            serde_json::Value::String(encoded)
+        } else {
+            serde_json::from_slice::<Value>(record.data.as_ref())?
+        };
+
         let props = vec![
             Prop {
                 label: Some("id".to_string()),
@@ -80,9 +91,7 @@ impl PyroValue for EventRecord {
             },
             Prop {
                 label: Some("payload".to_string()),
-                val: from_json_to_pyro_runtime_value(serde_json::from_slice::<Value>(
-                    record.data.as_ref(),
-                )?)?,
+                val: from_json_to_pyro_runtime_value(payload)?,
             },
         ];
 
@@ -369,13 +378,25 @@ pub fn create_pyro_runtime(
                                     }
 
                                     SubscriptionEvent::EventAppeared(record) => {
-                                        if input.send(EventRecord(record).serialize()?).is_err() {
+                                        let serialized = EventRecord(record)
+                                            .serialize()
+                                            .inspect_err(|error| {
+                                                tracing::error!(
+                                                    %error,
+                                                    proc_id,
+                                                    stream_name,
+                                                    name = name_subscribe_local,
+                                                    "serialization error"
+                                                );
+                                            })?;
+
+                                        if input.send(serialized).is_err() {
                                             tracing::debug!(
                                                 name = name_subscribe_local,
                                                 target = "subscription",
-                                                proc_id = proc_id,
+                                                proc_id,
                                                 kind = "pyro",
-                                                stream_name = stream_name,
+                                                stream_name,
                                                 reason = "User",
                                                 "subscription was dropped"
                                             );

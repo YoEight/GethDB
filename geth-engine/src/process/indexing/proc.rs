@@ -141,7 +141,7 @@ where
                     let stream_cache = revision_cache.clone();
                     let stream_lsm = lsm.clone();
                     env.spawn_blocking(move || {
-                        if stream_indexed_read(IndexRead {
+                        if let Err(error) = stream_indexed_read(IndexRead {
                             context: stream.context,
                             lsm: stream_lsm,
                             cache: stream_cache,
@@ -150,13 +150,10 @@ where
                             count,
                             dir,
                             stream: &stream.sender,
-                        })
-                        .is_err()
-                        {
+                        }) {
+                            tracing::error!(%error, "error when reading the index");
                             let _ = stream.sender.send(IndexResponses::Error.into());
                         }
-
-                        Ok::<_, eyre::Report>(())
                     });
                 }
             }
@@ -273,6 +270,7 @@ where
 
     let batch_size = min(params.count, 500);
     let mut batch = Vec::with_capacity(batch_size);
+    let mut no_entries = true;
     while let Some(item) = iter.next()? {
         if batch.len() >= batch_size {
             let entries = mem::replace(&mut batch, Vec::with_capacity(batch_size));
@@ -286,10 +284,18 @@ where
         }
 
         batch.push(item);
+        no_entries = false;
     }
 
     if !batch.is_empty() {
         let _ = params.stream.send(IndexResponses::Entries(batch).into());
+        return Ok(());
+    }
+
+    if no_entries {
+        let _ = params
+            .stream
+            .send(IndexResponses::Entries(Vec::new()).into());
     }
 
     Ok(())

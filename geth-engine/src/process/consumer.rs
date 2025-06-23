@@ -1,8 +1,7 @@
-use std::{collections::VecDeque, usize};
+use std::{collections::VecDeque, fmt::Display, usize};
 
 use geth_common::{
-    Direction, ReadStreamCompleted, Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
-    UnsubscribeReason,
+    Direction, ReadStreamCompleted, Record, Revision, SubscriptionEvent, UnsubscribeReason,
 };
 use geth_mikoshi::hashing::mikoshi_hash;
 use tokio::select;
@@ -18,7 +17,6 @@ struct CatchingUp {
     sub: subscription::Streaming,
     end: u64,
     history: VecDeque<Record>,
-    conf: Option<SubscriptionConfirmation>,
 }
 
 struct PlayHistory {
@@ -31,6 +29,17 @@ enum State {
     CatchingUp(CatchingUp),
     PlayHistory(PlayHistory),
     Live(subscription::Streaming),
+}
+
+impl Display for State {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            State::Init => write!(f, "Init"),
+            State::CatchingUp(_) => write!(f, "CatchingUp"),
+            State::PlayHistory(_) => write!(f, "PlayHistory"),
+            State::Live(_) => write!(f, "Live"),
+        }
+    }
 }
 
 pub struct ConsumerClient {
@@ -69,7 +78,7 @@ impl ConsumerClient {
     // to uncheck memory usage as everything will be stored in the history buffer.
     //
     // TODO: Implement a mechanism to limit the size of the history buffer by implementing a backpressure mechanism.
-    #[instrument(skip(self), fields(correation = %self.context.correlation))]
+    #[instrument(skip(self), fields(correation = %self.context.correlation, stream_name = self.stream_name, state = %self.state))]
     pub async fn next(&mut self) -> eyre::Result<Option<SubscriptionEvent>> {
         if self.done {
             return Ok(None);
@@ -104,18 +113,24 @@ impl ConsumerClient {
 
                             let end = current_revision.revision().unwrap_or_default();
 
-                            let sub = self
+                            let mut sub = self
                                 .sub
                                 .subscribe_to_stream(self.context, &self.stream_name)
                                 .await?;
 
-                            self.state = State::CatchingUp(CatchingUp {
-                                reader,
-                                sub,
-                                end,
-                                history: VecDeque::new(),
-                                conf: None,
-                            });
+                            if let Some(SubscriptionEvent::Confirmed(conf)) = sub.next().await? {
+                                self.state = State::CatchingUp(CatchingUp {
+                                    reader,
+                                    sub,
+                                    end,
+                                    history: VecDeque::new(),
+                                });
+
+                                return Ok(Some(SubscriptionEvent::Confirmed(conf)));
+                            }
+
+                            self.done = true;
+                            eyre::bail!("subscription was not confirmed");
                         }
                     }
                 }
@@ -129,7 +144,12 @@ impl ConsumerClient {
                                     self.state = State::CatchingUp(c);
                                     return Ok(Some(SubscriptionEvent::EventAppeared(event)))
                                 } else {
-                                    self.state = State::PlayHistory(PlayHistory { history: c.history, sub: c.sub });
+                                    if c.history.is_empty() {
+                                        self.state = State::Live(c.sub);
+                                    } else {
+                                        self.state = State::PlayHistory(PlayHistory { history: c.history, sub: c.sub });
+                                    }
+
                                     return Ok(Some(SubscriptionEvent::CaughtUp));
                                 }
                             }
@@ -149,16 +169,12 @@ impl ConsumerClient {
                                             self.state = State::CatchingUp(c);
                                         }
 
-                                        SubscriptionEvent::Confirmed(conf) => {
-                                            c.conf = Some(conf);
-                                        }
-
                                         SubscriptionEvent::Unsubscribed(reason) => {
                                             self.done = true;
                                             return Ok(Some(SubscriptionEvent::Unsubscribed(reason)));
                                         }
 
-                                        SubscriptionEvent::CaughtUp => unreachable!(),
+                                        SubscriptionEvent::CaughtUp | SubscriptionEvent::Confirmed(_) => unreachable!(),
                                     }
                                 } else {
                                     self.done = true;

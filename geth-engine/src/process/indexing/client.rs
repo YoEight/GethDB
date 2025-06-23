@@ -42,7 +42,13 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = inner.recv().await.and_then(|m| m.try_into().ok()) {
+        let resp = if let Some(resp) = inner.recv().await {
+            resp
+        } else {
+            eyre::bail!("index process is no longer reachable");
+        };
+
+        if let Some(resp) = resp.try_into().ok() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("internal error when running a read request to the index process")
@@ -65,7 +71,7 @@ impl IndexClient {
             }
         }
 
-        eyre::bail!("index process is no longer reachable");
+        eyre::bail!("unexpected message from the index process");
     }
 
     #[instrument(skip(self, entries, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]

@@ -1,6 +1,10 @@
 use std::any::type_name;
 
-use geth_common::{ExpectedRevision, Propose, SubscriptionConfirmation, SubscriptionEvent};
+use bytes::Bytes;
+use geth_common::{
+    ContentType, ExpectedRevision, Propose, SubscriptionConfirmation, SubscriptionEvent,
+};
+use uuid::Uuid;
 
 use crate::{process::tests::Foo, start_process_manager, Options, RequestContext};
 
@@ -84,11 +88,35 @@ pub async fn test_program_list() -> eyre::Result<()> {
 pub async fn test_program_stats() -> eyre::Result<()> {
     let manager = start_process_manager(Options::in_mem()).await?;
     let client = manager.new_subscription_client().await?;
+    let writer = manager.new_writer_client().await?;
     let ctx = RequestContext::new();
 
-    let mut _ignored = client
+    let mut program_out = client
         .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
+
+    program_out.wait_until_confirmation().await?;
+
+    writer
+        .append(
+            ctx,
+            "foobar".to_string(),
+            ExpectedRevision::Any,
+            vec![Propose {
+                id: Uuid::new_v4(),
+                content_type: ContentType::Binary,
+                class: "created".to_string(),
+                data: Bytes::default(),
+            }],
+        )
+        .await?
+        .success()?;
+
+    if let Some(e) = program_out.next().await? {
+        tracing::warn!(">>>>>>>> {:?}", e);
+    } else {
+        panic!("was expecting the program to send something");
+    }
 
     let programs = client.list_programs(ctx).await?;
     let program = client.program_stats(ctx, programs[0].id).await?;

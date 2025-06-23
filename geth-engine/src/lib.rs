@@ -75,6 +75,18 @@ impl TelemetryHandles {
 }
 
 pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
+    // panic::set_hook(Box::new(|info| {
+    //     let reason = if let Some(s) = info.payload().downcast_ref::<&str>() {
+    //         s.to_string()
+    //     } else if let Some(s) = info.payload().downcast_ref::<String>() {
+    //         s.clone()
+    //     } else {
+    //         "<unknown>".to_string()
+    //     };
+
+    //     tracing::error!(reason, location = ?info.location(), "panic!");
+    // }));
+
     let handles = init_telemetry(options)?;
     let manager = start_process_manager(options.clone()).await?;
 

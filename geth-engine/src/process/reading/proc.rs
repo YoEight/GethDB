@@ -48,9 +48,11 @@ where
                         tracing::info_span!("read_from_log", correlation = %stream.correlation);
 
                     let result: eyre::Result<()> = span.in_scope(|| {
+                        let mut no_entries = true;
                         while let Some(entry) = env.block_on(index_stream.next())? {
                             let entry = reader.read_at(entry.position)?;
                             batch.push(entry);
+                            no_entries = false;
 
                             if batch.len() < batch_size {
                                 continue;
@@ -68,6 +70,13 @@ where
 
                         if !batch.is_empty() {
                             let _ = stream.sender.send(ReadResponses::Entries(batch).into());
+                            return Ok(());
+                        }
+
+                        if no_entries {
+                            let _ = stream
+                                .sender
+                                .send(ReadResponses::Entries(Vec::new()).into());
                         }
 
                         Ok(())
