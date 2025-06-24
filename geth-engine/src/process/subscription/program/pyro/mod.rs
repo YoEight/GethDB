@@ -21,8 +21,11 @@ use tokio::sync::{
 };
 
 use crate::{
-    process::{consumer::ConsumerClient, subscription::SubscriptionClient, ProcId, RequestContext},
-    IndexClient, ReaderClient,
+    process::{
+        consumer::{start_consumer, ConsumerResult},
+        ProcId, RequestContext,
+    },
+    ManagerClient,
 };
 
 pub mod worker;
@@ -271,9 +274,7 @@ impl PyroRuntime {
 
 pub fn create_pyro_runtime(
     context: RequestContext,
-    reader: ReaderClient,
-    sub: SubscriptionClient,
-    index: IndexClient,
+    client: ManagerClient,
     proc_id: ProcId,
     name: &str,
 ) -> eyre::Result<PyroRuntime> {
@@ -310,31 +311,40 @@ pub fn create_pyro_runtime(
             );
 
             let (input, recv) = unbounded_channel();
-
-            let mut consumer = ConsumerClient::new(
-                context,
-                stream_name.clone(),
-                Revision::Start,
-                reader.clone(),
-                sub.clone(),
-                index.clone(),
-            );
-
             let name_subscribe_local = name_subscribe.clone();
             let subs_subscribe_local = subs_subscribe.clone();
+            let manager_client = client.clone();
             let pushed_events_subscribe_local = pushed_events_subscribe.clone();
             tokio::spawn(async move {
+                let mut consumer =
+                    match start_consumer(context, stream_name.clone(), Revision::Start, manager_client)
+                        .await
+                    {
+                        Err(error) => {
+                            tracing::error!(%error, stream_name, "unexpected error when starting a new consumer");
+                            return Ok(());
+                        }
+
+                        Ok(result) => match result {
+                            ConsumerResult::Success(c) => c,
+                            ConsumerResult::StreamDeleted => {
+                                tracing::error!(reason = "stream deleted", stream_name, "cannot start a new consumer");
+                                return Ok(());
+                            }
+                        }
+                    };
+
                 loop {
                     match consumer.next().await {
-                        Err(e) => {
+                        Err(error) => {
                             tracing::error!(
                                 name = name_subscribe_local,
                                 target = "subscription",
-                                proc_id = proc_id,
+                                proc_id,
                                 kind = "pyro",
-                                stream_name = stream_name,
+                                stream_name,
                                 reason = "error",
-                                error = %e,
+                                %error,
                                 "unexpected subscription error"
                             );
 

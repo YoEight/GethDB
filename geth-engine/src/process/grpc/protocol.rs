@@ -11,19 +11,17 @@ use geth_common::{
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
-use crate::process::consumer::ConsumerClient;
+use crate::process::consumer::{start_consumer, ConsumerResult};
 use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
 use crate::process::{ManagerClient, RequestContext};
-use crate::IndexClient;
 
 #[derive(Clone)]
 pub struct ProtocolImpl {
     writer: WriterClient,
     reader: ReaderClient,
     sub: SubscriptionClient,
-    index: IndexClient,
 }
 
 #[allow(clippy::result_large_err)]
@@ -50,7 +48,6 @@ impl ProtocolImpl {
             writer: client.new_writer_client().await?,
             reader: client.new_reader_client().await?,
             sub: client.new_subscription_client().await?,
-            index: client.new_index_client().await?,
         })
     }
 }
@@ -155,14 +152,22 @@ impl Protocol for ProtocolImpl {
 
         match request.into_inner().into() {
             Subscribe::ToStream(params) => {
-                let mut consumer = ConsumerClient::new(
+                let mut consumer = match start_consumer(
                     ctx,
                     params.stream_name.clone(),
                     params.start,
-                    self.reader.clone(),
-                    self.sub.clone(),
-                    self.index.clone(),
-                );
+                    self.reader.manager(),
+                )
+                .await
+                {
+                    Err(e) => return Err(Status::internal(e.to_string())),
+                    Ok(result) => match result {
+                        ConsumerResult::Success(c) => c,
+                        ConsumerResult::StreamDeleted => {
+                            return Err(Status::failed_precondition("stream-deleted"))
+                        }
+                    },
+                };
 
                 tokio::spawn(async move {
                     loop {

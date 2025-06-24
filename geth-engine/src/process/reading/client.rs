@@ -68,6 +68,10 @@ impl ReaderClient {
         Ok(Self::new(proc_id, env.client.clone()))
     }
 
+    pub fn manager(&self) -> ManagerClient {
+        self.inner.clone()
+    }
+
     #[instrument(skip(self, context), fields(correlation = %context.correlation))]
     pub async fn read(
         &self,
