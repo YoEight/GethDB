@@ -132,10 +132,11 @@ impl Consumer {
                                 if let Some(event) = outcome {
                                     match event {
                                         SubscriptionEvent::EventAppeared(record) => {
-                                            if record.revision <= self.end {
+                                            if record.revision < self.end {
                                                 continue;
                                             }
 
+                                            self.end = record.revision;
                                             self.history.push_back(record);
                                         }
 
@@ -167,7 +168,7 @@ impl Consumer {
                 State::Live => {
                     if let Some(event) = self.sub.next().await? {
                         if let SubscriptionEvent::EventAppeared(temp) = &event {
-                            if temp.revision <= self.end {
+                            if temp.revision < self.end {
                                 continue;
                             }
                         }
