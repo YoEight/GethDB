@@ -848,7 +848,14 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
         .register_multiple(Proc::PyroWorker, 8)
         .build();
 
-    start_process_manager_with_catalog(options, catalog).await
+    let client = start_process_manager_with_catalog(options, catalog).await?;
+
+    client.wait_for(Proc::Indexing).await?;
+    client.wait_for(Proc::PubSub).await?;
+    client.wait_for(Proc::Reading).await?;
+    client.wait_for(Proc::Writing).await?;
+
+    Ok(client)
 }
 
 pub async fn start_process_manager_with_catalog(
