@@ -11,7 +11,7 @@ use crate::process::{
     Item, Managed, ProcessEnv,
 };
 
-#[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pyro-worker"))]
+#[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut args = None;
 
@@ -56,7 +56,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut runtime = match create_pyro_runtime(
         context,
         env.client.clone(),
-        env.client.id,
+        env.client.id(),
         &args.name,
     ) {
         Ok(runtime) => runtime,
@@ -110,7 +110,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
                             ProgramRequests::Stats { .. } => {
                                 let _ = env.client.reply(context, mail.origin, mail.correlation, ProgramResponses::Stats(ProgramStats {
-                                    id: env.client.id,
+                                    id: env.client.id(),
                                     name: args.name.clone(),
                                     source_code: args.code.clone(),
                                     subscriptions: runtime.subs().await,
@@ -146,7 +146,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                             break;
                         }
 
-                        tracing::debug!(name = args.name, id = env.client.id, revision = revision, correlation = %context.correlation, "program emitted event");
+                        tracing::debug!(name = args.name, id = env.client.id(), revision = revision, correlation = %context.correlation, "program emitted event");
                     }
 
                     Err(e) => {

@@ -1,18 +1,15 @@
 use std::cmp::min;
 use std::mem;
 
+use crate::get_chunk_container;
 use crate::process::messages::{ReadRequests, ReadResponses};
-use crate::process::{Item, ProcessEnv, Raw, Runtime};
+use crate::process::{Item, ProcessEnv, Raw};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::LogReader;
 
-pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-{
-    let reader = LogReader::new(runtime.container().clone());
+pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let reader = LogReader::new(get_chunk_container().clone());
     let index_client = env.new_index_client()?;
 
     while let Some(item) = env.recv() {

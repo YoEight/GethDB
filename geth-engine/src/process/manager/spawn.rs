@@ -1,109 +1,85 @@
-use geth_mikoshi::storage::Storage;
-use tokio::runtime::Handle;
+use std::{future::Future, pin::Pin, thread};
+
+use tokio::sync::{mpsc::unbounded_channel, oneshot};
+use uuid::Uuid;
 
 use crate::{
-    process::{manager::ManagerClient, ProcessEnv, Raw, RunningProc, Runtime},
+    process::{manager::ManagerClient, Mailbox, Managed, ProcessEnv, Raw, RunningProc},
     Options, Proc,
 };
 
-pub struct Spawn {
+pub struct SpawnParams {
     pub options: Options,
     pub client: ManagerClient,
+    pub process: Process,
+}
+
+type ManagedProcess =
+    Box<dyn FnOnce(ProcessEnv<Managed>) -> Pin<Box<dyn Future<Output = eyre::Result<()>>>>>;
+
+type RawProcess = Box<dyn FnOnce(ProcessEnv<Raw>) -> eyre::Result<()>>;
+
+pub struct Process {
     pub proc: Proc,
+    pub run: Run,
 }
 
-fn spawn_raw<S, F>(
-    options: Options,
-    client: ManagerClient,
-    runtime: Runtime<S>,
-    handle: Handle,
-    proc: Proc,
-    runnable: F,
-) -> RunningProc
-where
-    S: Storage + Send + Sync + 'static,
-    F: FnOnce(Runtime<S>, ProcessEnv<Raw>) -> eyre::Result<()> + Send + Sync + 'static,
-{
-    let id = client.id();
-    let (proc_sender, proc_queue) = std::sync::mpsc::channel();
-    let env = ProcessEnv::new(
-        proc,
-        client.clone(),
-        options,
-        Raw {
-            queue: proc_queue,
-            handle,
-        },
-    );
-
-    let sender = client.inner.clone();
-    thread::spawn(move || {
-        if let Err(e) = runnable(runtime, env) {
-            let error = e.to_string();
-            if sender
-                .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
-                .is_err()
-            {
-                tracing::error!(
-                    proc_id = id,
-                    ?proc,
-                    error,
-                    "cannot report process terminated with an error"
-                );
-            }
-        } else if sender
-            .send(ManagerCommand::ProcTerminated { id, error: None })
-            .is_err()
-        {
-            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
-        }
-    });
-
-    RunningProc {
-        id,
-        proc,
-        mailbox: Mailbox::Raw(proc_sender),
-        last_received_request: Uuid::nil(),
-        dependents: Vec::new(),
-    }
+enum Run {
+    Managed(ManagedProcess),
+    Raw(RawProcess),
 }
 
-fn spawn<F, Fut>(options: Options, client: ManagerClient, proc: Proc, runnable: F) -> RunningProc
-where
-    F: FnOnce(ProcessEnv<Managed>) -> Fut + Send + Sync + 'static,
-    Fut: Future<Output = eyre::Result<()>> + Send + 'static,
-{
-    let id = client.id;
-    let (proc_sender, proc_queue) = unbounded_channel();
-    let env = ProcessEnv::new(proc, client.clone(), options, Managed { queue: proc_queue });
-    let sender = client.inner.clone();
+pub fn spawn(params: SpawnParams) {
     tokio::spawn(async move {
-        if let Err(e) = runnable(env).await {
-            let error = e.to_string();
-            if sender
-                .send(ManagerCommand::ProcTerminated { id, error: Some(e) })
-                .is_err()
-            {
-                tracing::error!(
-                    proc_id = id,
-                    ?proc,
-                    error,
-                    "cannot report process terminated with an error"
-                );
-            }
-        } else if sender
-            .send(ManagerCommand::ProcTerminated { id, error: None })
-            .is_err()
-        {
-            tracing::error!(proc_id = id, ?proc, "cannot report process terminated");
-        }
-    });
+        let id = params.client.id();
+        let client = params.client.clone();
+        let (sender_ready, recv_ready) = oneshot::channel();
 
-    RunningProc {
-        id,
-        proc,
-        mailbox: Mailbox::Tokio(proc_sender),
-        last_received_request: Uuid::nil(),
-        dependents: Vec::new(),
-    }
+        let mailbox = match params.process.run {
+            Run::Managed(run) => {
+                let (proc_sender, proc_queue) = unbounded_channel();
+                let env = ProcessEnv::new(
+                    params.process.proc,
+                    params.client,
+                    params.options,
+                    sender_ready,
+                    Managed { queue: proc_queue },
+                );
+
+                tokio::spawn(async move {
+                    client.report_process_terminated(id, run(env).await.err());
+                });
+
+                Mailbox::Tokio(proc_sender)
+            }
+
+            Run::Raw(run) => {
+                let (proc_sender, proc_queue) = std::sync::mpsc::channel();
+                let env = ProcessEnv::new(
+                    params.process.proc,
+                    params.client,
+                    params.options,
+                    sender_ready,
+                    Raw {
+                        queue: proc_queue,
+                        handle: tokio::runtime::Handle::current(),
+                    },
+                );
+
+                thread::spawn(move || {
+                    client.report_process_terminated(id, run(env).err());
+                });
+
+                Mailbox::Raw(proc_sender)
+            }
+        };
+
+        let process = RunningProc {
+            id,
+            proc: params.proc,
+            mailbox,
+            last_received_request: Uuid::nil(),
+            dependents: Vec::new(),
+        };
+    });
 }

@@ -20,7 +20,7 @@ use crate::process::{echo, panic, sink};
 use crate::{
     process::{
         grpc, indexing, load_fs_chunk_container,
-        manager::proc::process_manager,
+        manager::{catalog::ProvisionResult, proc::process_manager},
         messages::{Messages, Notifications, Responses},
         subscription::{self, pyro},
         writing, Item, Mail, ProcId, Runtime, SpawnError, SpawnResult, Topology,
@@ -142,26 +142,22 @@ impl ManagerCommand {
     }
 }
 
-pub struct Manager<S> {
+pub struct Manager {
     options: Options,
     client: ManagerClient,
-    runtime: Runtime<S>,
     catalog: Catalog,
     proc_id_gen: ProcId,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
-    closed: Arc<AtomicBool>,
     close_resp: Vec<oneshot::Sender<()>>,
     processes_shutting_down: HashMap<u64, Proc>,
+    reporter: ShutdownReporter,
 }
 
-impl<S> Manager<S>
-where
-    S: Storage + Send + Sync + 'static,
-{
+impl Manager {
     fn handle_find(&mut self, cmd: FindParams) -> eyre::Result<()> {
-        let _ = cmd.resp.send(self.catalog.lookup(&proc)?);
+        let _ = cmd.resp.send(self.catalog.lookup(&cmd.proc)?);
     }
 
     fn handle_send(&mut self, cmd: SendParams) -> eyre::Result<()> {
@@ -169,7 +165,7 @@ where
             Item::Mail(mail) => {
                 if let Some(resp) = self.requests.remove(&mail.correlation) {
                     let _ = resp.send(mail);
-                } else if let Some(proc) = self.catalog.monitor.get_mut(&cmd.dest) {
+                } else if let Some(proc) = self.catalog.get_process_mut(&cmd.dest) {
                     if let Some(resp) = cmd.resp {
                         self.requests.insert(mail.correlation, resp);
                         proc.last_received_request = mail.correlation;
@@ -187,7 +183,7 @@ where
             }
 
             Item::Stream(stream) => {
-                if let Some(proc) = self.catalog.monitor.get(&cmd.dest) {
+                if let Some(proc) = self.catalog.get_process(&cmd.dest) {
                     if !proc.mailbox.send(Item::Stream(stream)) {
                         self.handle_terminate(ProcTerminatedParams {
                             id: cmd.dest,
@@ -200,51 +196,24 @@ where
     }
 
     fn handle_wait_for(&mut self, cmd: WaitForParams) -> eyre::Result<()> {
-        let id = if let Some(topology) = self.catalog.inner.get_mut(&cmd.proc) {
-            match topology {
-                Topology::Singleton(prev) => {
-                    if let Some(id) = prev.as_ref() {
-                        // no need to track if the process that started this new process is the manager itself.
-                        if cmd.origin != 0 {
-                            if let Some(running) = self.catalog.monitor.get_mut(id) {
-                                running.dependents.push(cmd.origin);
-                            } else {
-                                tracing::error!(id = id, proc = ?cmd.proc, "running process was expected but is not found");
-                                panic!();
-                            }
-                        }
-
-                        let _ = cmd.resp.send(SpawnResult::Success(*id));
-                        return Ok(());
-                    } else {
-                        let id = self.proc_id_gen;
-                        self.proc_id_gen += 1;
-                        *prev = Some(id);
-                        id
-                    }
-                }
-
-                Topology::Multiple { limit, instances } => {
-                    if instances.len() + 1 > *limit {
-                        let _ = cmd.resp.send(SpawnResult::Failure {
-                            proc: cmd.proc,
-                            error: SpawnError::LimitReached,
-                        });
-                        return Ok(());
-                    }
-
-                    let id = self.proc_id_gen;
-                    self.proc_id_gen += 1;
-
-                    instances.insert(id);
-                    id
-                }
+        let id = match self.catalog.provision_process(cmd.origin, cmd.proc)? {
+            ProvisionResult::AlreadyProvisioned(id) => {
+                let _ = cmd.resp.send(SpawnResult::Success(id));
+                return Ok(());
             }
-        } else {
-            eyre::bail!("process {:?} is not registered", cmd.proc);
+
+            ProvisionResult::LimitReached => {
+                let _ = cmd.resp.send(SpawnResult::Failure {
+                    proc: cmd.proc,
+                    error: SpawnError::LimitReached,
+                });
+
+                return Ok(());
+            }
+
+            ProvisionResult::Available(id) => id,
         };
 
-        let runtime = self.runtime.clone();
         let mut client = self.client.new_with_overrides(id, cmd.proc);
         let options = self.options.clone();
 

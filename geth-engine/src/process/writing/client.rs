@@ -19,7 +19,7 @@ impl WriterClient {
         Self { target, inner }
     }
 
-    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn append(
         &self,
         context: RequestContext,
@@ -78,7 +78,7 @@ impl WriterClient {
         }
     }
 
-    #[instrument(skip(self, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn delete(
         &self,
         context: RequestContext,

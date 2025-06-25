@@ -9,13 +9,35 @@ use crate::{
     Proc, RequestContext,
 };
 
+#[derive(Debug)]
+pub enum ProvisionResult {
+    AlreadyProvisioned(ProcId),
+    Available(ProcId),
+    LimitReached,
+}
+
+#[derive(Default)]
+pub struct ProcIdGen {
+    inner: u64,
+}
+
+impl ProcIdGen {
+    fn next_proc_id(&mut self) -> ProcId {
+        let id = self.inner;
+        self.inner += 1;
+        id
+    }
+}
+
+#[derive(Default)]
 pub struct Catalog {
+    id_gen: ProcIdGen,
     inner: HashMap<Proc, Topology>,
     monitor: HashMap<ProcId, RunningProc>,
 }
 
 impl Catalog {
-    fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
+    pub fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
         if let Some(topology) = self.inner.get(proc) {
             return match &topology {
                 Topology::Singleton(prev) => {
@@ -40,12 +62,64 @@ impl Catalog {
         eyre::bail!("process {:?} is not registered", proc);
     }
 
+    pub fn provision_process(
+        &mut self,
+        dependent: ProcId,
+        proc: Proc,
+    ) -> eyre::Result<ProvisionResult> {
+        let topology = if let Some(t) = self.inner.get_mut(&proc) {
+            t
+        } else {
+            eyre::bail!("process {:?} is not registered", proc);
+        };
+
+        match topology {
+            Topology::Singleton(prev) => {
+                if let Some(prev_id) = &prev {
+                    // no need to track if the process that started this new process is the manager itself.
+                    if dependent != 0 {
+                        if let Some(running) = self.monitor.get_mut(prev_id) {
+                            running.dependents.push(dependent);
+                        } else {
+                            eyre::bail!(
+                                "running process {} was expected but is not found",
+                                prev_id
+                            );
+                        }
+                    }
+
+                    Ok(ProvisionResult::AlreadyProvisioned(prev_id))
+                } else {
+                    let new_id = self.id_gen.next_proc_id();
+                    *prev = Some(new_id);
+
+                    Ok(ProvisionResult::Available(new_id))
+                }
+            }
+
+            Topology::Multiple { limit, instances } => {
+                if instances.len() + 1 > *limit {
+                    return Ok(ProvisionResult::LimitReached);
+                }
+
+                let new_id = self.id_gen.next_proc_id();
+                instances.insert(new_id);
+
+                Ok(ProvisionResult::Available(new_id))
+            }
+        }
+    }
+
     pub fn monitor_process(&mut self, running: RunningProc) {
         self.monitor.insert(running.id, running);
     }
 
     pub fn get_process(&self, id: ProcId) -> Option<&RunningProc> {
         self.monitor.get(&id)
+    }
+
+    pub fn get_process_mut(&mut self, id: ProcId) -> Option<&mut RunningProc> {
+        self.monitor.get_mut(&id)
     }
 
     pub fn remove_process(&mut self, id: ProcId) -> Option<RunningProc> {
@@ -123,6 +197,7 @@ impl CatalogBuilder {
 
     pub fn build(self) -> Catalog {
         Catalog {
+            id_gen: Default::default(),
             inner: self.inner,
             monitor: Default::default(),
         }

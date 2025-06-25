@@ -43,11 +43,15 @@ pub(crate) fn get_chunk_container() -> &'static ChunkContainer {
 }
 
 fn configure_storage(options: &Options) -> eyre::Result<Storage> {
-    if options.db == "in_mem" {
-        return Ok(InMemoryStorage::new());
-    }
+    let storage = if options.db == "in_mem" {
+        InMemoryStorage::new()
+    } else {
+        FileSystemStorage::new(options.db.as_str().into())?
+    };
 
-    FileSystemStorage::new(options.db.as_str().into())
+    storage.init()?;
+
+    Ok(storage)
 }
 
 pub async fn run(options: Options) -> eyre::Result<()> {

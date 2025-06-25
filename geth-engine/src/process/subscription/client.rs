@@ -251,7 +251,7 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
-    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn push(&self, context: RequestContext, events: Vec<Record>) -> eyre::Result<()> {
         tracing::debug!("sending push request to pubsub process {}", self.target);
 

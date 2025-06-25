@@ -1,7 +1,7 @@
 use std::io;
 
 use geth_common::IteratorIO;
-use geth_mikoshi::FileSystemStorage;
+use geth_mikoshi::storage::Storage;
 use geth_mikoshi::InMemoryStorage;
 
 use crate::index::block::BlockEntry;
@@ -26,7 +26,7 @@ pub fn position_of(idx: usize) -> u64 {
     idx as u64
 }
 
-pub fn in_mem_generate_block() -> SsTable<InMemoryStorage> {
+pub fn in_mem_generate_block() -> SsTable {
     let mut table = SsTable::new(InMemoryStorage::new(), 4_096);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     table.put_iter(values).unwrap();
@@ -34,7 +34,7 @@ pub fn in_mem_generate_block() -> SsTable<InMemoryStorage> {
     table
 }
 
-pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
+pub fn in_mem_generate_sst() -> SsTable {
     let mut table = SsTable::new(InMemoryStorage::new(), 128);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     table.put_iter(values).unwrap();
@@ -42,10 +42,7 @@ pub fn in_mem_generate_sst() -> SsTable<InMemoryStorage> {
     table
 }
 
-pub fn fs_generate_stt_with_size(
-    storage: FileSystemStorage,
-    num_elems: usize,
-) -> io::Result<SsTable<FileSystemStorage>> {
+pub fn fs_generate_stt_with_size(storage: Storage, num_elems: usize) -> io::Result<SsTable> {
     let mut table = SsTable::with_capacity(storage, num_elems);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     table.put_iter(values)?;

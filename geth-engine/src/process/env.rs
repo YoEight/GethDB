@@ -1,6 +1,10 @@
-use std::future::Future;
+use std::{future::Future, path::is_separator};
 
-use tokio::{runtime::Handle, sync::mpsc::UnboundedReceiver, task::JoinHandle};
+use tokio::{
+    runtime::Handle,
+    sync::{mpsc::UnboundedReceiver, oneshot},
+    task::JoinHandle,
+};
 
 use crate::{
     process::{subscription::SubscriptionClient, Item},
@@ -16,19 +20,29 @@ pub struct Raw {
     pub handle: Handle,
 }
 
+type ReadyCallback = Option<oneshot::Sender<()>>;
+
 pub struct ProcessEnv<A> {
     pub proc: Proc,
     pub client: ManagerClient,
     pub options: Options,
+    ready: ReadyCallback,
     inner: A,
 }
 
 impl<A> ProcessEnv<A> {
-    pub fn new(proc: Proc, client: ManagerClient, options: Options, inner: A) -> Self {
+    pub fn new(
+        proc: Proc,
+        client: ManagerClient,
+        options: Options,
+        ready: ReadyCallback,
+        inner: A,
+    ) -> Self {
         Self {
             proc,
             client,
             options,
+            ready,
             inner,
         }
     }
@@ -36,6 +50,10 @@ impl<A> ProcessEnv<A> {
 
 impl ProcessEnv<Managed> {
     pub async fn recv(&mut self) -> Option<Item> {
+        if let Some(ready) = self.ready.take() {
+            let _ = ready.send(());
+        }
+
         if let Some(item) = self.inner.queue.recv().await {
             if item.is_shutdown() {
                 return None;
@@ -50,6 +68,10 @@ impl ProcessEnv<Managed> {
 
 impl ProcessEnv<Raw> {
     pub fn recv(&self) -> Option<Item> {
+        if let Some(ready) = self.ready.take() {
+            let _ = ready.send(());
+        }
+
         if let Ok(item) = self.inner.queue.recv() {
             if item.is_shutdown() {
                 return None;
