@@ -13,7 +13,7 @@ use bytes::{Bytes, BytesMut};
 use crate::constants::CHUNK_SIZE;
 use crate::storage::{FileCategory, FileId, Storage};
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct FileSystemStorage {
     root: PathBuf,
     buffer: BytesMut,
@@ -21,14 +21,14 @@ pub struct FileSystemStorage {
 }
 
 impl FileSystemStorage {
-    pub fn new(root: PathBuf) -> io::Result<Self> {
+    pub fn new(root: PathBuf) -> io::Result<Storage> {
         std::fs::create_dir_all(root.as_path())?;
 
-        Ok(Self {
+        Ok(Storage::FileSystem(Self {
             root,
             buffer: BytesMut::default(),
             inner: Arc::new(Mutex::new(Default::default())),
-        })
+        }))
     }
 
     fn load_or_create(&self, id: FileId) -> io::Result<Arc<File>> {
@@ -77,8 +77,8 @@ impl FileSystemStorage {
     }
 }
 
-impl Storage for FileSystemStorage {
-    fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
+impl FileSystemStorage {
+    pub fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
         let file = self.load_or_create(id)?;
 
         #[cfg(target_family = "unix")]
@@ -90,7 +90,7 @@ impl Storage for FileSystemStorage {
         Ok(())
     }
 
-    fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+    pub fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
         let mut file = self.load_or_create(id)?;
 
         let offset = file.seek(io::SeekFrom::End(0))?;
@@ -104,12 +104,12 @@ impl Storage for FileSystemStorage {
         Ok(())
     }
 
-    fn offset(&self, id: FileId) -> io::Result<u64> {
+    pub fn offset(&self, id: FileId) -> io::Result<u64> {
         let mut file = self.load_or_create(id)?;
         file.seek(io::SeekFrom::End(0))
     }
 
-    fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
+    pub fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
         let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         buffer.resize(len, 0);
@@ -121,7 +121,7 @@ impl Storage for FileSystemStorage {
         Ok(buffer.freeze())
     }
 
-    fn read_all(&self, id: FileId) -> io::Result<Bytes> {
+    pub fn read_all(&self, id: FileId) -> io::Result<Bytes> {
         let file = self.load_or_create(id)?;
         let mut buffer = self.buffer.clone();
         let len = file.metadata()?.len() as usize;
@@ -135,7 +135,7 @@ impl Storage for FileSystemStorage {
         Ok(buffer.freeze())
     }
 
-    fn exists(&self, id: FileId) -> io::Result<bool> {
+    pub fn exists(&self, id: FileId) -> io::Result<bool> {
         match std::fs::metadata(self.file_path(id)) {
             Err(e) if e.kind() == ErrorKind::NotFound => Ok(false),
             Err(e) => Err(e),
@@ -143,15 +143,15 @@ impl Storage for FileSystemStorage {
         }
     }
 
-    fn remove(&self, id: FileId) -> io::Result<()> {
+    pub fn remove(&self, id: FileId) -> io::Result<()> {
         std::fs::remove_file(self.file_path(id))
     }
 
-    fn len(&self, id: FileId) -> io::Result<usize> {
+    pub fn len(&self, id: FileId) -> io::Result<usize> {
         Ok(std::fs::metadata(self.file_path(id))?.len() as usize)
     }
 
-    fn list<C>(&self, category: C) -> io::Result<Vec<C::Item>>
+    pub fn list<C>(&self, category: C) -> io::Result<Vec<C::Item>>
     where
         C: FileCategory,
     {

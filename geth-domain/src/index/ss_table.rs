@@ -86,28 +86,25 @@ impl BlockMetas {
 }
 
 #[derive(Debug, Clone)]
-pub struct SsTable<S> {
+pub struct SsTable {
     pub id: Uuid,
-    pub storage: S,
+    pub storage: Storage,
     pub metas: BlockMetas,
     pub meta_offset: u64,
     pub block_size: usize,
     pub buffer: BytesMut,
 }
 
-impl<S> SsTable<S>
-where
-    S: Storage,
-{
-    pub fn new(storage: S, block_size: usize) -> Self {
+impl SsTable {
+    pub fn new(storage: Storage, block_size: usize) -> Self {
         Self::with_buffer(storage, block_size, BytesMut::new())
     }
 
-    pub fn with_capacity(storage: S, num_elems: usize) -> Self {
+    pub fn with_capacity(storage: Storage, num_elems: usize) -> Self {
         Self::new(storage, get_block_size(num_elems))
     }
 
-    pub fn with_buffer(storage: S, block_size: usize, buffer: BytesMut) -> Self {
+    pub fn with_buffer(storage: Storage, block_size: usize, buffer: BytesMut) -> Self {
         debug_assert!(
             block_size >= get_block_size(1),
             "block_size doesn't have the minimum viable value: {}",
@@ -124,11 +121,11 @@ where
         }
     }
 
-    pub fn with_default(storage: S) -> Self {
+    pub fn with_default(storage: Storage) -> Self {
         SsTable::new(storage, 4_096)
     }
 
-    pub fn load_with_buffer(storage: S, raw_id: Uuid, buffer: BytesMut) -> io::Result<Self> {
+    pub fn load_with_buffer(storage: Storage, raw_id: Uuid, buffer: BytesMut) -> io::Result<Self> {
         let id = FileId::SSTable(raw_id);
         let len = storage.len(id)?;
         let block_size = storage.read_from(id, 0, SSTABLE_HEADER_SIZE)?.get_u32_le() as usize;
@@ -145,7 +142,7 @@ where
         })
     }
 
-    pub fn load(storage: S, raw_id: Uuid) -> io::Result<Self> {
+    pub fn load(storage: Storage, raw_id: Uuid) -> io::Result<Self> {
         Self::load_with_buffer(storage, raw_id, BytesMut::new())
     }
 
@@ -278,7 +275,7 @@ where
         Ok(())
     }
 
-    pub fn iter(&self) -> SsTableIter<S> {
+    pub fn iter(&self) -> SsTableIter {
         SsTableIter {
             block_idx: 0,
             entry_idx: 0,
@@ -291,7 +288,7 @@ where
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> ScanForward<S> {
+    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> ScanForward {
         ScanForward {
             key,
             revision: start,
@@ -303,7 +300,7 @@ where
         }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanBackward<S> {
+    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanBackward {
         let mut candidates = self.find_best_candidates(key, start);
 
         candidates.rotate_left(candidates.len() - 1);
@@ -320,17 +317,14 @@ where
     }
 }
 
-pub struct SsTableIter<S> {
+pub struct SsTableIter {
     block_idx: usize,
     entry_idx: usize,
     block: Option<Block>,
-    table: SsTable<S>,
+    table: SsTable,
 }
 
-impl<S> IteratorIO for SsTableIter<S>
-where
-    S: Storage,
-{
+impl IteratorIO for SsTableIter {
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
@@ -358,20 +352,17 @@ where
     }
 }
 
-pub struct ScanForward<'a, S> {
+pub struct ScanForward<'a> {
     key: u64,
     revision: u64,
     count: usize,
     block_idx: usize,
     block_scan: Option<crate::index::block::immutable::ScanForward>,
-    table: &'a SsTable<S>,
+    table: &'a SsTable,
     candidates: VecDeque<usize>,
 }
 
-impl<S> IteratorIO for ScanForward<'_, S>
-where
-    S: Storage,
-{
+impl IteratorIO for ScanForward<'_> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {
@@ -411,20 +402,17 @@ where
     }
 }
 
-pub struct ScanBackward<'a, S> {
+pub struct ScanBackward<'a> {
     key: u64,
     revision: u64,
     count: usize,
     block_idx: Option<usize>,
     block_scan: Option<crate::index::block::immutable::ScanBackward>,
-    table: &'a SsTable<S>,
+    table: &'a SsTable,
     candidates: VecDeque<usize>,
 }
 
-impl<S> IteratorIO for ScanBackward<'_, S>
-where
-    S: Storage,
-{
+impl IteratorIO for ScanBackward<'_> {
     type Item = BlockEntry;
 
     fn next(&mut self) -> io::Result<Option<Self::Item>> {

@@ -37,21 +37,18 @@ impl Default for LsmSettings {
 }
 
 #[derive(Clone)]
-pub struct Lsm<S> {
-    pub storage: S,
+pub struct Lsm {
+    pub storage: Storage,
     pub buffer: BytesMut,
     pub settings: LsmSettings,
     pub active_table: MemTable,
     pub logical_position: u64,
     pub immutable_tables: VecDeque<MemTable>,
-    pub levels: BTreeMap<u8, VecDeque<SsTable<S>>>,
+    pub levels: BTreeMap<u8, VecDeque<SsTable>>,
 }
 
-impl<S> Lsm<S>
-where
-    S: Storage + Send + Sync + 'static,
-{
-    pub fn new(settings: LsmSettings, storage: S) -> Self {
+impl Lsm {
+    pub fn new(settings: LsmSettings, storage: Storage) -> Self {
         Self {
             storage,
             buffer: BytesMut::new(),
@@ -63,15 +60,15 @@ where
         }
     }
 
-    pub fn with_default(storage: S) -> Self {
+    pub fn with_default(storage: Storage) -> Self {
         Self::new(Default::default(), storage)
     }
 
-    pub fn storage(&self) -> &S {
+    pub fn storage(&self) -> &Storage {
         &self.storage
     }
 
-    pub fn load(settings: LsmSettings, storage: S) -> io::Result<Self> {
+    pub fn load(settings: LsmSettings, storage: Storage) -> io::Result<Self> {
         let mut lsm = Lsm::new(settings, storage.clone());
 
         if storage.exists(FileId::IndexMap)? {
@@ -96,7 +93,7 @@ where
         self.levels.values().map(|ts| ts.len()).sum()
     }
 
-    pub fn ss_table_first(&self) -> Option<SsTable<S>> {
+    pub fn ss_table_first(&self) -> Option<SsTable> {
         self.levels.get(&0)?.front().cloned()
     }
 
@@ -114,7 +111,6 @@ where
     pub fn put<Values>(&mut self, mut values: Values) -> io::Result<()>
     where
         Values: IteratorIO<Item = (u64, u64, u64)>,
-        S: Storage,
     {
         while let Some((key, revision, position)) = values.next()? {
             self.active_table.put(key, revision, position);
@@ -216,7 +212,7 @@ where
         key: u64,
         start: u64,
         count: usize,
-    ) -> impl IteratorIO<Item = BlockEntry> + use<'_, S> {
+    ) -> impl IteratorIO<Item = BlockEntry> + use<'_> {
         let mut builder = Merge::builder();
 
         builder.push_mem_table_scan(self.active_table.scan_forward(key, start, count));
@@ -239,7 +235,7 @@ where
         key: u64,
         start: u64,
         count: usize,
-    ) -> impl IteratorIO<Item = BlockEntry> + use<'_, S> {
+    ) -> impl IteratorIO<Item = BlockEntry> + use<'_> {
         let mut builder = Merge::builder();
 
         builder.push_mem_table_scan(self.active_table.scan_backward(key, start, count));

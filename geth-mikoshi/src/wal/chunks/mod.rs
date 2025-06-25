@@ -34,16 +34,13 @@ struct ContainerInner {
 }
 
 #[derive(Clone)]
-pub struct ChunkContainer<S> {
+pub struct ChunkContainer {
     inner: Arc<RwLock<ContainerInner>>,
-    storage: S,
+    storage: Storage,
 }
 
-impl<S> ChunkContainer<S> {
-    pub fn load(storage: S) -> io::Result<ChunkContainer<S>>
-    where
-        S: Storage,
-    {
+impl ChunkContainer {
+    pub fn load(storage: Storage) -> io::Result<ChunkContainer> {
         let mut buffer = BytesMut::new();
         let mut sorted_chunks = BTreeMap::<usize, ChunkInfo>::new();
 
@@ -124,10 +121,7 @@ impl<S> ChunkContainer<S> {
         Ok(None)
     }
 
-    pub fn new_chunk(&self, buffer: &mut BytesMut, position: u64) -> eyre::Result<Chunk>
-    where
-        S: Storage,
-    {
+    pub fn new_chunk(&self, buffer: &mut BytesMut, position: u64) -> eyre::Result<Chunk> {
         let mut inner = self
             .inner
             .write()
@@ -158,7 +152,7 @@ impl<S> ChunkContainer<S> {
         Ok(new_chunk)
     }
 
-    pub fn storage(&self) -> &S {
+    pub fn storage(&self) -> &Storage {
         &self.storage
     }
 }

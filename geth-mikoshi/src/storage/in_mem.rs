@@ -7,6 +7,7 @@ use bytes::{BufMut, Bytes, BytesMut};
 use crate::constants::CHUNK_SIZE;
 use crate::storage::{FileCategory, FileId, Storage};
 
+#[derive(Debug)]
 struct Internal {
     buffer: BytesMut,
     map: HashMap<FileId, BytesMut>,
@@ -21,14 +22,14 @@ impl Default for Internal {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct InMemoryStorage {
     inner: Arc<Mutex<Internal>>,
 }
 
 impl InMemoryStorage {
-    pub fn new() -> Self {
-        InMemoryStorage::default()
+    pub fn new() -> Storage {
+        Storage::InMemory(InMemoryStorage::default())
     }
 }
 
@@ -40,8 +41,8 @@ impl Default for InMemoryStorage {
     }
 }
 
-impl Storage for InMemoryStorage {
-    fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
+impl InMemoryStorage {
+    pub fn write_to(&self, id: FileId, offset: u64, bytes: Bytes) -> io::Result<()> {
         let mut inner = self.inner.lock().unwrap();
         let offset = offset as usize;
 
@@ -94,7 +95,7 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
+    pub fn append(&self, id: FileId, bytes: Bytes) -> io::Result<()> {
         if let FileId::Chunk { .. } = id {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -116,7 +117,7 @@ impl Storage for InMemoryStorage {
         Ok(())
     }
 
-    fn offset(&self, id: FileId) -> io::Result<u64> {
+    pub fn offset(&self, id: FileId) -> io::Result<u64> {
         if let FileId::Chunk { .. } = id {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -136,7 +137,7 @@ impl Storage for InMemoryStorage {
         ))
     }
 
-    fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
+    pub fn read_from(&self, id: FileId, offset: u64, len: usize) -> io::Result<Bytes> {
         let inner = self.inner.lock().unwrap();
 
         if let Some(buffer) = inner.map.get(&id) {
@@ -158,7 +159,7 @@ impl Storage for InMemoryStorage {
         ))
     }
 
-    fn read_all(&self, id: FileId) -> io::Result<Bytes> {
+    pub fn read_all(&self, id: FileId) -> io::Result<Bytes> {
         let inner = self.inner.lock().unwrap();
 
         if let Some(buffer) = inner.map.get(&id) {
@@ -171,19 +172,19 @@ impl Storage for InMemoryStorage {
         ))
     }
 
-    fn exists(&self, id: FileId) -> io::Result<bool> {
+    pub fn exists(&self, id: FileId) -> io::Result<bool> {
         let inner = self.inner.lock().unwrap();
         Ok(inner.map.contains_key(&id))
     }
 
-    fn remove(&self, id: FileId) -> io::Result<()> {
+    pub fn remove(&self, id: FileId) -> io::Result<()> {
         let mut inner = self.inner.lock().unwrap();
         inner.map.remove(&id);
 
         Ok(())
     }
 
-    fn len(&self, id: FileId) -> io::Result<usize> {
+    pub fn len(&self, id: FileId) -> io::Result<usize> {
         let inner = self.inner.lock().unwrap();
 
         if let Some(buffer) = inner.map.get(&id) {
@@ -196,7 +197,7 @@ impl Storage for InMemoryStorage {
         ))
     }
 
-    fn list<C>(&self, _category: C) -> io::Result<Vec<C::Item>>
+    pub fn list<C>(&self, _category: C) -> io::Result<Vec<C::Item>>
     where
         C: FileCategory,
     {

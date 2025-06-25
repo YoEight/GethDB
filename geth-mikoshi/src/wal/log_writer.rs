@@ -14,17 +14,14 @@ const ENTRY_HEADER_SIZE: usize = size_of::<u64>() // log position
 
 const ENTRY_META_SIZE: usize = ENTRY_PREFIX_SIZE + size_of::<u32>(); // post-entry size;
 
-pub struct LogWriter<S> {
-    container: ChunkContainer<S>,
+pub struct LogWriter {
+    container: ChunkContainer,
     buffer: BytesMut,
     writer: u64,
 }
 
-impl<S> LogWriter<S>
-where
-    S: Storage,
-{
-    pub fn load(container: ChunkContainer<S>, buffer: BytesMut) -> eyre::Result<LogWriter<S>> {
+impl LogWriter {
+    pub fn load(container: ChunkContainer, buffer: BytesMut) -> eyre::Result<LogWriter> {
         let storage = container.storage();
         let mut writer = 0u64;
 
@@ -123,7 +120,7 @@ where
     }
 }
 
-fn flush_writer_chk<S: Storage>(storage: &S, log_pos: u64) -> io::Result<()> {
+fn flush_writer_chk(storage: &Storage, log_pos: u64) -> io::Result<()> {
     storage.write_to(
         FileId::writer_chk(),
         0,

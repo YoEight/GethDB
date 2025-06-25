@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::storage::{FileId, Storage};
+use crate::storage::FileId;
 use crate::wal::chunks::ChunkContainer;
 use crate::wal::LogEntry;
 use bytes::Buf;
@@ -8,22 +8,16 @@ use bytes::Buf;
 use super::chunks::Chunk;
 
 #[derive(Clone)]
-pub struct LogReader<S> {
-    container: ChunkContainer<S>,
+pub struct LogReader {
+    container: ChunkContainer,
 }
 
-impl<S> LogReader<S>
-where
-    S: Storage,
-{
-    pub fn new(container: ChunkContainer<S>) -> Self {
+impl LogReader {
+    pub fn new(container: ChunkContainer) -> Self {
         Self { container }
     }
 
-    pub fn read_at(&self, position: u64) -> eyre::Result<LogEntry>
-    where
-        S: Storage,
-    {
+    pub fn read_at(&self, position: u64) -> eyre::Result<LogEntry> {
         let chunk = if let Some(chunk) = self.container.find(position)? {
             chunk
         } else {
@@ -40,14 +34,11 @@ where
         Ok(position.get_u64_le())
     }
 
-    pub fn entries(&self, start: u64, limit: u64) -> Entries<S> {
+    pub fn entries(&self, start: u64, limit: u64) -> Entries {
         Entries::new(self, start, limit)
     }
 
-    fn chunk_read_at(&self, chunk: &Chunk, position: u64) -> eyre::Result<LogEntry>
-    where
-        S: Storage,
-    {
+    fn chunk_read_at(&self, chunk: &Chunk, position: u64) -> eyre::Result<LogEntry> {
         let storage = self.container.storage();
 
         let local_offset = chunk.raw_position(position);
@@ -79,15 +70,15 @@ where
     }
 }
 
-pub struct Entries<'a, S> {
-    inner: &'a LogReader<S>,
+pub struct Entries<'a> {
+    inner: &'a LogReader,
     current: u64,
     limit: u64,
     chunk: Option<Chunk>,
 }
 
-impl<'a, S> Entries<'a, S> {
-    pub fn new(inner: &'a LogReader<S>, start: u64, limit: u64) -> Self {
+impl<'a> Entries<'a> {
+    pub fn new(inner: &'a LogReader, start: u64, limit: u64) -> Self {
         Self {
             inner,
             current: start,
@@ -96,10 +87,7 @@ impl<'a, S> Entries<'a, S> {
         }
     }
 
-    pub fn next(&mut self) -> eyre::Result<Option<LogEntry>>
-    where
-        S: Storage,
-    {
+    pub fn next(&mut self) -> eyre::Result<Option<LogEntry>> {
         loop {
             if self.current >= self.limit {
                 return Ok(None);
