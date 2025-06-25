@@ -40,21 +40,39 @@ impl Catalog {
         eyre::bail!("process {:?} is not registered", proc);
     }
 
-    fn remove(&mut self, running: &RunningProc) {
-        if let Some(mut topology) = self.inner.get_mut(&running.proc) {
-            match &mut topology {
-                Topology::Singleton(prev) => {
-                    *prev = None;
-                }
-
-                Topology::Multiple { instances, .. } => {
-                    instances.remove(&running.id);
-                }
-            }
-        }
+    pub fn monitor_process(&mut self, running: RunningProc) {
+        self.monitor.insert(running.id, running);
     }
 
-    fn clear_running_processes(&mut self) {
+    pub fn get_process(&self, id: ProcId) -> Option<&RunningProc> {
+        self.monitor.get(&id)
+    }
+
+    pub fn remove_process(&mut self, id: ProcId) -> Option<RunningProc> {
+        if let Some(running) = self.monitor.remove(&id) {
+            if let Some(mut topology) = self.inner.get_mut(&running.proc) {
+                match &mut topology {
+                    Topology::Singleton(prev) => {
+                        *prev = None;
+                    }
+
+                    Topology::Multiple { instances, .. } => {
+                        instances.remove(&running.id);
+                    }
+                }
+            }
+
+            return Some(running);
+        }
+
+        None
+    }
+
+    pub fn processes<'a>(&'a self) -> impl Iterator<Item = &'a RunningProc> {
+        self.monitor.values()
+    }
+
+    pub fn clear_running_processes(&mut self) {
         let now = Instant::now();
         for (_, running) in std::mem::take(&mut self.monitor) {
             self.remove(&running);

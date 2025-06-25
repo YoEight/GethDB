@@ -1,4 +1,4 @@
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use geth_common::ProgramSummary;
 use tokio::sync::{
@@ -10,7 +10,10 @@ use uuid::Uuid;
 
 use crate::{
     process::{
-        manager::{ManagerCommand, ShutdownNotification},
+        manager::{
+            FindParams, ManagerCommand, ProcTerminatedParams, SendParams, ShutdownNotification,
+            ShutdownParams, TimeoutParams, WaitForParams,
+        },
         messages::Messages,
         subscription::SubscriptionClient,
         Item, Mail, ProcId, SpawnResult, Stream,
@@ -53,16 +56,18 @@ impl ManagerClient {
         self.id
     }
 
-    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
-        let (resp, receiver) = oneshot::channel();
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::Find { proc, resp })
-                .is_err()
-        {
+    pub fn send_internal(&self, cmd: ManagerCommand) -> eyre::Result<()> {
+        if self.shutdown_notif.is_shutdown() || self.inner.send(cmd).is_err() {
             eyre::bail!("process manager has shutdown");
         }
+
+        Ok(())
+    }
+
+    pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
+        let (resp, receiver) = oneshot::channel();
+
+        self.send_internal(ManagerCommand::Find(FindParams { proc, resp }));
 
         match receiver.await {
             Ok(ps) => Ok(ps),
@@ -86,26 +91,17 @@ impl ManagerClient {
         correlation: Uuid,
         payload: Messages,
     ) -> eyre::Result<()> {
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::Send {
-                    dest,
-                    item: Item::Mail(Mail {
-                        context,
-                        origin: self.id,
-                        correlation,
-                        payload,
-                        created: Instant::now(),
-                    }),
-                    resp: None,
-                })
-                .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
-
-        Ok(())
+        self.send_internal(ManagerCommand::Send(SendParams {
+            dest,
+            item: Item::Mail(Mail {
+                context,
+                origin: self.id,
+                correlation,
+                payload,
+                created: Instant::now(),
+            }),
+            resp: None,
+        }))
     }
 
     pub async fn request_opt(
@@ -115,24 +111,17 @@ impl ManagerClient {
         payload: Messages,
     ) -> eyre::Result<Option<Mail>> {
         let (resp, receiver) = oneshot::channel();
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::Send {
-                    dest,
-                    item: Item::Mail(Mail {
-                        context,
-                        origin: self.id,
-                        correlation: Uuid::new_v4(),
-                        payload,
-                        created: Instant::now(),
-                    }),
-                    resp: Some(resp),
-                })
-                .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
+        self.send_internal(ManagerCommand::Send(SendParams {
+            dest,
+            item: Item::Mail(Mail {
+                context,
+                origin: self.id,
+                correlation: Uuid::new_v4(),
+                payload,
+                created: Instant::now(),
+            }),
+            resp: Some(resp),
+        }))?;
 
         Ok(receiver.await.ok())
     }
@@ -157,23 +146,16 @@ impl ManagerClient {
         payload: Messages,
     ) -> eyre::Result<UnboundedReceiver<Messages>> {
         let (sender, receiver) = unbounded_channel();
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::Send {
-                    dest,
-                    item: Item::Stream(Stream {
-                        context,
-                        correlation: Uuid::new_v4(),
-                        payload,
-                        sender,
-                    }),
-                    resp: None,
-                })
-                .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
+        self.send_internal(ManagerCommand::Send(SendParams {
+            dest,
+            item: Item::Stream(Stream {
+                context,
+                correlation: Uuid::new_v4(),
+                payload,
+                sender,
+            }),
+            resp: None,
+        }))?;
 
         Ok(receiver)
     }
@@ -185,43 +167,27 @@ impl ManagerClient {
         correlation: Uuid,
         payload: Messages,
     ) -> eyre::Result<()> {
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::Send {
-                    dest,
-                    item: Item::Mail(Mail {
-                        context,
-                        origin: self.id,
-                        correlation,
-                        payload,
-                        created: Instant::now(),
-                    }),
-                    resp: None,
-                })
-                .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
-
-        Ok(())
+        self.send_internal(ManagerCommand::Send(SendParams {
+            dest,
+            item: Item::Mail(Mail {
+                context,
+                origin: self.id,
+                correlation,
+                payload,
+                created: Instant::now(),
+            }),
+            resp: None,
+        }))
     }
 
     #[instrument(skip(self), fields(origin = ?self.origin_proc))]
     pub async fn wait_for(&self, proc: Proc) -> eyre::Result<SpawnResult> {
         let (resp, receiver) = oneshot::channel();
-        if self.shutdown_notif.is_shutdown()
-            || self
-                .inner
-                .send(ManagerCommand::WaitFor {
-                    origin: self.id,
-                    proc,
-                    resp,
-                })
-                .is_err()
-        {
-            eyre::bail!("process manager has shutdown");
-        }
+        self.send_internal(ManagerCommand::WaitFor(WaitForParams {
+            origin: self.id,
+            proc,
+            resp,
+        }))?;
 
         tracing::debug!(proc = ?proc, "waiting for process to be available...");
 
@@ -235,6 +201,13 @@ impl ManagerClient {
             }
             Err(_) => eyre::bail!("process manager has shutdown"),
         }
+    }
+
+    pub fn report_process_terminated(&self, id: ProcId, error: Option<eyre::Report>) {
+        let _ = self.send_internal(ManagerCommand::ProcTerminated(ProcTerminatedParams {
+            id,
+            error,
+        }));
     }
 
     pub async fn new_writer_client(&self) -> eyre::Result<WriterClient> {
@@ -257,9 +230,21 @@ impl ManagerClient {
         Ok(ReaderClient::new(id, self.clone()))
     }
 
+    pub fn send_timeout_in(&self, correlation: Uuid, duration: Duration) -> eyre::Result<()> {
+        let this = self.clone();
+
+        tokio::spawn(async move {
+            tokio::time::sleep(duration).await;
+            this.send_internal(ManagerCommand::Timeout(TimeoutParams { correlation }))
+        });
+    }
+
     pub async fn shutdown(&self) -> eyre::Result<()> {
         let (resp, recv) = oneshot::channel();
-        if self.inner.send(ManagerCommand::Shutdown { resp }).is_err() {
+        if self
+            .send_internal(ManagerCommand::Shutdown(ShutdownParams { resp }))
+            .is_err()
+        {
             return Ok(());
         }
 
