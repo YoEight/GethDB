@@ -19,7 +19,7 @@ impl IndexClient {
         Self { target, inner }
     }
 
-    #[instrument(skip(self, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn read(
         &self,
         context: RequestContext,
@@ -74,7 +74,7 @@ impl IndexClient {
         eyre::bail!("unexpected message from the index process");
     }
 
-    #[instrument(skip(self, entries, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, entries, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn store(
         &self,
         context: RequestContext,
@@ -108,7 +108,7 @@ impl IndexClient {
         eyre::bail!("unexpected message from the index process");
     }
 
-    #[instrument(skip(self, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn latest_revision(
         &self,
         context: RequestContext,

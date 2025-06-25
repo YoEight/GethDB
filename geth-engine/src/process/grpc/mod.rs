@@ -7,8 +7,8 @@ use geth_common::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{
-    process::{Managed, ProcessEnv},
-    ManagerClient, Options, Proc,
+    process::{manager::ManagerClient, Managed, ProcessEnv},
+    Options, Proc,
 };
 
 mod protocol;

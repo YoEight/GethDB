@@ -2,12 +2,12 @@ use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
-use crate::process::{Item, ProcessEnv, Raw, RequestContext, Runtime};
+use crate::process::{Item, ProcessEnv, Raw, RequestContext};
+use crate::{get_chunk_container, get_storage};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
 use std::cmp::min;
@@ -26,18 +26,12 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
-#[instrument(skip(runtime, env), fields(origin = ?env.proc))]
-pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-{
-    let mut lsm = Lsm::load(
-        LsmSettings::default(),
-        runtime.container().storage().clone(),
-    )?;
+#[instrument(skip(env), fields(origin = ?env.proc))]
+pub fn run<S>(env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let mut lsm = Lsm::load(LsmSettings::default(), get_storage().clone())?;
 
     tracing::info!("rebuilding index...");
-    let revision_cache = rebuild_index(&mut lsm, runtime.container().clone())?;
+    let revision_cache = rebuild_index(&mut lsm, get_chunk_container().clone())?;
     tracing::info!("index rebuilt successfully");
 
     let lsm = Arc::new(RwLock::new(lsm));
@@ -163,10 +157,7 @@ where
     Ok(())
 }
 
-fn rebuild_index<S>(lsm: &mut Lsm<S>, container: ChunkContainer<S>) -> eyre::Result<RevisionCache>
-where
-    S: Storage + Send + Sync + 'static,
-{
+fn rebuild_index(lsm: &mut Lsm, container: ChunkContainer) -> eyre::Result<RevisionCache> {
     let reader = LogReader::new(container);
     let writer_checkpoint = reader.get_writer_checkpoint()?;
     let cache = new_revision_cache();
@@ -193,14 +184,11 @@ where
     Ok(cache)
 }
 
-fn key_latest_revision<S>(
-    lsm: &Lsm<S>,
+fn key_latest_revision(
+    lsm: &Lsm,
     cache: RevisionCache,
     stream_key: u64,
-) -> io::Result<CurrentRevision>
-where
-    S: Storage + Send + Sync + 'static,
-{
+) -> io::Result<CurrentRevision> {
     let current_revision = if let Some(current) = cache.get(&stream_key) {
         CurrentRevision::Revision(current)
     } else {
@@ -218,10 +206,7 @@ where
     Ok(current_revision)
 }
 
-fn store_entries<S>(lsm: &Arc<RwLock<Lsm<S>>>, entries: Vec<BlockEntry>) -> eyre::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-{
+fn store_entries(lsm: &Arc<RwLock<Lsm>>, entries: Vec<BlockEntry>) -> eyre::Result<()> {
     let mut lsm = lsm
         .write()
         .map_err(|e| eyre::eyre!("poisoned lock when writing to the index: {}", e))?;
@@ -231,9 +216,9 @@ where
     Ok(())
 }
 
-struct IndexRead<'a, S> {
+struct IndexRead<'a> {
     context: RequestContext,
-    lsm: Arc<RwLock<Lsm<S>>>,
+    lsm: Arc<RwLock<Lsm>>,
     cache: RevisionCache,
     key: u64,
     start: u64,
@@ -243,10 +228,7 @@ struct IndexRead<'a, S> {
 }
 
 #[instrument(skip(params), fields(correlation = %params.context.correlation, key = params.key, start = params.start, count = params.count, direction = ?params.dir))]
-fn stream_indexed_read<S>(params: IndexRead<'_, S>) -> eyre::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-{
+fn stream_indexed_read<S>(params: IndexRead<'_>) -> eyre::Result<()> {
     let lsm = params
         .lsm
         .read()

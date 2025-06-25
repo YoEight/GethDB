@@ -56,6 +56,10 @@ impl ManagerClient {
         self.id
     }
 
+    pub fn origin(&self) -> Proc {
+        self.origin_proc
+    }
+
     pub fn send_internal(&self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.shutdown_notif.is_shutdown() || self.inner.send(cmd).is_err() {
             eyre::bail!("process manager has shutdown");
