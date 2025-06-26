@@ -238,7 +238,7 @@ impl ManagerClient {
         Ok(ReaderClient::new(id, self.clone()))
     }
 
-    pub fn send_timeout_in(&self, correlation: Uuid, duration: Duration) -> eyre::Result<()> {
+    pub fn send_timeout_in(&self, correlation: Uuid, duration: Duration) {
         let this = self.clone();
 
         tokio::spawn(async move {

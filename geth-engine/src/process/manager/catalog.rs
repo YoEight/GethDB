@@ -8,17 +8,14 @@ use geth_common::ProgramSummary;
 use uuid::Uuid;
 
 use crate::{
-    process::{
-        manager::spawn::{Process, Run},
-        messages::Messages,
-        Item, Mail, ProcId, RunningProc,
-    },
+    process::{messages::Messages, Item, Mail, ProcId, RunningProc},
     Proc, RequestContext,
 };
 
+#[derive(Debug)]
 pub struct Provision {
     pub id: ProcId,
-    pub process: Process,
+    pub proc: Proc,
 }
 
 #[derive(Debug)]
@@ -42,12 +39,12 @@ impl ProcIdGen {
 }
 struct RegisteredProcess {
     limit: usize,
-    process: Process,
+    process: Proc,
     instances: HashSet<ProcId>,
 }
 
 impl RegisteredProcess {
-    fn singleton(process: Process) -> Self {
+    fn singleton(process: Proc) -> Self {
         Self {
             limit: 1,
             process,
@@ -55,7 +52,7 @@ impl RegisteredProcess {
         }
     }
 
-    fn multiple(limit: usize, process: Process) -> Self {
+    fn multiple(limit: usize, process: Proc) -> Self {
         debug_assert!(limit != 0);
 
         Self {
@@ -139,12 +136,15 @@ impl Catalog {
                     }
                 }
 
-                Ok(ProvisionResult::AlreadyProvisioned(prev_id))
+                Ok(ProvisionResult::AlreadyProvisioned(*prev_id))
             } else {
                 let new_id = self.id_gen.next_proc_id();
-                *prev = Some(new_id);
+                registered.add_instance(new_id);
 
-                Ok(ProvisionResult::Available(new_id))
+                Ok(ProvisionResult::Available(Provision {
+                    id: new_id,
+                    proc: registered.process,
+                }))
             }
         } else {
             // TODO - improve so adding a new instance is fool proof. Right now, we need to make
@@ -156,7 +156,10 @@ impl Catalog {
             let new_id = self.id_gen.next_proc_id();
             registered.add_instance(new_id);
 
-            Ok(ProvisionResult::Available(new_id))
+            Ok(ProvisionResult::Available(Provision {
+                id: new_id,
+                proc: registered.process,
+            }))
         }
     }
 
@@ -174,7 +177,7 @@ impl Catalog {
 
     pub fn remove_process(&mut self, id: ProcId) -> Option<RunningProc> {
         if let Some(running) = self.monitor.remove(&id) {
-            if let Some(mut registered) = self.inner.get_mut(&running.proc) {
+            if let Some(registered) = self.inner.get_mut(&running.proc) {
                 registered.remove_instance(id);
             }
 
@@ -190,9 +193,9 @@ impl Catalog {
 
     pub fn clear_running_processes(&mut self) {
         let now = Instant::now();
-        for (_, running) in std::mem::take(&mut self.monitor) {
-            self.remove(&running);
+        self.inner.clear();
 
+        for (_, running) in self.monitor.drain() {
             running.mailbox.send(Item::Mail(Mail {
                 origin: 0,
                 correlation: Uuid::nil(),
@@ -219,24 +222,24 @@ pub struct CatalogBuilder {
 }
 
 impl CatalogBuilder {
-    pub fn register(mut self, process: Process) -> Self {
-        if process.proc == Proc::Root {
+    pub fn register(mut self, process: Proc) -> Self {
+        if process == Proc::Root {
             return self;
         }
 
         self.inner
-            .insert(process.proc, RegisteredProcess::singleton(process));
+            .insert(process, RegisteredProcess::singleton(process));
 
         self
     }
 
-    pub fn register_multiple(mut self, limit: usize, process: Process) -> Self {
-        if process.proc == Proc::Root {
+    pub fn register_multiple(mut self, limit: usize, process: Proc) -> Self {
+        if process == Proc::Root {
             return self;
         }
 
         self.inner
-            .insert(process.proc, RegisteredProcess::multiple(limit, process));
+            .insert(process, RegisteredProcess::multiple(limit, process));
 
         self
     }

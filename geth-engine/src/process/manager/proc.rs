@@ -7,7 +7,7 @@ use crate::{
     Options,
 };
 
-pub async fn process_manager(
+pub fn process_manager(
     options: Options,
     client: ManagerClient,
     catalog: Catalog,
@@ -23,7 +23,7 @@ pub async fn process_manager(
         closing: false,
         close_resp: vec![],
         processes_shutting_down: Default::default(),
-        reporter,
+        reporter: reporter.clone(),
     };
 
     tokio::spawn(async move {
@@ -46,18 +46,7 @@ pub async fn process_manager(
                 break;
             }
         }
+
+        reporter.report_shutdown();
     });
-
-    // while let Some(cmd) = manager.queue.recv().await {
-    //     if let Err(e) = manager.handle(cmd) {
-    //         tracing::error!("unexpected: {}", e);
-    //         break;
-    //     }
-
-    //     if manager.closed.load(Ordering::Acquire) {
-    //         break;
-    //     }
-    // }
-
-    // tracing::info!("process manager terminated");
 }

@@ -1,4 +1,4 @@
-use std::{future::Future, path::is_separator};
+use std::{future::Future, path::is_separator, sync::Arc};
 
 use tokio::{
     runtime::Handle,
@@ -25,7 +25,7 @@ type ReadyCallback = Option<oneshot::Sender<()>>;
 pub struct ProcessEnv<A> {
     pub proc: Proc,
     pub client: ManagerClient,
-    pub options: Options,
+    pub options: Arc<Options>,
     ready: ReadyCallback,
     inner: A,
 }
@@ -34,15 +34,15 @@ impl<A> ProcessEnv<A> {
     pub fn new(
         proc: Proc,
         client: ManagerClient,
-        options: Options,
-        ready: ReadyCallback,
+        options: Arc<Options>,
+        ready: oneshot::Sender<()>,
         inner: A,
     ) -> Self {
         Self {
             proc,
             client,
             options,
-            ready,
+            ready: Some(ready),
             inner,
         }
     }

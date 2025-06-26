@@ -8,28 +8,20 @@ use std::{
 };
 
 use geth_common::ProgramSummary;
-use geth_mikoshi::{wal::chunks::ChunkContainer, InMemoryStorage};
-use tokio::{
-    runtime::Handle,
-    sync::{mpsc::UnboundedReceiver, oneshot, Notify},
-};
+use tokio::sync::{oneshot, Notify};
 use uuid::Uuid;
 
-#[cfg(test)]
-use crate::process::{echo, panic, sink};
 use crate::{
     process::{
-        grpc, indexing,
         manager::{
             catalog::ProvisionResult,
             proc::process_manager,
             spawn::{spawn_process, SpawnParams},
         },
         messages::{Messages, Notifications, Responses},
-        subscription::{self, pyro},
-        writing, Item, Mail, ProcId, SpawnError, SpawnResult,
+        Item, Mail, ProcId, SpawnError, SpawnResult,
     },
-    reading, Options, Proc, RequestContext,
+    Options, Proc, RequestContext,
 };
 
 mod catalog;
@@ -39,7 +31,6 @@ mod spawn;
 
 pub use catalog::{Catalog, CatalogBuilder};
 pub use client::ManagerClient;
-pub use spawn::Process;
 
 #[derive(Clone)]
 pub struct ShutdownReporter {
@@ -162,6 +153,7 @@ pub struct Manager {
 impl Manager {
     fn handle_find(&mut self, cmd: FindParams) -> eyre::Result<()> {
         let _ = cmd.resp.send(self.catalog.lookup(&cmd.proc)?);
+        Ok(())
     }
 
     fn handle_send(&mut self, cmd: SendParams) -> eyre::Result<()> {
@@ -169,7 +161,7 @@ impl Manager {
             Item::Mail(mail) => {
                 if let Some(resp) = self.requests.remove(&mail.correlation) {
                     let _ = resp.send(mail);
-                } else if let Some(proc) = self.catalog.get_process_mut(&cmd.dest) {
+                } else if let Some(proc) = self.catalog.get_process_mut(cmd.dest) {
                     if let Some(resp) = cmd.resp {
                         self.requests.insert(mail.correlation, resp);
                         proc.last_received_request = mail.correlation;
@@ -187,7 +179,7 @@ impl Manager {
             }
 
             Item::Stream(stream) => {
-                if let Some(proc) = self.catalog.get_process(&cmd.dest) {
+                if let Some(proc) = self.catalog.get_process(cmd.dest) {
                     if !proc.mailbox.send(Item::Stream(stream)) {
                         self.handle_terminate(ProcTerminatedParams {
                             id: cmd.dest,
@@ -197,6 +189,8 @@ impl Manager {
                 }
             }
         }
+
+        Ok(())
     }
 
     fn handle_wait_for(&mut self, cmd: WaitForParams) -> eyre::Result<()> {
@@ -218,15 +212,15 @@ impl Manager {
             ProvisionResult::Available(p) => p,
         };
 
-        let mut client = self
-            .client
-            .new_with_overrides(provision.id, provision.process.proc);
+        let client = self.client.new_with_overrides(provision.id, provision.proc);
 
         spawn_process(SpawnParams {
             options: self.options.clone(),
             client,
-            process: provision.process,
+            process: provision.proc,
         });
+
+        Ok(())
 
         // // no need to track if the process that started this new process is the manager itself.
         // if cmd.origin != 0 {
@@ -269,7 +263,7 @@ impl Manager {
             }
 
             for dependent in running.dependents {
-                if let Some(running) = self.catalog.get_process(&dependent) {
+                if let Some(running) = self.catalog.get_process(dependent) {
                     if !self.closing
                         && !running.mailbox.send(Item::Mail(Mail {
                             context: RequestContext::new(),
@@ -298,12 +292,11 @@ impl Manager {
             }
 
             if self.processes_shutting_down.is_empty() {
-                self.closed.store(true, Ordering::Release);
+                self.reporter.report_shutdown();
+
                 for resp in self.close_resp.drain(..) {
                     let _ = resp.send(());
                 }
-
-                self.queue.close();
             }
         }
     }
@@ -318,9 +311,8 @@ impl Manager {
             }
 
             if self.processes_shutting_down.is_empty() {
-                self.closed.store(true, Ordering::Release);
+                self.reporter.report_shutdown();
                 let _ = cmd.resp.send(());
-                self.queue.close();
                 return Ok(());
             }
 
@@ -330,15 +322,14 @@ impl Manager {
             );
 
             self.catalog.clear_running_processes();
-            let client = self.client.clone();
-
             // TODO - implement shutdown properly
             let corr = Uuid::new_v4();
-
-            client.send_timeout_in(corr, Duration::from_secs(5));
+            self.client.send_timeout_in(corr, Duration::from_secs(5));
         }
 
         self.close_resp.push(cmd.resp);
+
+        Ok(())
     }
 
     fn handle_timeout(&mut self, cmd: TimeoutParams) -> eyre::Result<()> {
@@ -348,27 +339,11 @@ impl Manager {
             tracing::warn!(proc_id = id, ?proc, "process didn't terminate in time");
         }
 
-        self.closed.store(true, Ordering::Release);
+        self.reporter.report_shutdown();
         for resp in self.close_resp.drain(..) {
             let _ = resp.send(());
         }
-        self.queue.close();
         Ok(())
-    }
-
-    fn handle(&mut self, cmd: ManagerCommand) -> eyre::Result<()> {
-        if self.closing && !cmd.is_shutdown_related() {
-            return Ok(());
-        }
-
-        match cmd {
-            ManagerCommand::Find(cmd) => self.handle_find(cmd),
-            ManagerCommand::Send(cmd) => self.handle_send(cmd),
-            ManagerCommand::WaitFor(cmd) => self.handle_wait_for(cmd),
-            ManagerCommand::ProcTerminated(cmd) => self.handle_terminate(cmd),
-            ManagerCommand::Shutdown(cmd) => self.handle_shutdown(cmd),
-            ManagerCommand::Timeout(cmd) => self.handle_timeout(cmd),
-        }
     }
 }
 
@@ -378,23 +353,8 @@ pub async fn start_process_manager_with_catalog(
 ) -> eyre::Result<ManagerClient> {
     let reporter = ShutdownReporter::default();
     let (client, queue) = ManagerClient::new_root_client(reporter.clone().into());
-    let mgr_client = client.clone();
 
-    if options.db == "in_mem" {
-        let storage = InMemoryStorage::new();
-        geth_mikoshi::storage::init(&storage)?;
-        let container = ChunkContainer::load(storage)?;
-        tokio::spawn(async move {
-            process_manager(options, mgr_client, catalog, container, queue).await;
-            reporter.report_shutdown();
-        });
-    } else {
-        let container = load_fs_chunk_container(&options)?;
-        tokio::spawn(async move {
-            process_manager(options, mgr_client, catalog, container, queue).await;
-            reporter.report_shutdown();
-        });
-    }
+    process_manager(options, client.clone(), catalog, reporter, queue);
 
     Ok(client)
 }
