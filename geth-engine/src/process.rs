@@ -1,12 +1,6 @@
-use geth_mikoshi::wal::chunks::ChunkContainer;
-use geth_mikoshi::{FileSystemStorage, InMemoryStorage};
 use messages::Messages;
-use std::collections::HashSet;
-use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::Arc;
 use std::time::Instant;
-use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
-use tokio::sync::Notify;
+use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
 use crate::process::manager::{Catalog, ManagerClient};
@@ -95,14 +89,6 @@ pub enum Proc {
     Panic,
 }
 
-enum Topology {
-    Singleton(Option<ProcId>),
-    Multiple {
-        limit: usize,
-        instances: HashSet<ProcId>,
-    },
-}
-
 struct RunningProc {
     id: ProcId,
     proc: Proc,
@@ -167,12 +153,12 @@ impl SpawnResult {
 
 pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClient> {
     let catalog = Catalog::builder()
-        .register(Proc::Indexing)
-        .register(Proc::Writing)
-        .register(Proc::Reading)
-        .register(Proc::PubSub)
-        .register(Proc::Grpc)
-        .register_multiple(Proc::PyroWorker, 8)
+        .register(indexing::process())
+        // .register(Proc::Writing)
+        // .register(Proc::Reading)
+        // .register(Proc::PubSub)
+        // .register(Proc::Grpc)
+        // .register_multiple(Proc::PyroWorker, 8)
         .build();
 
     let client = start_process_manager_with_catalog(options, catalog).await?;
@@ -183,23 +169,4 @@ pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClie
     client.wait_for(Proc::Writing).await?;
 
     Ok(client)
-}
-
-fn load_fs_chunk_container(options: &Options) -> eyre::Result<ChunkContainer<FileSystemStorage>> {
-    let storage = FileSystemStorage::new(options.db.clone().into())?;
-    geth_mikoshi::storage::init(&storage)?;
-
-    let container = ChunkContainer::load(storage)?;
-    Ok(container)
-}
-
-#[derive(Clone)]
-pub struct Runtime<S> {
-    container: ChunkContainer<S>,
-}
-
-impl<S> Runtime<S> {
-    pub fn container(&self) -> &ChunkContainer<S> {
-        &self.container
-    }
 }

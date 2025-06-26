@@ -8,7 +8,7 @@ use std::{
 };
 
 use geth_common::ProgramSummary;
-use geth_mikoshi::{storage::Storage, wal::chunks::ChunkContainer, InMemoryStorage};
+use geth_mikoshi::{wal::chunks::ChunkContainer, InMemoryStorage};
 use tokio::{
     runtime::Handle,
     sync::{mpsc::UnboundedReceiver, oneshot, Notify},
@@ -19,11 +19,15 @@ use uuid::Uuid;
 use crate::process::{echo, panic, sink};
 use crate::{
     process::{
-        grpc, indexing, load_fs_chunk_container,
-        manager::{catalog::ProvisionResult, proc::process_manager},
+        grpc, indexing,
+        manager::{
+            catalog::ProvisionResult,
+            proc::process_manager,
+            spawn::{spawn_process, SpawnParams},
+        },
         messages::{Messages, Notifications, Responses},
         subscription::{self, pyro},
-        writing, Item, Mail, ProcId, Runtime, SpawnError, SpawnResult, Topology,
+        writing, Item, Mail, ProcId, SpawnError, SpawnResult,
     },
     reading, Options, Proc, RequestContext,
 };
@@ -35,6 +39,7 @@ mod spawn;
 
 pub use catalog::{Catalog, CatalogBuilder};
 pub use client::ManagerClient;
+pub use spawn::Process;
 
 #[derive(Clone)]
 pub struct ShutdownReporter {
@@ -63,7 +68,7 @@ impl ShutdownReporter {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ShutdownNotification {
     notify: Arc<Notify>,
     closed: Arc<AtomicBool>,
@@ -148,7 +153,6 @@ pub struct Manager {
     catalog: Catalog,
     proc_id_gen: ProcId,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
-    queue: UnboundedReceiver<ManagerCommand>,
     closing: bool,
     close_resp: Vec<oneshot::Sender<()>>,
     processes_shutting_down: HashMap<u64, Proc>,
@@ -196,7 +200,7 @@ impl Manager {
     }
 
     fn handle_wait_for(&mut self, cmd: WaitForParams) -> eyre::Result<()> {
-        let id = match self.catalog.provision_process(cmd.origin, cmd.proc)? {
+        let provision = match self.catalog.provision_process(cmd.origin, cmd.proc)? {
             ProvisionResult::AlreadyProvisioned(id) => {
                 let _ = cmd.resp.send(SpawnResult::Success(id));
                 return Ok(());
@@ -211,67 +215,26 @@ impl Manager {
                 return Ok(());
             }
 
-            ProvisionResult::Available(id) => id,
+            ProvisionResult::Available(p) => p,
         };
 
-        let mut client = self.client.new_with_overrides(id, cmd.proc);
-        let options = self.options.clone();
+        let mut client = self
+            .client
+            .new_with_overrides(provision.id, provision.process.proc);
 
-        let mut running_proc = match cmd.proc {
-            Proc::Writing => spawn_raw(
-                options,
-                client,
-                runtime,
-                Handle::current(),
-                cmd.proc,
-                writing::run,
-            ),
+        spawn_process(SpawnParams {
+            options: self.options.clone(),
+            client,
+            process: provision.process,
+        });
 
-            Proc::Reading => spawn_raw(
-                options,
-                client,
-                runtime,
-                Handle::current(),
-                cmd.proc,
-                reading::run,
-            ),
+        // // no need to track if the process that started this new process is the manager itself.
+        // if cmd.origin != 0 {
+        //     running_proc.dependents.push(cmd.origin);
+        // }
 
-            Proc::Indexing => spawn_raw(
-                options,
-                client,
-                runtime,
-                Handle::current(),
-                cmd.proc,
-                indexing::run,
-            ),
-
-            Proc::PubSub => spawn(options, client, cmd.proc, subscription::run),
-            Proc::Grpc => spawn(options, client, cmd.proc, grpc::run),
-
-            Proc::PyroWorker => spawn(options, client, cmd.proc, pyro::worker::run),
-
-            Proc::Root => {
-                let _ = cmd.resp.send(SpawnResult::Success(0));
-                return Ok(());
-            }
-
-            #[cfg(test)]
-            Proc::Echo => spawn(options, client, cmd.proc, echo::run),
-
-            #[cfg(test)]
-            Proc::Sink => spawn(options, client, cmd.proc, sink::run),
-
-            #[cfg(test)]
-            Proc::Panic => spawn(options, client, cmd.proc, panic::run),
-        };
-
-        // no need to track if the process that started this new process is the manager itself.
-        if cmd.origin != 0 {
-            running_proc.dependents.push(cmd.origin);
-        }
-
-        self.catalog.monitor_process(running_proc);
-        let _ = cmd.resp.send(SpawnResult::Success(id));
+        // self.catalog.monitor_process(running_proc);
+        // let _ = cmd.resp.send(SpawnResult::Success(id));
     }
 
     fn handle_terminate(&mut self, cmd: ProcTerminatedParams) {

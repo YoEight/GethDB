@@ -1,50 +1,63 @@
-use std::sync::atomic::Ordering;
-
-use geth_mikoshi::{storage::Storage, wal::chunks::ChunkContainer};
-use tokio::{runtime::Handle, sync::mpsc::UnboundedReceiver};
+use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    process::{
-        manager::{catalog::Catalog, client::ManagerClient, Manager, ManagerCommand},
-        ProcessEnv, Raw, RunningProc, Runtime,
+    process::manager::{
+        catalog::Catalog, client::ManagerClient, Manager, ManagerCommand, ShutdownReporter,
     },
-    Options, Proc,
+    Options,
 };
 
-pub async fn process_manager<S>(
+pub async fn process_manager(
     options: Options,
     client: ManagerClient,
     catalog: Catalog,
-    container: ChunkContainer<S>,
-    queue: UnboundedReceiver<ManagerCommand>,
-) where
-    S: Storage + Send + Sync + 'static,
-{
-    let closed = client.closed.clone();
+    reporter: ShutdownReporter,
+    mut queue: UnboundedReceiver<ManagerCommand>,
+) {
     let mut manager = Manager {
         options,
         client,
-        runtime: Runtime { container },
         catalog,
         proc_id_gen: 1,
         requests: Default::default(),
         closing: false,
-        closed,
         close_resp: vec![],
-        queue,
         processes_shutting_down: Default::default(),
+        reporter,
     };
 
-    while let Some(cmd) = manager.queue.recv().await {
-        if let Err(e) = manager.handle(cmd) {
-            tracing::error!("unexpected: {}", e);
-            break;
-        }
+    tokio::spawn(async move {
+        while let Some(cmd) = queue.recv().await {
+            let outcome = match cmd {
+                ManagerCommand::Find(cmd) => manager.handle_find(cmd),
+                ManagerCommand::Send(cmd) => manager.handle_send(cmd),
+                ManagerCommand::WaitFor(cmd) => manager.handle_wait_for(cmd),
+                ManagerCommand::ProcTerminated(cmd) => Ok(manager.handle_terminate(cmd)),
+                ManagerCommand::Shutdown(cmd) => manager.handle_shutdown(cmd),
+                ManagerCommand::Timeout(cmd) => manager.handle_timeout(cmd),
+            };
 
-        if manager.closed.load(Ordering::Acquire) {
-            break;
-        }
-    }
+            if let Err(error) = outcome {
+                tracing::error!(%error, "unexpected error in manager process");
+                break;
+            }
 
-    tracing::info!("process manager terminated");
+            if manager.client.notification().is_shutdown() {
+                break;
+            }
+        }
+    });
+
+    // while let Some(cmd) = manager.queue.recv().await {
+    //     if let Err(e) = manager.handle(cmd) {
+    //         tracing::error!("unexpected: {}", e);
+    //         break;
+    //     }
+
+    //     if manager.closed.load(Ordering::Acquire) {
+    //         break;
+    //     }
+    // }
+
+    // tracing::info!("process manager terminated");
 }

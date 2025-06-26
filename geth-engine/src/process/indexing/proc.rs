@@ -1,9 +1,10 @@
 use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
+use crate::process::manager::Process;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
 use crate::process::{Item, ProcessEnv, Raw, RequestContext};
-use crate::{get_chunk_container, get_storage};
+use crate::{get_chunk_container, get_storage, Proc};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -26,8 +27,12 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
+pub fn process() -> Process {
+    Process::raw(Proc::Indexing, run)
+}
+
 #[instrument(skip(env), fields(origin = ?env.proc))]
-pub fn run<S>(env: ProcessEnv<Raw>) -> eyre::Result<()> {
+pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
     let mut lsm = Lsm::load(LsmSettings::default(), get_storage().clone())?;
 
     tracing::info!("rebuilding index...");

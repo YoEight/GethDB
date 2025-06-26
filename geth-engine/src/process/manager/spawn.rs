@@ -1,4 +1,4 @@
-use std::{future::Future, pin::Pin, thread};
+use std::{future::Future, pin::Pin, sync::Arc, thread};
 
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use uuid::Uuid;
@@ -14,22 +14,51 @@ pub struct SpawnParams {
     pub process: Process,
 }
 
-type ManagedProcess =
-    Box<dyn FnOnce(ProcessEnv<Managed>) -> Pin<Box<dyn Future<Output = eyre::Result<()>>>>>;
+type ManagedProcessFn =
+    Box<dyn Fn(ProcessEnv<Managed>) -> Pin<Box<dyn Future<Output = eyre::Result<()>>>> + Send>;
 
-type RawProcess = Box<dyn FnOnce(ProcessEnv<Raw>) -> eyre::Result<()>>;
+type ManagedProcess = Arc<dyn Fn() -> ManagedProcessFn>;
 
+type RawProcessFn = Box<dyn Fn(ProcessEnv<Raw>) -> eyre::Result<()> + Send>;
+
+type RawProcess = Arc<dyn Fn() -> RawProcessFn>;
+
+#[derive(Clone)]
 pub struct Process {
     pub proc: Proc,
     pub run: Run,
 }
 
-enum Run {
+impl Process {
+    pub fn managed<F, Fut>(proc: Proc, run: F) -> Self
+    where
+        F: Fn(ProcessEnv<Managed>) -> Fut,
+        Fut: Future<Output = eyre::Result<()>>,
+    {
+        Self {
+            proc,
+            run: Run::Managed(Arc::new(move || Box::new(|x| Box::pin(run(x))))),
+        }
+    }
+
+    pub fn raw<F>(proc: Proc, run: F) -> Self
+    where
+        F: Fn(ProcessEnv<Managed>) -> eyre::Result<()>,
+    {
+        Self {
+            proc,
+            run: Run::Raw(Arc::new(move || Box::new(run))),
+        }
+    }
+}
+
+#[derive(Clone)]
+pub enum Run {
     Managed(ManagedProcess),
     Raw(RawProcess),
 }
 
-pub fn spawn(params: SpawnParams) {
+pub fn spawn_process(params: SpawnParams) {
     tokio::spawn(async move {
         let id = params.client.id();
         let client = params.client.clone();
