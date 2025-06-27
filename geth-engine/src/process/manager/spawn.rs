@@ -3,9 +3,16 @@ use std::{future::Future, sync::Arc, thread};
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::process::{echo, panic, sink};
 use crate::{
-    process::{manager::ManagerClient, Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc},
-    Options, Proc,
+    process::{
+        grpc, indexing,
+        manager::ManagerClient,
+        subscription::{self, pyro},
+        writing, Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc,
+    },
+    reading, Options, Proc,
 };
 
 pub struct SpawnParams {
@@ -24,20 +31,21 @@ pub fn spawn_process(params: SpawnParams) {
 
         let mailbox = match params.process {
             Proc::Root => return,
-            Proc::Writing => todo!(),
-            Proc::Reading => todo!(),
-            Proc::Indexing => todo!(),
-            Proc::PubSub => todo!(),
-            Proc::Grpc => todo!(),
-            Proc::PyroWorker => todo!(),
+            Proc::Writing => spawn_raw(params, sender_ready, writing::run),
+            Proc::Reading => spawn_raw(params, sender_ready, reading::run),
+            Proc::Indexing => spawn_raw(params, sender_ready, indexing::run),
+            Proc::PubSub => spawn(params, sender_ready, subscription::run),
+            Proc::Grpc => spawn(params, sender_ready, grpc::run),
+            Proc::PyroWorker => spawn(params, sender_ready, pyro::worker::run),
             #[cfg(test)]
-            Proc::Echo => todo!(),
+            Proc::Echo => spawn(params, sender_ready, echo::run),
             #[cfg(test)]
-            Proc::Sink => todo!(),
+            Proc::Sink => spawn(params, sender_ready, sink::run),
             #[cfg(test)]
-            Proc::Panic => todo!(),
+            Proc::Panic => spawn(params, sender_ready, panic::run),
         };
 
+        let _ = recv_ready.await;
         let process = RunningProc {
             id,
             proc,

@@ -27,10 +27,6 @@ fn new_revision_cache() -> RevisionCache {
         .build()
 }
 
-pub fn process() -> Process {
-    Process::raw(Proc::Indexing, run)
-}
-
 #[instrument(skip(env), fields(origin = ?env.proc))]
 pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
     let mut lsm = Lsm::load(LsmSettings::default(), get_storage().clone())?;

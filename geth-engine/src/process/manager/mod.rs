@@ -19,7 +19,7 @@ use crate::{
             spawn::{spawn_process, SpawnParams},
         },
         messages::{Messages, Notifications, Responses},
-        Item, Mail, ProcId, SpawnError, SpawnResult,
+        Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult,
     },
     Options, Proc, RequestContext,
 };
@@ -118,11 +118,16 @@ struct TimeoutParams {
     correlation: Uuid,
 }
 
+struct ProcReadyParams {
+    running: RunningProc,
+}
+
 pub enum ManagerCommand {
     Find(FindParams),
     Send(SendParams),
     WaitFor(WaitForParams),
     ProcTerminated(ProcTerminatedParams),
+    ProcReady(ProcReadyParams),
     Shutdown(ShutdownParams),
     Timeout(TimeoutParams),
 }
@@ -139,7 +144,7 @@ impl ManagerCommand {
 }
 
 pub struct Manager {
-    options: Options,
+    options: Arc<Options>,
     client: ManagerClient,
     catalog: Catalog,
     proc_id_gen: ProcId,
@@ -218,6 +223,7 @@ impl Manager {
             options: self.options.clone(),
             client,
             process: provision.proc,
+            id: provision.id,
         });
 
         Ok(())
@@ -329,6 +335,10 @@ impl Manager {
 
         self.close_resp.push(cmd.resp);
 
+        Ok(())
+    }
+
+    fn handle_proc_ready(&mut self, cmd: ProcReadyParams) -> eyre::Result<()> {
         Ok(())
     }
 

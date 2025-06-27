@@ -5,10 +5,11 @@ use std::{
 
 use chrono::Utc;
 use geth_common::ProgramSummary;
+use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    process::{messages::Messages, Item, Mail, ProcId, RunningProc},
+    process::{messages::Messages, Item, Mail, ProcId, RunningProc, SpawnResult},
     Proc, RequestContext,
 };
 
@@ -40,6 +41,8 @@ impl ProcIdGen {
 struct RegisteredProcess {
     limit: usize,
     process: Proc,
+    waiting_list: Vec<oneshot::Sender<SpawnResult>>,
+    singleton_started: bool, // only useful
     instances: HashSet<ProcId>,
 }
 
@@ -49,6 +52,8 @@ impl RegisteredProcess {
             limit: 1,
             process,
             instances: Default::default(),
+            waiting_list: Default::default(),
+            singleton_started: false,
         }
     }
 
@@ -59,6 +64,8 @@ impl RegisteredProcess {
             limit,
             process,
             instances: Default::default(),
+            waiting_list: Default::default(),
+            singleton_started: Default::default(),
         }
     }
 
@@ -68,6 +75,10 @@ impl RegisteredProcess {
         }
 
         Some(self.instances.iter().last().copied())
+    }
+
+    fn is_singleton(&self) -> bool {
+        self.limit == 1
     }
 
     fn has_capacity(&self) -> bool {
@@ -92,12 +103,7 @@ pub struct Catalog {
 
 impl Catalog {
     pub fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
-        let registered = if let Some(r) = self.inner.get(proc) {
-            r
-        } else {
-            eyre::bail!("process {:?} is not registered", proc);
-        };
-
+        let registered = self.get_registered(&proc)?;
         if let Some(prev) = registered.as_singleton() {
             if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
                 Ok(Some(ProgramSummary {
@@ -114,16 +120,20 @@ impl Catalog {
         }
     }
 
+    fn get_registered(&self, proc: &Proc) -> eyre::Result<&RegisteredProcess> {
+        if let Some(registered) = self.inner.get(proc) {
+            Ok(registered)
+        } else {
+            eyre::bail!("process {:?} is not registered", proc);
+        }
+    }
+
     pub fn provision_process(
         &mut self,
         dependent: ProcId,
         proc: Proc,
     ) -> eyre::Result<ProvisionResult> {
-        let registered = if let Some(t) = self.inner.get_mut(&proc) {
-            t
-        } else {
-            eyre::bail!("process {:?} is not registered", proc);
-        };
+        let registered = self.get_registered(&proc)?;
 
         if let Some(prev) = registered.as_singleton() {
             if let Some(prev_id) = &prev {
