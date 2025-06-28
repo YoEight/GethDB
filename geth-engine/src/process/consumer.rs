@@ -113,6 +113,7 @@ impl Consumer {
                             match outcome {
                                 Err(e) => return Err(e),
                                 Ok(outcome) => if let Some(event) = outcome {
+                                    tracing::debug!("event read from the reader");
                                     return Ok(Some(SubscriptionEvent::EventAppeared(event)))
                                 } else {
                                     if self.history.is_empty() {
@@ -144,6 +145,8 @@ impl Consumer {
                                             self.done = true;
                                             return Ok(Some(SubscriptionEvent::Unsubscribed(reason)));
                                         }
+
+                                        SubscriptionEvent::Notification(n) => return Ok(Some(SubscriptionEvent::Notification(n))),
 
                                         SubscriptionEvent::CaughtUp | SubscriptionEvent::Confirmed(_) => unreachable!(),
                                     }

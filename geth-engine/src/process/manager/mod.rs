@@ -152,11 +152,19 @@ pub struct Manager {
 
 impl Manager {
     fn handle_find(&mut self, cmd: FindParams) -> eyre::Result<()> {
+        if self.closing {
+            return Ok(());
+        }
+
         let _ = cmd.resp.send(self.catalog.lookup(&cmd.proc)?);
         Ok(())
     }
 
     fn handle_send(&mut self, cmd: SendParams) -> eyre::Result<()> {
+        if self.closing {
+            return Ok(());
+        }
+
         match cmd.item {
             Item::Mail(mail) => {
                 if let Some(resp) = self.requests.remove(&mail.correlation) {
@@ -194,6 +202,10 @@ impl Manager {
     }
 
     fn handle_wait_for(&mut self, cmd: WaitForParams) -> eyre::Result<()> {
+        if self.closing {
+            return Ok(());
+        }
+
         let provision = match self.catalog.provision_process(cmd.origin, cmd.proc)? {
             ProvisionResult::AlreadyProvisioned(id) => {
                 let _ = cmd.resp.send(SpawnResult::Success(id));
@@ -300,9 +312,9 @@ impl Manager {
     }
 
     fn handle_shutdown(&mut self, cmd: ShutdownParams) -> eyre::Result<()> {
-        tracing::info!("received shutdown request, initiating shutdown process");
-
         if !self.closing {
+            tracing::info!("received shutdown request, initiating shutdown process");
+
             self.closing = true;
             for proc in self.catalog.processes() {
                 self.processes_shutting_down.insert(proc.id, proc.proc);

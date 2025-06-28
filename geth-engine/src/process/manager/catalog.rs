@@ -27,9 +27,14 @@ pub enum ProvisionResult {
     WaitingForConfirmation(ProcId),
 }
 
-#[derive(Default)]
 pub struct ProcIdGen {
     inner: u64,
+}
+
+impl Default for ProcIdGen {
+    fn default() -> Self {
+        Self { inner: 1 }
+    }
 }
 
 impl ProcIdGen {

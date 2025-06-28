@@ -3,17 +3,18 @@ use std::any::type_name;
 use bytes::Bytes;
 use geth_common::{
     ContentType, ExpectedRevision, Propose, SubscriptionConfirmation, SubscriptionEvent,
+    SubscriptionNotification,
 };
 use uuid::Uuid;
 
-use crate::{process::tests::Foo, start_process_manager, Options, RequestContext};
+use crate::{process::tests::Foo, Options, RequestContext};
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let client = manager.new_subscription_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let client = embedded.manager().new_subscription_client().await?;
+    let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
-    let writer = manager.new_writer_client().await?;
 
     let mut expected = vec![];
 
@@ -69,9 +70,9 @@ pub async fn test_program_created() -> eyre::Result<()> {
 
 #[tokio::test]
 pub async fn test_program_list() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let client = embedded.manager().new_subscription_client().await?;
     let ctx = RequestContext::new();
-    let client = manager.new_subscription_client().await?;
 
     let mut _ignored = client
         .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
@@ -86,9 +87,9 @@ pub async fn test_program_list() -> eyre::Result<()> {
 
 #[tokio::test]
 pub async fn test_program_stats() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let client = manager.new_subscription_client().await?;
-    let writer = manager.new_writer_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let client = embedded.manager().new_subscription_client().await?;
+    let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
 
     let mut program_out = client
@@ -97,20 +98,32 @@ pub async fn test_program_stats() -> eyre::Result<()> {
 
     program_out.wait_until_confirmation().await?;
 
-    writer
-        .append(
-            ctx,
-            "foobar".to_string(),
-            ExpectedRevision::Any,
-            vec![Propose {
-                id: Uuid::new_v4(),
-                content_type: ContentType::Binary,
-                class: "created".to_string(),
-                data: Bytes::default(),
-            }],
-        )
-        .await?
-        .success()?;
+    while let Some(e) = program_out.next().await? {
+        if let SubscriptionEvent::Notification(n) = e {
+            if let SubscriptionNotification::Subscribed(s) = n {
+                if s != "foobar" {
+                    continue;
+                }
+
+                writer
+                    .append(
+                        ctx,
+                        "foobar".to_string(),
+                        ExpectedRevision::Any,
+                        vec![Propose {
+                            id: Uuid::new_v4(),
+                            content_type: ContentType::Binary,
+                            class: "created".to_string(),
+                            data: Bytes::default(),
+                        }],
+                    )
+                    .await?
+                    .success()?;
+
+                break;
+            }
+        }
+    }
 
     if program_out.next().await?.is_some() {
     } else {
@@ -136,9 +149,9 @@ pub async fn test_program_stats() -> eyre::Result<()> {
 
 #[tokio::test]
 pub async fn test_program_stop() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let client = manager.new_subscription_client().await?;
-    let writer = manager.new_writer_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let client = embedded.manager().new_subscription_client().await?;
+    let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
 
     let mut expected = vec![];
@@ -154,14 +167,26 @@ pub async fn test_program_stop() -> eyre::Result<()> {
 
     streaming.wait_until_confirmation().await?;
 
-    writer
-        .append(
-            ctx,
-            stream_name.to_string(),
-            ExpectedRevision::Any,
-            expected.clone(),
-        )
-        .await?;
+    while let Some(e) = streaming.next().await? {
+        if let SubscriptionEvent::Notification(n) = e {
+            if let SubscriptionNotification::Subscribed(s) = n {
+                if s != "foobar" {
+                    continue;
+                }
+
+                writer
+                    .append(
+                        ctx,
+                        stream_name.to_string(),
+                        ExpectedRevision::Any,
+                        expected.clone(),
+                    )
+                    .await?;
+
+                break;
+            }
+        }
+    }
 
     let mut count = 0usize;
 

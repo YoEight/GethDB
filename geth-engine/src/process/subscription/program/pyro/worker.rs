@@ -1,15 +1,30 @@
+use std::collections::HashSet;
+
 use bytes::Bytes;
 use geth_common::{ContentType, ProgramStats, Record};
 use uuid::Uuid;
 
-use crate::process::{
-    messages::{ProgramRequests, ProgramResponses, SubscribeResponses},
-    subscription::program::{
-        pyro::{create_pyro_runtime, from_runtime_value_to_json},
-        ProgramArgs,
+use crate::{
+    process::{
+        messages::{ProgramRequests, ProgramResponses, SubscribeResponses},
+        subscription::{
+            program::{
+                pyro::{create_pyro_runtime, from_runtime_value_to_json},
+                ProgramArgs,
+            },
+            pyro::{PyroEvent, PyroRuntimeNotification},
+        },
+        Item, Managed, ProcId, ProcessEnv,
     },
-    Item, Managed, ProcessEnv,
+    RequestContext,
 };
+
+struct WorkerArgs {
+    context: RequestContext,
+    program: ProgramArgs,
+    origin: ProcId,
+    correlation: Uuid,
+}
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
@@ -19,28 +34,23 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     while let Some(item) = env.recv().await {
         if let Item::Mail(message) = item {
             if let Ok(ProgramRequests::Start { name, code, sender }) = message.payload.try_into() {
-                args = Some((
-                    message.context,
-                    ProgramArgs {
+                args = Some(WorkerArgs {
+                    context: message.context,
+                    program: ProgramArgs {
                         name,
                         code,
                         output: sender,
                     },
-                ));
-
-                env.client.reply(
-                    message.context,
-                    message.origin,
-                    message.correlation,
-                    ProgramResponses::Started.into(),
-                )?;
+                    origin: message.origin,
+                    correlation: message.correlation,
+                });
 
                 break;
             }
         }
     }
 
-    let (context, args) = if let Some(args) = args {
+    let args = if let Some(args) = args {
         args
     } else {
         tracing::debug!("computation unit released as no program instructions were received");
@@ -49,50 +59,64 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
     let span = tracing::debug_span!(
         "create-runtime",
-        name = args.name,
-        correlation = %context.correlation
+        name = args.program.name,
+        correlation = %args.context.correlation
     )
     .entered();
     let mut runtime = match create_pyro_runtime(
-        context,
+        args.context,
         env.client.clone(),
         env.client.id(),
-        &args.name,
+        &args.program.name,
     ) {
         Ok(runtime) => runtime,
         Err(e) => {
-            tracing::error!(correlation = %context.correlation, error = %e, "error when creating a pyro runtime");
-            let _ = args.output.send(SubscribeResponses::Error(e).into());
+            tracing::error!(correlation = %args.context.correlation, error = %e, "error when creating a pyro runtime");
+            let _ = args
+                .program
+                .output
+                .send(SubscribeResponses::Error(e).into());
             return Ok(());
         }
     };
     span.exit();
 
     let span =
-        tracing::debug_span!("compilation", name = args.name, correlation = %context.correlation)
+        tracing::debug_span!("compilation", name = args.program.name, correlation = %args.context.correlation)
             .entered();
-    let process = match runtime.compile(&args.code) {
+    let process = match runtime.compile(&args.program.code) {
         Ok(process) => process,
         Err(e) => {
-            tracing::error!(error = %e, correlation = %context.correlation, "error when compiling pyro program");
-            let _ = args.output.send(SubscribeResponses::Error(e).into());
+            tracing::error!(error = %e, correlation = %args.context.correlation, "error when compiling pyro program");
+            let _ = args
+                .program
+                .output
+                .send(SubscribeResponses::Error(e).into());
             return Ok(());
         }
     };
     span.exit();
 
-    tracing::info!(name = args.name, correlation = %context.correlation, "ready to do work");
+    env.client.reply(
+        args.context,
+        args.origin,
+        args.correlation,
+        ProgramResponses::Started.into(),
+    )?;
+
+    tracing::info!(name = args.program.name, correlation = %args.context.correlation, "ready to do work");
     let mut execution = Box::pin(process.run());
     let mut revision = 0;
+    let mut subs = HashSet::new();
 
     loop {
         tokio::select! {
             outcome = &mut execution => {
                 if let Err(e) = outcome {
-                    tracing::error!(name = args.name, error = %e, correlation = %context.correlation, "error when running pyro program");
-                    let _ = args.output.send(SubscribeResponses::Error(eyre::eyre!("program panicked")).into());
+                    tracing::error!(name = args.program.name, error = %e, correlation = %args.context.correlation, "error when running pyro program");
+                    let _ = args.program.output.send(SubscribeResponses::Error(eyre::eyre!("program panicked")).into());
                 } else {
-                    tracing::info!(name = args.name, correlation = %context.correlation, "program completed successfully");
+                    tracing::info!(name = args.program.name, correlation = %args.context.correlation, "program completed successfully");
                 }
 
                 break;
@@ -103,24 +127,24 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                     if let Ok(req) = mail.payload.try_into() {
                         match req {
                             ProgramRequests::Stop { .. } => {
-                                tracing::info!(name = args.name, correlation = %context.correlation, "program stopped");
-                                let _ = env.client.reply(context, mail.origin, mail.correlation, ProgramResponses::Stopped.into());
+                                tracing::info!(name = args.program.name, correlation = %args.context.correlation, "program stopped");
+                                let _ = env.client.reply(args.context, mail.origin, mail.correlation, ProgramResponses::Stopped.into());
                                 break;
                             }
 
                             ProgramRequests::Stats { .. } => {
-                                let _ = env.client.reply(context, mail.origin, mail.correlation, ProgramResponses::Stats(ProgramStats {
+                                let _ = env.client.reply(args.context, mail.origin, mail.correlation, ProgramResponses::Stats(ProgramStats {
                                     id: env.client.id(),
-                                    name: args.name.clone(),
-                                    source_code: args.code.clone(),
-                                    subscriptions: runtime.subs().await,
-                                    pushed_events: runtime.pushed_events(),
+                                    name: args.program.name.clone(),
+                                    source_code: args.program.code.clone(),
+                                    subscriptions: subs.iter().cloned().collect(),
+                                    pushed_events: revision as usize,
                                     started: runtime.started(),
                                 }).into());
                             }
 
                             x => {
-                                tracing::warn!(msg = ?x, correlation = %context.correlation, "ignore program message")
+                                tracing::warn!(msg = ?x, correlation = %args.context.correlation, "ignore program message")
                             }
                         }
                     }
@@ -128,37 +152,80 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
             }
 
             Some(output) = runtime.recv() => {
-                match from_runtime_value_to_json(output) {
-                    Ok(json) => {
-                        let resp = SubscribeResponses::Record(Record {
-                            id: Uuid::new_v4(),
-                            content_type: ContentType::Json,
-                            class: "event-emitted".to_string(),
-                            stream_name: args.name.clone(),
-                            revision,
-                            data: Bytes::from(serde_json::to_vec(&json)?),
-                            position: u64::MAX,
-                        });
+                match output {
+                    PyroEvent::Value(output) => {
+                        match from_runtime_value_to_json(output) {
+                            Ok(json) => {
+                                let resp = SubscribeResponses::Record(Record {
+                                    id: Uuid::new_v4(),
+                                    content_type: ContentType::Json,
+                                    class: "event-emitted".to_string(),
+                                    stream_name: args.program.name.clone(),
+                                    revision,
+                                    data: Bytes::from(serde_json::to_vec(&json)?),
+                                    position: u64::MAX,
+                                });
 
-                        revision += 1;
-                        if args.output.send(resp.into()).is_err() {
-                            tracing::warn!(correlation = %context.correlation, "exiting program because nothing is listening");
-                            break;
+                                revision += 1;
+
+                                if args.program.output.send(resp.into()).is_err() {
+                                    tracing::warn!(
+                                        correlation = %args.context.correlation,
+                                        "exiting program because nothing is listening",
+                                    );
+
+                                    break;
+                                }
+
+                                tracing::debug!(
+                                    name = args.program.name,
+                                    id = env.client.id(),
+                                    revision = revision,
+                                    correlation = %args.context.correlation,
+                                    "program emitted event",
+                                );
+                            }
+
+                            Err(e) => {
+                                tracing::error!(
+                                    error = %e,
+                                    correlation = %args.context.correlation,
+                                    "error when converting runtime value to JSON",
+                                );
+
+                                let _ = args.program.output.send(SubscribeResponses::Error(e).into());
+                                break;
+                            }
                         }
-
-                        tracing::debug!(name = args.name, id = env.client.id(), revision = revision, correlation = %context.correlation, "program emitted event");
                     }
 
-                    Err(e) => {
-                        tracing::error!(error = %e, correlation = %context.correlation, "error when converting runtime value to JSON");
-                        let _ = args.output.send(SubscribeResponses::Error(e).into());
-                        break;
+                    PyroEvent::Notification(notif) => {
+                        match notif {
+                            PyroRuntimeNotification::SubscribedToStream(s) => {
+                                subs.insert(s.clone());
+
+                                let _ = args.program.output.send(
+                                    SubscribeResponses::Programs(ProgramResponses::Subscribed(s)).into());
+                            }
+
+                            PyroRuntimeNotification::UnsubscribedToStream(s) => {
+                                subs.remove(&s);
+
+                                let _ = args.program.output.send(
+                                    SubscribeResponses::Programs(ProgramResponses::Unsubscribed(s)).into());
+                            }
+                        }
                     }
                 }
             }
 
             else => {
-                tracing::debug!(name = args.name, correlation = %context.correlation, "shutting down per server request");
+                tracing::debug!(
+                    name = args.program.name,
+                    correlation = %args.context.correlation,
+                    "shutting down per server request",
+                );
+
                 break;
             }
         }

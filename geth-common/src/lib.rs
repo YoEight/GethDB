@@ -6,7 +6,7 @@ use std::fmt::Display;
 use thiserror::Error;
 use uuid::Uuid;
 
-pub use client::{SubscriptionEvent, UnsubscribeReason};
+pub use client::{SubscriptionEvent, SubscriptionNotification, UnsubscribeReason};
 pub use io::{IteratorIO, IteratorIOExt};
 
 mod client;
@@ -1036,6 +1036,33 @@ impl Display for SubscriptionError {
     }
 }
 
+impl From<protocol::subscribe_response::Notification> for SubscriptionNotification {
+    fn from(value: protocol::subscribe_response::Notification) -> Self {
+        match value.kind.unwrap() {
+            protocol::subscribe_response::notification::Kind::Subscribed(s) => Self::Subscribed(s),
+            protocol::subscribe_response::notification::Kind::Unsubscribed(s) => {
+                Self::Unsubscribed(s)
+            }
+        }
+    }
+}
+
+impl From<SubscriptionNotification> for protocol::subscribe_response::Notification {
+    fn from(value: SubscriptionNotification) -> Self {
+        protocol::subscribe_response::Notification {
+            kind: Some(match value {
+                SubscriptionNotification::Subscribed(s) => {
+                    protocol::subscribe_response::notification::Kind::Subscribed(s)
+                }
+
+                SubscriptionNotification::Unsubscribed(s) => {
+                    protocol::subscribe_response::notification::Kind::Unsubscribed(s)
+                }
+            }),
+        }
+    }
+}
+
 impl From<protocol::SubscribeResponse> for SubscriptionEvent {
     fn from(value: protocol::SubscribeResponse) -> Self {
         match value.event.unwrap() {
@@ -1053,6 +1080,9 @@ impl From<protocol::SubscribeResponse> for SubscriptionEvent {
             protocol::subscribe_response::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
             protocol::subscribe_response::Event::Error(_) => {
                 SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)
+            }
+            protocol::subscribe_response::Event::Notification(n) => {
+                SubscriptionEvent::Notification(n.into())
             }
         }
     }
@@ -1097,6 +1127,10 @@ impl From<SubscriptionEvent> for protocol::SubscribeResponse {
                 event: Some(protocol::subscribe_response::Event::Error(
                     protocol::subscribe_response::Error {},
                 )),
+            },
+
+            SubscriptionEvent::Notification(n) => protocol::SubscribeResponse {
+                event: Some(protocol::subscribe_response::Event::Notification(n.into())),
             },
         }
     }
