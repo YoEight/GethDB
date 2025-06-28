@@ -1,11 +1,16 @@
-use std::{collections::VecDeque, fmt::Display};
+use std::{cmp::max, collections::VecDeque, fmt::Display};
 
-use geth_common::{Direction, ReadStreamCompleted, Record, Revision, SubscriptionEvent};
+use geth_common::{
+    Direction, ReadStreamCompleted, Record, Revision, SubscriptionEvent, UnsubscribeReason,
+};
 use geth_mikoshi::hashing::mikoshi_hash;
 use tokio::select;
 use tracing::instrument;
 
-use crate::{process::subscription, reading, ManagerClient, RequestContext};
+use crate::{
+    process::subscription::{self, SubscriptionClient},
+    reading, IndexClient, ManagerClient, ReaderClient, RequestContext,
+};
 
 #[derive(Clone, Copy, Debug)]
 enum State {
@@ -33,8 +38,12 @@ pub struct Consumer {
     stream_name: String,
     end: u64,
     history: VecDeque<Record>,
-    reader: reading::Streaming,
-    sub: subscription::Streaming,
+    reader: ReaderClient,
+    index: IndexClient,
+    sub: SubscriptionClient,
+    start: Revision<u64>,
+    reader_streaming: reading::Streaming,
+    sub_streaming: subscription::Streaming,
 }
 
 pub enum ConsumerResult {
@@ -52,15 +61,6 @@ pub async fn start_consumer(
     let reader = client.new_reader_client().await?;
     let sub = client.new_subscription_client().await?;
 
-    let result = reader
-        .read(context, &stream_name, start, Direction::Forward, usize::MAX)
-        .await?;
-
-    let reader = match result {
-        ReadStreamCompleted::StreamDeleted => return Ok(ConsumerResult::StreamDeleted),
-        ReadStreamCompleted::Success(s) => s,
-    };
-
     let result = index
         .latest_revision(context, mikoshi_hash(&stream_name))
         .await?;
@@ -70,7 +70,6 @@ pub async fn start_consumer(
     }
 
     let end = result.revision().unwrap_or_default();
-    let sub = sub.subscribe_to_stream(context, &stream_name).await?;
 
     Ok(ConsumerResult::Success(Consumer {
         context,
@@ -80,7 +79,11 @@ pub async fn start_consumer(
         stream_name,
         end,
         reader,
+        index,
         sub,
+        start,
+        reader_streaming: reading::Streaming::empty(),
+        sub_streaming: subscription::Streaming::empty(),
     }))
 }
 
@@ -98,8 +101,52 @@ impl Consumer {
         loop {
             match self.state {
                 State::Init => {
-                    if let Some(SubscriptionEvent::Confirmed(conf)) = self.sub.next().await? {
+                    let result = self
+                        .reader
+                        .read(
+                            self.context,
+                            &self.stream_name,
+                            self.start,
+                            Direction::Forward,
+                            usize::MAX,
+                        )
+                        .await?;
+
+                    match result {
+                        ReadStreamCompleted::StreamDeleted => {
+                            tracing::error!("stream got deleted while streaming");
+                            return Ok(Some(SubscriptionEvent::Unsubscribed(
+                                UnsubscribeReason::Server,
+                            )));
+                        }
+
+                        ReadStreamCompleted::Success(r) => {
+                            self.reader_streaming = r;
+                        }
+                    };
+
+                    let result = self
+                        .index
+                        .latest_revision(self.context, mikoshi_hash(&self.stream_name))
+                        .await?;
+
+                    if result.is_deleted() {
+                        tracing::error!("stream got deleted while streaming");
+                        return Ok(Some(SubscriptionEvent::Unsubscribed(
+                            UnsubscribeReason::Server,
+                        )));
+                    }
+
+                    self.end = result.revision().unwrap_or_default();
+
+                    let mut sub_streaming = self
+                        .sub
+                        .subscribe_to_stream(self.context, &self.stream_name)
+                        .await?;
+
+                    if let Some(SubscriptionEvent::Confirmed(conf)) = sub_streaming.next().await? {
                         self.state = State::CatchingUp;
+                        self.sub_streaming = sub_streaming;
                         return Ok(Some(SubscriptionEvent::Confirmed(conf)));
                     }
 
@@ -109,11 +156,11 @@ impl Consumer {
 
                 State::CatchingUp => {
                     select! {
-                        outcome = self.reader.next() => {
+                        outcome = self.reader_streaming.next() => {
                             match outcome {
                                 Err(e) => return Err(e),
                                 Ok(outcome) => if let Some(event) = outcome {
-                                    tracing::debug!("event read from the reader");
+                                    self.end = max(self.end, event.revision);
                                     return Ok(Some(SubscriptionEvent::EventAppeared(event)))
                                 } else {
                                     if self.history.is_empty() {
@@ -127,7 +174,7 @@ impl Consumer {
                             }
                         }
 
-                        outcome = self.sub.next() => match outcome {
+                        outcome = self.sub_streaming.next() => match outcome {
                             Err(e) => return Err(e),
                             Ok(outcome) => {
                                 if let Some(event) = outcome {
@@ -161,6 +208,10 @@ impl Consumer {
 
                 State::PlayHistory => {
                     if let Some(record) = self.history.pop_front() {
+                        if record.revision < self.end {
+                            continue;
+                        }
+
                         self.end = record.revision;
                         return Ok(Some(SubscriptionEvent::EventAppeared(record)));
                     }
@@ -169,7 +220,7 @@ impl Consumer {
                 }
 
                 State::Live => {
-                    if let Some(event) = self.sub.next().await? {
+                    if let Some(event) = self.sub_streaming.next().await? {
                         if let SubscriptionEvent::EventAppeared(temp) = &event {
                             if temp.revision < self.end {
                                 continue;

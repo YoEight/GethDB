@@ -7,7 +7,7 @@ use geth_common::{
     ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
     SubscriptionNotification, UnsubscribeReason,
 };
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -19,6 +19,15 @@ pub struct Streaming {
 }
 
 impl Streaming {
+    pub fn empty() -> Self {
+        Self {
+            context: RequestContext::nil(),
+            stream_name: String::new(),
+            id: None,
+            inner: unbounded_channel().1,
+        }
+    }
+
     pub fn from(
         context: RequestContext,
         stream_name: String,

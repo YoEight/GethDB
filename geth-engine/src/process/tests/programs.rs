@@ -27,14 +27,27 @@ pub async fn test_program_created() -> eyre::Result<()> {
         .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
 
-    writer
-        .append(
-            ctx,
-            stream_name.to_string(),
-            ExpectedRevision::Any,
-            expected.clone(),
-        )
-        .await?;
+    while let Some(e) = streaming.next().await? {
+        if let SubscriptionEvent::Notification(n) = e {
+            if let SubscriptionNotification::Subscribed(s) = n {
+                if s != "foobar" {
+                    continue;
+                }
+
+                writer
+                    .append(
+                        ctx,
+                        stream_name.to_string(),
+                        ExpectedRevision::Any,
+                        expected.clone(),
+                    )
+                    .await?
+                    .success()?;
+
+                break;
+            }
+        }
+    }
 
     let mut count = 0usize;
 
@@ -59,7 +72,9 @@ pub async fn test_program_created() -> eyre::Result<()> {
                 }
             }
 
-            _ => break,
+            SubscriptionEvent::Unsubscribed(_) => break,
+
+            _ => {}
         }
     }
 
