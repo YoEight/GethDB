@@ -48,7 +48,7 @@ impl IndexClient {
             eyre::bail!("index process is no longer reachable");
         };
 
-        if let Some(resp) = resp.try_into().ok() {
+        if let Ok(resp) = resp.try_into() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("internal error when running a read request to the index process")

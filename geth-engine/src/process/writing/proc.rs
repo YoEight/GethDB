@@ -11,11 +11,8 @@ use uuid::Uuid;
 
 use super::entries::ProposeEntries;
 
-pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
-    let mut log_writer = LogWriter::load(
-        get_chunk_container().clone(),
-        BytesMut::with_capacity(4_096),
-    )?;
+pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let mut log_writer = LogWriter::load(get_chunk_container(), BytesMut::with_capacity(4_096))?;
     let index_client = env.new_index_client()?;
     let sub_client = env.new_subscription_client()?;
 

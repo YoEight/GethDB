@@ -1,7 +1,4 @@
-use std::cell::OnceCell;
-
 pub use crate::options::Options;
-use crate::process::manager::ManagerClient;
 
 mod domain;
 mod names;
@@ -17,11 +14,13 @@ use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resource};
 pub use process::{
     indexing::IndexClient,
+    manager::{start_process_manager_with_catalog, Catalog, CatalogBuilder, ManagerClient},
     reading::{self, ReaderClient},
     start_process_manager,
     writing::WriterClient,
     Proc, RequestContext,
 };
+use tokio::sync::OnceCell;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -31,22 +30,22 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
-const STORAGE: OnceCell<Storage> = OnceCell::new();
-const CHUNK_CONTAINER: OnceCell<ChunkContainer> = OnceCell::new();
+static STORAGE: OnceCell<Storage> = OnceCell::const_new();
+static CHUNK_CONTAINER: OnceCell<ChunkContainer> = OnceCell::const_new();
 
-pub(crate) fn get_storage() -> &'static Storage {
-    STORAGE.get().unwrap()
+pub(crate) fn get_storage() -> Storage {
+    STORAGE.get().unwrap().clone()
 }
 
-pub(crate) fn get_chunk_container() -> &'static ChunkContainer {
-    CHUNK_CONTAINER.get().unwrap()
+pub(crate) fn get_chunk_container() -> ChunkContainer {
+    CHUNK_CONTAINER.get().unwrap().clone()
 }
 
 fn configure_storage(options: &Options) -> eyre::Result<Storage> {
     let storage = if options.db == "in_mem" {
-        InMemoryStorage::new()
+        InMemoryStorage::new_storage()
     } else {
-        FileSystemStorage::new(options.db.as_str().into())?
+        FileSystemStorage::new_storage(options.db.as_str().into())?
     };
 
     storage.init()?;
@@ -77,6 +76,10 @@ impl EmbeddedClient {
 
         Ok(())
     }
+
+    pub fn manager(&self) -> &ManagerClient {
+        &self.manager
+    }
 }
 
 #[derive(Default)]
@@ -104,8 +107,12 @@ pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
     let storage = configure_storage(options)?;
     let container = ChunkContainer::load(storage)?;
 
-    STORAGE.set(container.storage().clone());
-    CHUNK_CONTAINER.set(container);
+    STORAGE
+        .set(container.storage().clone())
+        .expect("to always work");
+    CHUNK_CONTAINER
+        .set(container)
+        .expect("expect to always work");
 
     let manager = start_process_manager(options.clone()).await?;
 

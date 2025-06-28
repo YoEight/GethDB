@@ -15,7 +15,7 @@ mod protocol;
 
 pub async fn start_server(
     client: ManagerClient,
-    options: Options,
+    options: Arc<Options>,
     notify: Arc<Notify>,
 ) -> eyre::Result<()> {
     let addr = format!("{}:{}", options.host, options.port)

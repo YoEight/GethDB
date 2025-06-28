@@ -21,7 +21,7 @@ pub struct FileSystemStorage {
 }
 
 impl FileSystemStorage {
-    pub fn new(root: PathBuf) -> io::Result<Storage> {
+    pub fn new_storage(root: PathBuf) -> io::Result<Storage> {
         std::fs::create_dir_all(root.as_path())?;
 
         Ok(Storage::FileSystem(Self {

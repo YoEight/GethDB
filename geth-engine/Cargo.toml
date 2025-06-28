@@ -47,6 +47,7 @@ tracing-opentelemetry = "0.31"
 opentelemetry = "0.30"
 opentelemetry_sdk = "0.30"
 opentelemetry-appender-tracing = "0.30"
+lazy_static = "1"
 
 bytes = "1"
 eyre = "0.6"

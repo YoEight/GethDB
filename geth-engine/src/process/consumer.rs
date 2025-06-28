@@ -1,4 +1,4 @@
-use std::{collections::VecDeque, fmt::Display, usize};
+use std::{collections::VecDeque, fmt::Display};
 
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision, SubscriptionEvent};
 use geth_mikoshi::hashing::mikoshi_hash;

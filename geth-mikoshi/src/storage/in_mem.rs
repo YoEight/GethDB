@@ -28,7 +28,7 @@ pub struct InMemoryStorage {
 }
 
 impl InMemoryStorage {
-    pub fn new() -> Storage {
+    pub fn new_storage() -> Storage {
         Storage::InMemory(InMemoryStorage::default())
     }
 }

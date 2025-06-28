@@ -3,7 +3,7 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::process::manager::{Catalog, ManagerClient};
+use crate::process::manager::{start_process_manager_with_catalog, Catalog};
 use crate::Options;
 
 #[cfg(test)]
@@ -26,6 +26,7 @@ pub mod subscription;
 pub mod writing;
 
 pub use env::{Managed, ProcessEnv, Raw};
+pub use manager::ManagerClient;
 
 #[derive(Debug, Clone, Copy)]
 pub struct RequestContext {
@@ -89,7 +90,7 @@ pub enum Proc {
     Panic,
 }
 
-struct RunningProc {
+pub struct RunningProc {
     id: ProcId,
     proc: Proc,
     last_received_request: Uuid,
@@ -126,6 +127,7 @@ impl Item {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SpawnError {
     LimitReached,
+    Timeout,
 }
 
 pub enum SpawnResult {
@@ -146,6 +148,7 @@ impl SpawnResult {
             SpawnResult::Success(id) => Ok(id),
             SpawnResult::Failure { proc, error } => match error {
                 SpawnError::LimitReached => eyre::bail!("process {:?} limit reached", proc),
+                SpawnError::Timeout => eyre::bail!("process {:?} did not start in time", proc),
             },
         }
     }
@@ -153,12 +156,12 @@ impl SpawnResult {
 
 pub async fn start_process_manager(options: Options) -> eyre::Result<ManagerClient> {
     let catalog = Catalog::builder()
-        .register(indexing::process())
-        // .register(Proc::Writing)
-        // .register(Proc::Reading)
-        // .register(Proc::PubSub)
-        // .register(Proc::Grpc)
-        // .register_multiple(Proc::PyroWorker, 8)
+        .register(Proc::Indexing)
+        .register(Proc::Writing)
+        .register(Proc::Reading)
+        .register(Proc::PubSub)
+        .register(Proc::Grpc)
+        .register_multiple(8, Proc::PyroWorker)
         .build();
 
     let client = start_process_manager_with_catalog(options, catalog).await?;

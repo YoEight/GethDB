@@ -27,7 +27,7 @@ pub fn position_of(idx: usize) -> u64 {
 }
 
 pub fn in_mem_generate_block() -> SsTable {
-    let mut table = SsTable::new(InMemoryStorage::new(), 4_096);
+    let mut table = SsTable::new(InMemoryStorage::new_storage(), 4_096);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     table.put_iter(values).unwrap();
 
@@ -35,7 +35,7 @@ pub fn in_mem_generate_block() -> SsTable {
 }
 
 pub fn in_mem_generate_sst() -> SsTable {
-    let mut table = SsTable::new(InMemoryStorage::new(), 128);
+    let mut table = SsTable::new(InMemoryStorage::new_storage(), 128);
     let values = (0..NUM_OF_KEYS).map(|idx| (key_of(idx), revision_of(idx), position_of(idx)));
     table.put_iter(values).unwrap();
 

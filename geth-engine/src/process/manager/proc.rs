@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
@@ -15,10 +17,9 @@ pub fn process_manager(
     mut queue: UnboundedReceiver<ManagerCommand>,
 ) {
     let mut manager = Manager {
-        options,
+        options: Arc::new(options),
         client,
         catalog,
-        proc_id_gen: 1,
         requests: Default::default(),
         closing: false,
         close_resp: vec![],
@@ -32,9 +33,22 @@ pub fn process_manager(
                 ManagerCommand::Find(cmd) => manager.handle_find(cmd),
                 ManagerCommand::Send(cmd) => manager.handle_send(cmd),
                 ManagerCommand::WaitFor(cmd) => manager.handle_wait_for(cmd),
-                ManagerCommand::ProcTerminated(cmd) => Ok(manager.handle_terminate(cmd)),
                 ManagerCommand::Shutdown(cmd) => manager.handle_shutdown(cmd),
-                ManagerCommand::Timeout(cmd) => manager.handle_timeout(cmd),
+
+                ManagerCommand::ProcTerminated(cmd) => {
+                    manager.handle_terminate(cmd);
+                    Ok(())
+                }
+
+                ManagerCommand::Timeout(cmd) => {
+                    manager.handle_timeout(cmd);
+                    Ok(())
+                }
+
+                ManagerCommand::ProcReady(cmd) => {
+                    manager.handle_proc_ready(cmd);
+                    Ok(())
+                }
             };
 
             if let Err(error) = outcome {

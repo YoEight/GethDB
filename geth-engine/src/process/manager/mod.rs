@@ -88,41 +88,48 @@ impl ShutdownNotification {
     }
 }
 
-struct FindParams {
+pub(crate) struct FindParams {
     proc: Proc,
     resp: oneshot::Sender<Option<ProgramSummary>>,
 }
 
-struct SendParams {
+pub(crate) struct SendParams {
     dest: ProcId,
     item: Item,
     resp: Option<oneshot::Sender<Mail>>,
 }
 
-struct WaitForParams {
+pub(crate) struct WaitForParams {
     origin: ProcId,
     proc: Proc,
     resp: oneshot::Sender<SpawnResult>,
 }
 
-struct ProcTerminatedParams {
+pub(crate) struct ProcTerminatedParams {
     id: ProcId,
     error: Option<eyre::Report>,
 }
 
-struct ShutdownParams {
+pub(crate) struct ShutdownParams {
     resp: oneshot::Sender<()>,
 }
 
-struct TimeoutParams {
+pub(crate) enum TimeoutTarget {
+    SpawnProcess(ProcId),
+    Shutdown,
+}
+
+pub(crate) struct TimeoutParams {
+    target: TimeoutTarget,
     correlation: Uuid,
 }
 
-struct ProcReadyParams {
+pub(crate) struct ProcReadyParams {
     running: RunningProc,
+    correlation: Uuid,
 }
 
-pub enum ManagerCommand {
+pub(crate) enum ManagerCommand {
     Find(FindParams),
     Send(SendParams),
     WaitFor(WaitForParams),
@@ -132,22 +139,10 @@ pub enum ManagerCommand {
     Timeout(TimeoutParams),
 }
 
-impl ManagerCommand {
-    fn is_shutdown_related(&self) -> bool {
-        matches!(
-            self,
-            ManagerCommand::ProcTerminated { .. }
-                | ManagerCommand::Shutdown { .. }
-                | ManagerCommand::Timeout(_)
-        )
-    }
-}
-
 pub struct Manager {
     options: Arc<Options>,
     client: ManagerClient,
     catalog: Catalog,
-    proc_id_gen: ProcId,
     requests: HashMap<Uuid, oneshot::Sender<Mail>>,
     closing: bool,
     close_resp: Vec<oneshot::Sender<()>>,
@@ -215,26 +210,23 @@ impl Manager {
             }
 
             ProvisionResult::Available(p) => p,
+
+            ProvisionResult::WaitingForConfirmation(proc_id) => {
+                self.catalog.wait_for_confirmation(proc_id, cmd.resp);
+                return Ok(());
+            }
         };
 
         let client = self.client.new_with_overrides(provision.id, provision.proc);
-
-        spawn_process(SpawnParams {
+        let correlation = spawn_process(SpawnParams {
             options: self.options.clone(),
             client,
             process: provision.proc,
             id: provision.id,
         });
 
-        Ok(())
-
-        // // no need to track if the process that started this new process is the manager itself.
-        // if cmd.origin != 0 {
-        //     running_proc.dependents.push(cmd.origin);
-        // }
-
-        // self.catalog.monitor_process(running_proc);
-        // let _ = cmd.resp.send(SpawnResult::Success(id));
+        self.catalog
+            .create_waiting_room(correlation, provision.id, provision.proc, cmd.resp)
     }
 
     fn handle_terminate(&mut self, cmd: ProcTerminatedParams) {
@@ -328,9 +320,11 @@ impl Manager {
             );
 
             self.catalog.clear_running_processes();
-            // TODO - implement shutdown properly
-            let corr = Uuid::new_v4();
-            self.client.send_timeout_in(corr, Duration::from_secs(5));
+            self.client.send_timeout_in(
+                Uuid::nil(),
+                TimeoutTarget::Shutdown,
+                Duration::from_secs(5),
+            );
         }
 
         self.close_resp.push(cmd.resp);
@@ -338,22 +332,31 @@ impl Manager {
         Ok(())
     }
 
-    fn handle_proc_ready(&mut self, cmd: ProcReadyParams) -> eyre::Result<()> {
-        Ok(())
+    fn handle_proc_ready(&mut self, cmd: ProcReadyParams) {
+        self.catalog
+            .report_process_ready(cmd.correlation, cmd.running);
     }
 
-    fn handle_timeout(&mut self, cmd: TimeoutParams) -> eyre::Result<()> {
-        tracing::warn!("shutdown process timedout");
+    fn handle_timeout(&mut self, cmd: TimeoutParams) {
+        match cmd.target {
+            TimeoutTarget::SpawnProcess(id) => {
+                self.catalog
+                    .report_process_start_timeout(id, cmd.correlation);
+            }
 
-        for (id, proc) in self.processes_shutting_down.iter() {
-            tracing::warn!(proc_id = id, ?proc, "process didn't terminate in time");
-        }
+            TimeoutTarget::Shutdown => {
+                tracing::warn!("shutdown process timed out");
 
-        self.reporter.report_shutdown();
-        for resp in self.close_resp.drain(..) {
-            let _ = resp.send(());
+                for (id, proc) in self.processes_shutting_down.iter() {
+                    tracing::warn!(proc_id = id, ?proc, "process didn't terminate in time");
+                }
+
+                self.reporter.report_shutdown();
+                for resp in self.close_resp.drain(..) {
+                    let _ = resp.send(());
+                }
+            }
         }
-        Ok(())
     }
 }
 

@@ -8,8 +8,8 @@ use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::wal::LogReader;
 
-pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
-    let reader = LogReader::new(get_chunk_container().clone());
+pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let reader = LogReader::new(get_chunk_container());
     let index_client = env.new_index_client()?;
 
     while let Some(item) = env.recv() {

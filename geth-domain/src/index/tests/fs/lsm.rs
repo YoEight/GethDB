@@ -14,7 +14,7 @@ use crate::index::ss_table::SsTable;
 fn test_fs_lsm_get() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut lsm = Lsm::with_default(FileSystemStorage::new(root)?);
+    let mut lsm = Lsm::with_default(FileSystemStorage::new_storage(root)?);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (3, 0, 3)])?;
 
@@ -29,7 +29,7 @@ fn test_fs_lsm_get() -> io::Result<()> {
 fn test_fs_lsm_mem_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let mut lsm = Lsm::with_default(FileSystemStorage::new(root)?);
+    let mut lsm = Lsm::with_default(FileSystemStorage::new_storage(root)?);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
 
@@ -82,7 +82,7 @@ fn test_fs_lsm_sync() -> io::Result<()> {
 
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut lsm = Lsm::new(setts, storage);
 
     lsm.put_values([(1, 0, 1), (2, 0, 2), (2, 1, 5), (3, 0, 3)])?;
@@ -113,7 +113,7 @@ fn test_fs_lsm_sync() -> io::Result<()> {
 fn test_fs_lsm_serialization() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut lsm = Lsm::with_default(storage.clone());
 
     let mut table1 = SsTable::with_default(storage.clone());

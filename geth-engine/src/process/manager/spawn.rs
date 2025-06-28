@@ -1,4 +1,4 @@
-use std::{future::Future, sync::Arc, thread};
+use std::{future::Future, sync::Arc, thread, time::Duration};
 
 use tokio::sync::{mpsc::unbounded_channel, oneshot};
 use uuid::Uuid;
@@ -8,7 +8,7 @@ use crate::process::{echo, panic, sink};
 use crate::{
     process::{
         grpc, indexing,
-        manager::ManagerClient,
+        manager::{ManagerClient, TimeoutTarget},
         subscription::{self, pyro},
         writing, Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc,
     },
@@ -22,7 +22,23 @@ pub struct SpawnParams {
     pub process: Proc,
 }
 
-pub fn spawn_process(params: SpawnParams) {
+fn default_process_spawn_timeout(proc: Proc) -> Duration {
+    if proc == Proc::Indexing {
+        Duration::from_secs(30)
+    } else {
+        Duration::from_secs(5)
+    }
+}
+
+pub fn spawn_process(params: SpawnParams) -> Uuid {
+    let correlation = Uuid::new_v4();
+
+    params.client.send_timeout_in(
+        correlation,
+        TimeoutTarget::SpawnProcess(params.id),
+        default_process_spawn_timeout(params.process),
+    );
+
     tokio::spawn(async move {
         let id = params.client.id();
         let client = params.client.clone();
@@ -46,14 +62,20 @@ pub fn spawn_process(params: SpawnParams) {
         };
 
         let _ = recv_ready.await;
-        let process = RunningProc {
-            id,
-            proc,
-            mailbox,
-            last_received_request: Uuid::nil(),
-            dependents: Vec::new(),
-        };
+
+        client.send_process_ready(
+            correlation,
+            RunningProc {
+                id,
+                proc,
+                mailbox,
+                last_received_request: Uuid::nil(),
+                dependents: Vec::new(),
+            },
+        );
     });
+
+    correlation
 }
 
 fn spawn_raw<F>(params: SpawnParams, sender_ready: oneshot::Sender<()>, run: F) -> Mailbox

@@ -28,12 +28,13 @@ impl FileCategory for Chunks {
     }
 }
 
+#[derive(Debug)]
 struct ContainerInner {
     closed: Vec<Chunk>,
     ongoing: Chunk,
 }
 
-#[derive(Clone)]
+#[derive(Debug, Clone)]
 pub struct ChunkContainer {
     inner: Arc<RwLock<ContainerInner>>,
     storage: Storage,

@@ -9,7 +9,7 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    process::{messages::Messages, Item, Mail, ProcId, RunningProc, SpawnResult},
+    process::{messages::Messages, Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult},
     Proc, RequestContext,
 };
 
@@ -24,6 +24,7 @@ pub enum ProvisionResult {
     AlreadyProvisioned(ProcId),
     Available(Provision),
     LimitReached,
+    WaitingForConfirmation(ProcId),
 }
 
 #[derive(Default)]
@@ -41,8 +42,6 @@ impl ProcIdGen {
 struct RegisteredProcess {
     limit: usize,
     process: Proc,
-    waiting_list: Vec<oneshot::Sender<SpawnResult>>,
-    singleton_started: bool, // only useful
     instances: HashSet<ProcId>,
 }
 
@@ -52,8 +51,6 @@ impl RegisteredProcess {
             limit: 1,
             process,
             instances: Default::default(),
-            waiting_list: Default::default(),
-            singleton_started: false,
         }
     }
 
@@ -64,8 +61,6 @@ impl RegisteredProcess {
             limit,
             process,
             instances: Default::default(),
-            waiting_list: Default::default(),
-            singleton_started: Default::default(),
         }
     }
 
@@ -77,12 +72,8 @@ impl RegisteredProcess {
         Some(self.instances.iter().last().copied())
     }
 
-    fn is_singleton(&self) -> bool {
-        self.limit == 1
-    }
-
     fn has_capacity(&self) -> bool {
-        self.instances.len() + 1 <= self.limit
+        self.instances.len() < self.limit
     }
 
     fn add_instance(&mut self, id: ProcId) {
@@ -95,15 +86,79 @@ impl RegisteredProcess {
 }
 
 #[derive(Default)]
+struct Registry {
+    inner: HashMap<Proc, RegisteredProcess>,
+}
+
+impl Registry {
+    fn get_process_mut(&mut self, proc: &Proc) -> Option<&mut RegisteredProcess> {
+        self.inner.get_mut(proc)
+    }
+
+    fn process(&self, proc: &Proc) -> eyre::Result<&RegisteredProcess> {
+        if let Some(registered) = self.inner.get(proc) {
+            Ok(registered)
+        } else {
+            eyre::bail!("process {:?} is not registered", proc);
+        }
+    }
+
+    fn process_mut(&mut self, proc: &Proc) -> eyre::Result<&mut RegisteredProcess> {
+        if let Some(registered) = self.get_process_mut(proc) {
+            Ok(registered)
+        } else {
+            eyre::bail!("process {:?} is not registered", proc);
+        }
+    }
+
+    fn clear(&mut self) {
+        self.inner.clear();
+    }
+}
+
+impl From<HashMap<Proc, RegisteredProcess>> for Registry {
+    fn from(inner: HashMap<Proc, RegisteredProcess>) -> Self {
+        Self { inner }
+    }
+}
+
+struct WaitingRoom {
+    correlation: Uuid,
+    id: ProcId,
+    proc: Proc,
+    attendees: Vec<oneshot::Sender<SpawnResult>>,
+}
+
+#[derive(Default)]
+struct Lobby {
+    inner: HashMap<ProcId, WaitingRoom>,
+}
+
+impl Lobby {
+    pub fn waiting_room(&mut self, id: &ProcId) -> Option<&mut WaitingRoom> {
+        self.inner.get_mut(id)
+    }
+
+    pub fn create(&mut self, room: WaitingRoom) {
+        self.inner.insert(room.id, room);
+    }
+
+    pub fn remove(&mut self, id: &ProcId) -> Option<WaitingRoom> {
+        self.inner.remove(id)
+    }
+}
+
+#[derive(Default)]
 pub struct Catalog {
     id_gen: ProcIdGen,
-    inner: HashMap<Proc, RegisteredProcess>,
+    registry: Registry,
+    lobby: Lobby,
     monitor: HashMap<ProcId, RunningProc>,
 }
 
 impl Catalog {
     pub fn lookup(&self, proc: &Proc) -> eyre::Result<Option<ProgramSummary>> {
-        let registered = self.get_registered(&proc)?;
+        let registered = self.registry.process(proc)?;
         if let Some(prev) = registered.as_singleton() {
             if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
                 Ok(Some(ProgramSummary {
@@ -120,20 +175,12 @@ impl Catalog {
         }
     }
 
-    fn get_registered(&self, proc: &Proc) -> eyre::Result<&RegisteredProcess> {
-        if let Some(registered) = self.inner.get(proc) {
-            Ok(registered)
-        } else {
-            eyre::bail!("process {:?} is not registered", proc);
-        }
-    }
-
     pub fn provision_process(
         &mut self,
         dependent: ProcId,
         proc: Proc,
     ) -> eyre::Result<ProvisionResult> {
-        let registered = self.get_registered(&proc)?;
+        let registered = self.registry.process_mut(&proc)?;
 
         if let Some(prev) = registered.as_singleton() {
             if let Some(prev_id) = &prev {
@@ -146,7 +193,11 @@ impl Catalog {
                     }
                 }
 
-                Ok(ProvisionResult::AlreadyProvisioned(*prev_id))
+                if self.lobby.waiting_room(prev_id).is_some() {
+                    Ok(ProvisionResult::WaitingForConfirmation(*prev_id))
+                } else {
+                    Ok(ProvisionResult::AlreadyProvisioned(*prev_id))
+                }
             } else {
                 let new_id = self.id_gen.next_proc_id();
                 registered.add_instance(new_id);
@@ -173,6 +224,69 @@ impl Catalog {
         }
     }
 
+    pub fn wait_for_confirmation(&mut self, proc_id: ProcId, resp: oneshot::Sender<SpawnResult>) {
+        if let Some(room) = self.lobby.waiting_room(&proc_id) {
+            room.attendees.push(resp);
+            return;
+        }
+
+        tracing::warn!(proc_id, "waiting for a process that has no waiting room");
+    }
+
+    pub fn create_waiting_room(
+        &mut self,
+        correlation: Uuid,
+        proc_id: ProcId,
+        proc: Proc,
+        resp: oneshot::Sender<SpawnResult>,
+    ) -> eyre::Result<()> {
+        if let Some(room) = self.lobby.waiting_room(&proc_id) {
+            // indempotency check
+            if room.correlation != correlation {
+                eyre::bail!("conflicting waiting room creation for process: {}", room.id);
+            }
+        } else {
+            self.lobby.create(WaitingRoom {
+                correlation,
+                id: proc_id,
+                proc,
+                attendees: vec![resp],
+            });
+        }
+
+        Ok(())
+    }
+
+    pub fn report_process_start_timeout(&mut self, id: ProcId, correlation: Uuid) {
+        if let Some(room) = self.lobby.remove(&id) {
+            if room.correlation != correlation {
+                return;
+            }
+
+            for attendee in room.attendees {
+                let _ = attendee.send(SpawnResult::Failure {
+                    proc: room.proc,
+                    error: SpawnError::Timeout,
+                });
+            }
+        }
+    }
+
+    pub fn report_process_ready(&mut self, correlation: Uuid, running: RunningProc) {
+        let id = running.id;
+        if let Some(room) = self.lobby.remove(&id) {
+            if room.correlation != correlation {
+                return;
+            }
+
+            self.monitor_process(running);
+
+            for attendee in room.attendees {
+                let _ = attendee.send(SpawnResult::Success(id));
+            }
+        }
+    }
+
     pub fn monitor_process(&mut self, running: RunningProc) {
         self.monitor.insert(running.id, running);
     }
@@ -187,7 +301,7 @@ impl Catalog {
 
     pub fn remove_process(&mut self, id: ProcId) -> Option<RunningProc> {
         if let Some(running) = self.monitor.remove(&id) {
-            if let Some(registered) = self.inner.get_mut(&running.proc) {
+            if let Some(registered) = self.registry.get_process_mut(&running.proc) {
                 registered.remove_instance(id);
             }
 
@@ -197,13 +311,13 @@ impl Catalog {
         None
     }
 
-    pub fn processes<'a>(&'a self) -> impl Iterator<Item = &'a RunningProc> {
+    pub fn processes(&self) -> impl Iterator<Item = &RunningProc> {
         self.monitor.values()
     }
 
     pub fn clear_running_processes(&mut self) {
         let now = Instant::now();
-        self.inner.clear();
+        self.registry.clear();
 
         for (_, running) in self.monitor.drain() {
             running.mailbox.send(Item::Mail(Mail {
@@ -257,7 +371,8 @@ impl CatalogBuilder {
     pub fn build(self) -> Catalog {
         Catalog {
             id_gen: Default::default(),
-            inner: self.inner,
+            registry: self.inner.into(),
+            lobby: Default::default(),
             monitor: Default::default(),
         }
     }

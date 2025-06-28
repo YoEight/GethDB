@@ -831,6 +831,7 @@ dependencies = [
  "geth-common",
  "geth-domain",
  "geth-mikoshi",
+ "lazy_static",
  "moka",
  "opentelemetry",
  "opentelemetry-appender-tracing",

@@ -1,4 +1,4 @@
-use std::{future::Future, path::is_separator, sync::Arc};
+use std::{future::Future, sync::Arc};
 
 use tokio::{
     runtime::Handle,
@@ -67,7 +67,7 @@ impl ProcessEnv<Managed> {
 }
 
 impl ProcessEnv<Raw> {
-    pub fn recv(&self) -> Option<Item> {
+    pub fn recv(&mut self) -> Option<Item> {
         if let Some(ready) = self.ready.take() {
             let _ = ready.send(());
         }

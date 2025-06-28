@@ -11,12 +11,12 @@ use uuid::Uuid;
 use crate::{
     process::{
         manager::{
-            FindParams, ManagerCommand, ProcTerminatedParams, SendParams, ShutdownNotification,
-            ShutdownParams, TimeoutParams, WaitForParams,
+            FindParams, ManagerCommand, ProcReadyParams, ProcTerminatedParams, SendParams,
+            ShutdownNotification, ShutdownParams, TimeoutParams, TimeoutTarget, WaitForParams,
         },
         messages::Messages,
         subscription::SubscriptionClient,
-        Item, Mail, ProcId, SpawnResult, Stream,
+        Item, Mail, ProcId, RunningProc, SpawnResult, Stream,
     },
     IndexClient, Proc, ReaderClient, RequestContext, WriterClient,
 };
@@ -30,7 +30,7 @@ pub struct ManagerClient {
 }
 
 impl ManagerClient {
-    pub fn new_root_client(
+    pub(crate) fn new_root_client(
         shutdown_notif: ShutdownNotification,
     ) -> (Self, UnboundedReceiver<ManagerCommand>) {
         let (sender, queue) = unbounded_channel();
@@ -64,7 +64,7 @@ impl ManagerClient {
         &self.shutdown_notif
     }
 
-    pub fn send_internal(&self, cmd: ManagerCommand) -> eyre::Result<()> {
+    fn send_internal(&self, cmd: ManagerCommand) -> eyre::Result<()> {
         if self.shutdown_notif.is_shutdown() || self.inner.send(cmd).is_err() {
             eyre::bail!("process manager has shutdown");
         }
@@ -75,7 +75,7 @@ impl ManagerClient {
     pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
         let (resp, receiver) = oneshot::channel();
 
-        self.send_internal(ManagerCommand::Find(FindParams { proc, resp }));
+        self.send_internal(ManagerCommand::Find(FindParams { proc, resp }))?;
 
         match receiver.await {
             Ok(ps) => Ok(ps),
@@ -238,13 +238,28 @@ impl ManagerClient {
         Ok(ReaderClient::new(id, self.clone()))
     }
 
-    pub fn send_timeout_in(&self, correlation: Uuid, duration: Duration) {
+    pub(crate) fn send_timeout_in(
+        &self,
+        correlation: Uuid,
+        target: TimeoutTarget,
+        duration: Duration,
+    ) {
         let this = self.clone();
 
         tokio::spawn(async move {
             tokio::time::sleep(duration).await;
-            this.send_internal(ManagerCommand::Timeout(TimeoutParams { correlation }))
+            this.send_internal(ManagerCommand::Timeout(TimeoutParams {
+                target,
+                correlation,
+            }))
         });
+    }
+
+    pub fn send_process_ready(&self, correlation: Uuid, running: RunningProc) {
+        let _ = self.send_internal(ManagerCommand::ProcReady(ProcReadyParams {
+            correlation,
+            running,
+        }));
     }
 
     pub async fn shutdown(&self) -> eyre::Result<()> {

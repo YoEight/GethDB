@@ -1,10 +1,9 @@
 use crate::domain::index::CurrentRevision;
 use crate::names::types::STREAM_DELETED;
-use crate::process::manager::Process;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
 use crate::process::{Item, ProcessEnv, Raw, RequestContext};
-use crate::{get_chunk_container, get_storage, Proc};
+use crate::{get_chunk_container, get_storage};
 use geth_common::{Direction, IteratorIO};
 use geth_domain::index::BlockEntry;
 use geth_domain::{Lsm, LsmSettings};
@@ -28,8 +27,8 @@ fn new_revision_cache() -> RevisionCache {
 }
 
 #[instrument(skip(env), fields(origin = ?env.proc))]
-pub fn run(env: ProcessEnv<Raw>) -> eyre::Result<()> {
-    let mut lsm = Lsm::load(LsmSettings::default(), get_storage().clone())?;
+pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let mut lsm = Lsm::load(LsmSettings::default(), get_storage())?;
 
     tracing::info!("rebuilding index...");
     let revision_cache = rebuild_index(&mut lsm, get_chunk_container().clone())?;
@@ -229,7 +228,7 @@ struct IndexRead<'a> {
 }
 
 #[instrument(skip(params), fields(correlation = %params.context.correlation, key = params.key, start = params.start, count = params.count, direction = ?params.dir))]
-fn stream_indexed_read<S>(params: IndexRead<'_>) -> eyre::Result<()> {
+fn stream_indexed_read(params: IndexRead<'_>) -> eyre::Result<()> {
     let lsm = params
         .lsm
         .read()

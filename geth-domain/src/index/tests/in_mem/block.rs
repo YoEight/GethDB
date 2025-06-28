@@ -7,7 +7,7 @@ use crate::index::tests::{in_mem_generate_block, key_of, position_of, revision_o
 
 #[test]
 fn test_in_mem_block_build_single_key() -> io::Result<()> {
-    let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
+    let mut table = SsTable::with_capacity(InMemoryStorage::new_storage(), 1);
 
     table.put_iter([(1, 1, 1)])?;
 
@@ -26,7 +26,7 @@ fn test_in_mem_block_build_single_key() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_build_full() -> io::Result<()> {
-    let mut table = SsTable::with_capacity(InMemoryStorage::new(), 1);
+    let mut table = SsTable::with_capacity(InMemoryStorage::new_storage(), 1);
 
     table.put_iter([(1, 1, 10), (2, 2, 20)])?;
 
@@ -97,7 +97,7 @@ fn test_in_mem_block_find_key() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_skipped() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
@@ -130,7 +130,7 @@ fn test_in_mem_block_scan_skipped() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_skipped_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
@@ -163,7 +163,7 @@ fn test_in_mem_block_scan_skipped_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_forward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
@@ -202,7 +202,7 @@ fn test_in_mem_block_scan_forward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
@@ -241,7 +241,7 @@ fn test_in_mem_block_scan_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_gap() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(2, 1, 5), (2, 2, 6)])?;
 
@@ -265,7 +265,7 @@ fn test_in_mem_block_scan_gap() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_gap_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(2, 1, 5), (2, 2, 6)])?;
 
@@ -289,7 +289,7 @@ fn test_in_mem_block_scan_gap_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
@@ -303,7 +303,7 @@ fn test_in_mem_block_scan_not_found_easy_1() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_1_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(3, 0, 7), (3, 1, 8), (3, 2, 9)])?;
 
@@ -317,7 +317,7 @@ fn test_in_mem_block_scan_not_found_easy_1_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
@@ -331,7 +331,7 @@ fn test_in_mem_block_scan_not_found_easy_2() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_easy_2_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([(1, 0, 1), (1, 1, 2), (1, 2, 3)])?;
 
@@ -345,7 +345,7 @@ fn test_in_mem_block_scan_not_found_easy_2_backward() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
@@ -366,7 +366,7 @@ fn test_in_mem_block_scan_not_found_hard() -> io::Result<()> {
 
 #[test]
 fn test_in_mem_block_scan_not_found_hard_backward() -> io::Result<()> {
-    let mut table = SsTable::with_default(InMemoryStorage::new());
+    let mut table = SsTable::with_default(InMemoryStorage::new_storage());
 
     table.put_iter([
         (1, 0, 1),
