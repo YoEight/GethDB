@@ -11,7 +11,7 @@ use crate::{process::tests::Foo, Options, RequestContext};
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_subscription_client().await?;
     let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
@@ -80,29 +80,31 @@ pub async fn test_program_created() -> eyre::Result<()> {
 
     assert_eq!(count, expected.len());
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 pub async fn test_program_list() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_subscription_client().await?;
     let ctx = RequestContext::new();
 
-    let mut _ignored = client
+    let mut ignored = client
         .subscribe_to_program(ctx, "echo", include_str!("./resources/programs/echo.pyro"))
         .await?;
+
+    ignored.wait_until_confirmation().await?;
 
     let programs = client.list_programs(ctx).await?;
     assert_eq!(programs.len(), 1);
     assert_eq!(programs[0].name, "echo");
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 pub async fn test_program_stats() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_subscription_client().await?;
     let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
@@ -159,12 +161,12 @@ pub async fn test_program_stats() -> eyre::Result<()> {
     );
     assert_eq!(program.subscriptions, vec!["foobar".to_string()]);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 pub async fn test_program_stop() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_subscription_client().await?;
     let writer = embedded.manager().new_writer_client().await?;
     let ctx = RequestContext::new();
@@ -228,5 +230,5 @@ pub async fn test_program_stop() -> eyre::Result<()> {
     let result = streaming.next().await?;
     assert!(result.is_none());
 
-    Ok(())
+    embedded.shutdown().await
 }

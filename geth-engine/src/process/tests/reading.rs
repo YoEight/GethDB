@@ -1,7 +1,7 @@
 use std::usize;
 
 use crate::Options;
-use crate::{process::start_process_manager, RequestContext};
+use crate::RequestContext;
 use geth_common::{Direction, ExpectedRevision, Propose, Revision};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -13,9 +13,9 @@ struct Foo {
 
 #[tokio::test]
 async fn test_reader_proc_simple() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_client = manager.new_writer_client().await?;
-    let reader_client = manager.new_reader_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
+    let writer_client = embedded.manager().new_writer_client().await?;
+    let reader_client = embedded.manager().new_reader_client().await?;
     let ctx = RequestContext::new();
     let mut expected = vec![];
 
@@ -58,13 +58,13 @@ async fn test_reader_proc_simple() -> eyre::Result<()> {
 
     assert_eq!(expected.len(), count as usize);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn test_empty_read_does_not_hang() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let client = manager.new_reader_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
+    let client = embedded.manager().new_reader_client().await?;
     let ctx = RequestContext::new();
     let stream_name = Uuid::new_v4().to_string();
 
@@ -81,5 +81,5 @@ async fn test_empty_read_does_not_hang() -> eyre::Result<()> {
 
     while let Some(_) = streaming.next().await? {}
 
-    Ok(())
+    embedded.shutdown().await
 }

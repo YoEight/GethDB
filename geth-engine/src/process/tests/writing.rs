@@ -1,4 +1,3 @@
-use crate::process::start_process_manager;
 use crate::process::tests::Foo;
 use crate::Options;
 use crate::{process::reading::record_try_from, RequestContext};
@@ -8,10 +7,10 @@ use uuid::Uuid;
 
 #[tokio::test]
 async fn test_writer_proc_simple() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let index_client = manager.new_index_client().await?;
-    let writer_client = manager.new_writer_client().await?;
-    let reader_client = manager.new_reader_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
+    let index_client = embedded.manager().new_index_client().await?;
+    let writer_client = embedded.manager().new_writer_client().await?;
+    let reader_client = embedded.manager().new_reader_client().await?;
     let ctx = RequestContext::new();
     let mut expected = vec![];
 
@@ -62,5 +61,5 @@ async fn test_writer_proc_simple() -> eyre::Result<()> {
 
     assert_eq!(expected.len(), index);
 
-    Ok(())
+    embedded.shutdown().await
 }

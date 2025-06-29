@@ -46,6 +46,7 @@ pub struct Consumer {
     sub_streaming: subscription::Streaming,
 }
 
+#[allow(clippy::large_enum_variant)]
 pub enum ConsumerResult {
     Success(Consumer),
     StreamDeleted,

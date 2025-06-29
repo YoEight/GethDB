@@ -9,7 +9,7 @@ use crate::{Options, RequestContext};
 
 #[tokio::test]
 async fn test_store_read() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_index_client().await?;
     let ctx = RequestContext::new();
     let mut expected = vec![];
@@ -32,12 +32,12 @@ async fn test_store_read() -> eyre::Result<()> {
 
     assert_eq!(expected, entries);
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn test_last_revision_when_exists() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_index_client().await?;
     let ctx = RequestContext::new();
     let mut expected = vec![];
@@ -56,24 +56,24 @@ async fn test_last_revision_when_exists() -> eyre::Result<()> {
     assert!(revision.is_some());
     assert_eq!(9, revision.unwrap());
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn test_last_revision_when_non_existent() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_index_client().await?;
     let ctx = RequestContext::new();
     let revision = client.latest_revision(ctx, 2).await?.revision();
 
     assert!(revision.is_none());
 
-    Ok(())
+    embedded.shutdown().await
 }
 
 #[tokio::test]
 async fn test_empty_index_does_not_hang() -> eyre::Result<()> {
-    let embedded = crate::run_embedded(&Options::in_mem()).await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
     let client = embedded.manager().new_index_client().await?;
     let ctx = RequestContext::new();
 

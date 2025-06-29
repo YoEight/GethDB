@@ -25,7 +25,8 @@ fn sink_response(resp: Mail) -> u64 {
 #[tokio::test]
 async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
     let mut buffer = BytesMut::new();
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let echo_proc_id = manager.wait_for(Proc::Echo).await?.must_succeed()?;
 
     let mut count = 0u64;
@@ -51,7 +52,8 @@ async fn test_spawn_and_receive_mails() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_streaming() -> eyre::Result<()> {
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let sink = SinkClient::resolve(manager.clone()).await?;
     let mut streaming = sink.stream_from(0, 10).await?;
     let mut count = 0u64;
@@ -66,7 +68,8 @@ async fn test_streaming() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_find_proc() -> eyre::Result<()> {
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?.must_succeed()?;
     let find_proc_id = manager.find(Proc::Echo).await?;
 
@@ -78,7 +81,8 @@ async fn test_find_proc() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_shutdown_reported_properly() -> eyre::Result<()> {
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Echo).await?.must_succeed()?;
 
     let num = 42;
@@ -102,7 +106,8 @@ async fn test_shutdown_reported_properly() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_request_returns_when_proc_panicked() -> eyre::Result<()> {
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Panic).await?.must_succeed()?;
 
     let resp = manager
@@ -120,7 +125,8 @@ async fn test_request_returns_when_proc_panicked() -> eyre::Result<()> {
 
 #[tokio::test]
 async fn test_stream_returns_when_proc_panicked() -> eyre::Result<()> {
-    let manager = start_process_manager_with_catalog(Options::in_mem(), test_catalog()).await?;
+    let manager =
+        start_process_manager_with_catalog(Options::in_mem_no_grpc(), test_catalog()).await?;
     let proc_id = manager.wait_for(Proc::Panic).await?.must_succeed()?;
 
     let mut resp = manager

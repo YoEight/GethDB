@@ -22,6 +22,8 @@ pub struct Options {
     pub telemetry_endpoint: Option<String>,
 
     pub telemetry_event_filters: Vec<String>,
+
+    pub disable_grpc: bool,
 }
 
 impl Options {
@@ -32,6 +34,7 @@ impl Options {
             db,
             telemetry_endpoint: None,
             telemetry_event_filters: vec![],
+            disable_grpc: false,
         }
     }
 
@@ -46,6 +49,15 @@ impl Options {
         Self {
             db: "in_mem".to_string(),
             ..Self::default()
+        }
+    }
+
+    pub fn in_mem_no_grpc() -> Self {
+        let opts = Self::in_mem();
+
+        Self {
+            disable_grpc: true,
+            ..opts
         }
     }
 }

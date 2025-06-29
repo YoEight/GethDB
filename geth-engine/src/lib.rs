@@ -116,7 +116,9 @@ pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
 
     let manager = start_process_manager(options.clone()).await?;
 
-    manager.wait_for(Proc::Grpc).await?;
+    if !options.disable_grpc {
+        manager.wait_for(Proc::Grpc).await?;
+    }
 
     Ok(EmbeddedClient { handles, manager })
 }
