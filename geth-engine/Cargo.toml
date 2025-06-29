@@ -47,6 +47,7 @@ tracing-opentelemetry = "0.31"
 opentelemetry = "0.30"
 opentelemetry_sdk = "0.30"
 opentelemetry-appender-tracing = "0.30"
+lazy_static = "1"
 
 bytes = "1"
 eyre = "0.6"
@@ -56,6 +57,7 @@ moka = "0.11"
 async-trait = "0.1.71"
 serde = { version = "1", features = ["derive"] }
 ctor = "0.2"
+base64 = "0.22"
 
 [build-dependencies]
 built = { version = "0.8", features = ["git2"] }

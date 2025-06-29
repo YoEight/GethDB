@@ -16,7 +16,7 @@ use crate::index::tests::{
 fn test_fs_sst_build_single_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
     table.put_iter([(1, 2, 3)])?;
@@ -34,7 +34,7 @@ fn test_fs_sst_build_single_key() -> io::Result<()> {
 fn test_fs_sst_build_two_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
     table.put_iter([(1, 2, 3), (2, 3, 4)])?;
@@ -58,7 +58,7 @@ fn test_fs_sst_build_two_blocks() -> io::Result<()> {
 fn test_fs_sst_key_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
     table.put_iter([(1, 2, 3)])?;
@@ -72,7 +72,7 @@ fn test_fs_sst_key_not_found() -> io::Result<()> {
 fn test_fs_sst_find_key() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let table = fs_generate_stt_with_size(storage, 1)?;
 
     for i in 0..NUM_OF_KEYS {
@@ -94,7 +94,7 @@ fn test_fs_sst_find_key() -> io::Result<()> {
 fn test_fs_ss_table_scan() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
     table.put_iter([
@@ -134,7 +134,7 @@ fn test_fs_ss_table_scan() -> io::Result<()> {
 fn test_fs_ss_table_scan_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 1);
 
     table.put_iter([
@@ -175,7 +175,7 @@ fn test_fs_ss_table_scan_backward() -> io::Result<()> {
 fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
     table.put_iter([
@@ -217,7 +217,7 @@ fn test_fs_ss_table_scan_3_blocks() -> io::Result<()> {
 fn test_fs_ss_table_scan_3_blocks_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
     table.put_iter([
@@ -260,7 +260,7 @@ fn test_fs_ss_table_scan_3_blocks_backward() -> io::Result<()> {
 fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
     table.put_iter([
@@ -283,7 +283,7 @@ fn test_fs_ss_table_scan_not_found() -> io::Result<()> {
 fn test_fs_ss_table_scan_not_found_backward() -> io::Result<()> {
     let temp = TempDir::default();
     let root = PathBuf::from(temp.as_ref());
-    let storage = FileSystemStorage::new(root)?;
+    let storage = FileSystemStorage::new_storage(root)?;
     let mut table = SsTable::with_capacity(storage, 3);
 
     table.put_iter([
@@ -305,7 +305,7 @@ fn test_fs_ss_table_scan_not_found_backward() -> io::Result<()> {
 #[test]
 fn test_fs_ss_table_serialization() -> io::Result<()> {
     let temp = TempDir::default();
-    let storage = FileSystemStorage::new(PathBuf::from(temp.as_ref()))?;
+    let storage = FileSystemStorage::new_storage(PathBuf::from(temp.as_ref()))?;
     let mut table = SsTable::with_capacity(storage.clone(), 10);
 
     table.put_iter([(1, 2, 3)])?;

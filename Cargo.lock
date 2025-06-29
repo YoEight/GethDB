@@ -821,6 +821,7 @@ name = "geth-engine"
 version = "0.1.0"
 dependencies = [
  "async-trait",
+ "base64 0.22.1",
  "built",
  "bytes",
  "chrono",
@@ -830,6 +831,7 @@ dependencies = [
  "geth-common",
  "geth-domain",
  "geth-mikoshi",
+ "lazy_static",
  "moka",
  "opentelemetry",
  "opentelemetry-appender-tracing",

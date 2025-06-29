@@ -202,7 +202,7 @@ fn test_mem_table_backward_iter() {
 
 #[test]
 fn test_mem_table_flush() -> io::Result<()> {
-    let storage = InMemoryStorage::new();
+    let storage = InMemoryStorage::new_storage();
     let mut table = SsTable::new(storage, 128);
     let mut mem_table = MemTable::default();
 

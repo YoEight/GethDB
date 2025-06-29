@@ -68,9 +68,11 @@ async fn start_program_subscriptions() -> eyre::Result<()> {
         }
     }
 
+    embedded.shutdown().await?;
+
     assert_eq!(count, 10);
 
-    embedded.shutdown().await
+    Ok(())
 }
 
 #[tokio::test]

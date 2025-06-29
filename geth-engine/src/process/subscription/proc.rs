@@ -50,7 +50,7 @@ impl Register {
     }
 }
 
-#[tracing::instrument(skip_all, fields(proc_id = env.client.id, proc = "pubsub"))]
+#[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut reg = Register::default();
     let mut programs = HashMap::new();

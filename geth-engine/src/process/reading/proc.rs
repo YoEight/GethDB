@@ -1,18 +1,15 @@
 use std::cmp::min;
 use std::mem;
 
+use crate::get_chunk_container;
 use crate::process::messages::{ReadRequests, ReadResponses};
-use crate::process::{Item, ProcessEnv, Raw, Runtime};
+use crate::process::{Item, ProcessEnv, Raw};
 use geth_common::ReadCompleted;
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::LogReader;
 
-pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
-where
-    S: Storage + Send + Sync + 'static,
-{
-    let reader = LogReader::new(runtime.container().clone());
+pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let reader = LogReader::new(get_chunk_container());
     let index_client = env.new_index_client()?;
 
     while let Some(item) = env.recv() {
@@ -48,9 +45,11 @@ where
                         tracing::info_span!("read_from_log", correlation = %stream.correlation);
 
                     let result: eyre::Result<()> = span.in_scope(|| {
+                        let mut no_entries = true;
                         while let Some(entry) = env.block_on(index_stream.next())? {
                             let entry = reader.read_at(entry.position)?;
                             batch.push(entry);
+                            no_entries = false;
 
                             if batch.len() < batch_size {
                                 continue;
@@ -68,6 +67,13 @@ where
 
                         if !batch.is_empty() {
                             let _ = stream.sender.send(ReadResponses::Entries(batch).into());
+                            return Ok(());
+                        }
+
+                        if no_entries {
+                            let _ = stream
+                                .sender
+                                .send(ReadResponses::Entries(Vec::new()).into());
                         }
 
                         Ok(())

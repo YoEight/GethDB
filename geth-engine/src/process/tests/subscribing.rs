@@ -1,5 +1,5 @@
 use crate::Options;
-use crate::{process::start_process_manager, RequestContext};
+use crate::RequestContext;
 use geth_common::{ExpectedRevision, Propose, SubscriptionEvent};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -11,9 +11,9 @@ struct Foo {
 
 #[tokio::test]
 async fn test_pubsub_proc_simple() -> eyre::Result<()> {
-    let manager = start_process_manager(Options::in_mem()).await?;
-    let writer_client = manager.new_writer_client().await?;
-    let sub_client = manager.new_subscription_client().await?;
+    let embedded = crate::run_embedded(&Options::in_mem_no_grpc()).await?;
+    let writer_client = embedded.manager().new_writer_client().await?;
+    let sub_client = embedded.manager().new_subscription_client().await?;
     let ctx = RequestContext::new();
     let mut expected = vec![];
     let stream_name = Uuid::new_v4().to_string();
@@ -56,5 +56,5 @@ async fn test_pubsub_proc_simple() -> eyre::Result<()> {
 
     assert_eq!(expected.len(), count as usize);
 
-    Ok(())
+    embedded.shutdown().await
 }

@@ -19,7 +19,7 @@ impl IndexClient {
         Self { target, inner }
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn read(
         &self,
         context: RequestContext,
@@ -42,7 +42,13 @@ impl IndexClient {
             )
             .await?;
 
-        if let Some(resp) = inner.recv().await.and_then(|m| m.try_into().ok()) {
+        let resp = if let Some(resp) = inner.recv().await {
+            resp
+        } else {
+            eyre::bail!("index process is no longer reachable");
+        };
+
+        if let Ok(resp) = resp.try_into() {
             match resp {
                 IndexResponses::Error => {
                     eyre::bail!("internal error when running a read request to the index process")
@@ -65,10 +71,10 @@ impl IndexClient {
             }
         }
 
-        eyre::bail!("index process is no longer reachable");
+        eyre::bail!("unexpected message from the index process");
     }
 
-    #[instrument(skip(self, entries), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, entries, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn store(
         &self,
         context: RequestContext,
@@ -102,7 +108,7 @@ impl IndexClient {
         eyre::bail!("unexpected message from the index process");
     }
 
-    #[instrument(skip(self), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, context), fields(origin = ?self.inner.origin(), correlation = %context.correlation))]
     pub async fn latest_revision(
         &self,
         context: RequestContext,

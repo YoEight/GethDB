@@ -39,7 +39,11 @@ impl ReadStreaming {
                 while let Some(event) = sub.next().await? {
                     match event {
                         SubscriptionEvent::EventAppeared(record) => return Ok(Some(record)),
-                        SubscriptionEvent::Confirmed(_) | SubscriptionEvent::CaughtUp => continue,
+
+                        SubscriptionEvent::Confirmed(_)
+                        | SubscriptionEvent::CaughtUp
+                        | SubscriptionEvent::Notification(_) => continue,
+
                         SubscriptionEvent::Unsubscribed(_) => break,
                     }
                 }

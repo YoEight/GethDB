@@ -7,15 +7,15 @@ use geth_common::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{
-    process::{Managed, ProcessEnv},
-    ManagerClient, Options, Proc,
+    process::{manager::ManagerClient, Managed, ProcessEnv},
+    Options,
 };
 
 mod protocol;
 
 pub async fn start_server(
     client: ManagerClient,
-    options: Options,
+    options: Arc<Options>,
     notify: Arc<Notify>,
 ) -> eyre::Result<()> {
     let addr = format!("{}:{}", options.host, options.port)
@@ -34,7 +34,7 @@ pub async fn start_server(
     Ok(())
 }
 
-#[instrument(skip_all, fields(host = env.options.host, port = env.options.port, proc = ?Proc::Grpc))]
+#[instrument(skip_all, fields(host = env.options.host, port = env.options.port, proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let notify = Arc::new(Notify::new());
     let handle = tokio::spawn(start_server(

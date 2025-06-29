@@ -144,7 +144,8 @@ message SubscribeResponse {
     Confirmation confirmation = 1;
     EventAppeared event_appeared = 2;
     CaughtUp caught_up = 3;
-    Error error = 4;
+    Notification notification = 4;
+    Error error = 5;
   }
 
   message Confirmation {
@@ -159,6 +160,13 @@ message SubscribeResponse {
   }
 
   message CaughtUp {}
+
+  message Notification {
+      oneof kind {
+          string subscribed = 1;
+          string unsubscribed = 2;
+      }
+  }
 
   message Error {}
 }

@@ -409,6 +409,8 @@ pub enum ProgramResponses {
     Stats(ProgramStats),
     Summary(ProgramSummary),
     List(Vec<ProgramSummary>),
+    Subscribed(String),
+    Unsubscribed(String),
     NotFound,
     Error(eyre::Report),
     Started,

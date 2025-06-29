@@ -1,22 +1,18 @@
 use crate::domain::index::CurrentRevision;
+use crate::get_chunk_container;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{WriteRequests, WriteResponses};
-use crate::process::{Item, ProcessEnv, Raw, Runtime};
+use crate::process::{Item, ProcessEnv, Raw};
 use bytes::{Bytes, BytesMut};
 use geth_common::{ContentType, ExpectedRevision, Propose, WrongExpectedRevisionError};
 use geth_mikoshi::hashing::mikoshi_hash;
-use geth_mikoshi::storage::Storage;
 use geth_mikoshi::wal::LogWriter;
 use uuid::Uuid;
 
 use super::entries::ProposeEntries;
 
-pub fn run<S>(runtime: Runtime<S>, env: ProcessEnv<Raw>) -> eyre::Result<()>
-where
-    S: Storage + 'static,
-{
-    let mut log_writer =
-        LogWriter::load(runtime.container().clone(), BytesMut::with_capacity(4_096))?;
+pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
+    let mut log_writer = LogWriter::load(get_chunk_container(), BytesMut::with_capacity(4_096))?;
     let index_client = env.new_index_client()?;
     let sub_client = env.new_subscription_client()?;
 

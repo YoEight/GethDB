@@ -5,11 +5,12 @@ use crate::process::messages::{
 use crate::process::{ManagerClient, ProcId, RequestContext};
 use geth_common::{
     ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
-    UnsubscribeReason,
+    SubscriptionNotification, UnsubscribeReason,
 };
-use tokio::sync::mpsc::UnboundedReceiver;
+use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
 use tracing::instrument;
 
+#[derive(Debug)]
 pub struct Streaming {
     context: RequestContext,
     stream_name: String,
@@ -18,6 +19,15 @@ pub struct Streaming {
 }
 
 impl Streaming {
+    pub fn empty() -> Self {
+        Self {
+            context: RequestContext::nil(),
+            stream_name: String::new(),
+            id: None,
+            inner: unbounded_channel().1,
+        }
+    }
+
     pub fn from(
         context: RequestContext,
         stream_name: String,
@@ -83,9 +93,28 @@ impl Streaming {
                     )));
                 }
 
+                SubscribeResponses::Programs(prog) if self.id.is_some() => match prog {
+                    ProgramResponses::Subscribed(s) => {
+                        return Ok(Some(SubscriptionEvent::Notification(
+                            SubscriptionNotification::Subscribed(s),
+                        )))
+                    }
+
+                    ProgramResponses::Unsubscribed(s) => {
+                        return Ok(Some(SubscriptionEvent::Notification(
+                            SubscriptionNotification::Unsubscribed(s),
+                        )))
+                    }
+
+                    x => {
+                        tracing::error!(msg = ?x, correlation = %self.context.correlation, "unexpected message");
+                        eyre::bail!("unexpected message when streaming from process");
+                    }
+                },
+
                 x => {
                     tracing::error!(msg = ?x, correlation = %self.context.correlation, "unexpected message");
-                    eyre::bail!("unexpected message when streaming from the pubsub process");
+                    eyre::bail!("unexpected message when streaming from subscription");
                 }
             }
         }
@@ -250,10 +279,8 @@ impl SubscriptionClient {
         eyre::bail!("pubsub process is no longer running")
     }
 
-    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin_proc, correlation = %context.correlation))]
+    #[instrument(skip(self, events, context), fields(origin = ?self.inner.origin(), target = self.target, correlation = %context.correlation))]
     pub async fn push(&self, context: RequestContext, events: Vec<Record>) -> eyre::Result<()> {
-        tracing::debug!("sending push request to pubsub process {}", self.target);
-
         let resp = self
             .inner
             .request(

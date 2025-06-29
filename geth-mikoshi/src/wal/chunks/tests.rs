@@ -62,7 +62,7 @@ fn generate_bytes() -> Bytes {
 
 #[test]
 fn test_wal_chunk_iso() -> eyre::Result<()> {
-    let storage = InMemoryStorage::new();
+    let storage = InMemoryStorage::new_storage();
     let container = ChunkContainer::load(storage.clone())?;
     let data = generate_bytes();
     let mut entries = RawEntries::new(vec![data.clone()]);

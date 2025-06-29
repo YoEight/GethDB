@@ -1,25 +1,29 @@
-use std::{
-    collections::HashMap,
-    sync::{
-        atomic::{self, AtomicUsize},
-        Arc,
-    },
-};
+use std::{collections::HashMap, sync::Arc};
 
+use base64::Engine as _;
 use chrono::{DateTime, Utc};
-use geth_common::{Record, SubscriptionConfirmation, SubscriptionEvent};
+use geth_common::{ContentType, Record, Revision, SubscriptionConfirmation, SubscriptionEvent};
 use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
 use pyro_runtime::{
     helpers::{Declared, TypeBuilder},
     Channel, Engine, Env, PyroProcess, PyroType, PyroValue, RuntimeValue,
 };
 use serde_json::Value;
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    Mutex, RwLock,
+use tokio::{
+    select,
+    sync::{
+        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+        Mutex,
+    },
 };
 
-use crate::process::{subscription::SubscriptionClient, ProcId, RequestContext};
+use crate::{
+    process::{
+        consumer::{start_consumer, ConsumerResult},
+        ProcId, RequestContext,
+    },
+    ManagerClient,
+};
 
 pub mod worker;
 
@@ -54,6 +58,16 @@ impl PyroValue for EventRecord {
 
     fn serialize(self) -> eyre::Result<RuntimeValue> {
         let record = self.0;
+
+        let payload = if record.data.is_empty() {
+            serde_json::Value::Array(vec![])
+        } else if record.content_type != ContentType::Json {
+            let encoded = base64::engine::general_purpose::STANDARD.encode(&record.data);
+            serde_json::Value::String(encoded)
+        } else {
+            serde_json::from_slice::<Value>(record.data.as_ref())?
+        };
+
         let props = vec![
             Prop {
                 label: Some("id".to_string()),
@@ -77,9 +91,7 @@ impl PyroValue for EventRecord {
             },
             Prop {
                 label: Some("payload".to_string()),
-                val: from_json_to_pyro_runtime_value(serde_json::from_slice::<Value>(
-                    record.data.as_ref(),
-                )?)?,
+                val: from_json_to_pyro_runtime_value(payload)?,
             },
         ];
 
@@ -227,11 +239,21 @@ impl PyroValue for SubServer {
     }
 }
 
+pub enum PyroRuntimeNotification {
+    SubscribedToStream(String),
+    UnsubscribedToStream(String),
+}
+
+#[allow(clippy::large_enum_variant)]
+pub enum PyroEvent {
+    Value(RuntimeValue),
+    Notification(PyroRuntimeNotification),
+}
+
 pub struct PyroRuntime {
     engine: Engine<NominalTyping>,
     output: UnboundedReceiver<RuntimeValue>,
-    subs: Arc<RwLock<Vec<String>>>,
-    pushed_events: Arc<AtomicUsize>,
+    notifications: UnboundedReceiver<PyroRuntimeNotification>,
     started: DateTime<Utc>,
 }
 
@@ -240,16 +262,12 @@ impl PyroRuntime {
         self.engine.compile(code)
     }
 
-    pub async fn recv(&mut self) -> Option<RuntimeValue> {
-        self.output.recv().await
-    }
-
-    pub async fn subs(&self) -> Vec<String> {
-        self.subs.read().await.clone()
-    }
-
-    pub fn pushed_events(&self) -> usize {
-        self.pushed_events.load(atomic::Ordering::SeqCst)
+    pub async fn recv(&mut self) -> Option<PyroEvent> {
+        select! {
+            Some(value) = self.output.recv() => Some(PyroEvent::Value(value)),
+            Some(notif) = self.notifications.recv() => Some(PyroEvent::Notification(notif)),
+            else => None
+        }
     }
 
     pub fn started(&self) -> DateTime<Utc> {
@@ -259,7 +277,7 @@ impl PyroRuntime {
 
 pub fn create_pyro_runtime(
     context: RequestContext,
-    client: SubscriptionClient,
+    client: ManagerClient,
     proc_id: ProcId,
     name: &str,
 ) -> eyre::Result<PyroRuntime> {
@@ -277,11 +295,8 @@ pub fn create_pyro_runtime(
     });
 
     let (send_output, recv_output) = unbounded_channel();
+    let (send_notification, recv_notification) = unbounded_channel();
     let name_subscribe = name.to_string();
-    let subs = Arc::new(RwLock::new(Vec::new()));
-    let pushed_events = Arc::new(AtomicUsize::new(0));
-    let subs_subscribe = subs.clone();
-    let pushed_events_subscribe = pushed_events.clone();
     let engine = Engine::with_nominal_typing()
         .stdlib(env)
         .register_type::<EventEntry>("Entry")
@@ -296,51 +311,43 @@ pub fn create_pyro_runtime(
             );
 
             let (input, recv) = unbounded_channel();
-
-            let local_client = client.clone();
             let name_subscribe_local = name_subscribe.clone();
-            let subs_subscribe_local = subs_subscribe.clone();
-            let pushed_events_subscribe_local = pushed_events_subscribe.clone();
+            let manager_client = client.clone();
+            let local_send_notification = send_notification.clone();
             tokio::spawn(async move {
-                let mut streaming = local_client
-                    .clone()
-                    .subscribe_to_stream(context, stream_name.as_str())
-                    .await
-                    .inspect_err(|e| {
-                        tracing::error!(
-                            name = name_subscribe_local,
-                            proc_id = proc_id,
-                            target = "subscription",
-                            kind = "pyro",
-                            error = %e,
-                            stream_name = stream_name,
-                            "error when subscribing to stream",
-                        );
-                    })?;
+                let mut consumer =
+                    match start_consumer(context, stream_name.clone(), Revision::Start, manager_client)
+                        .await
+                    {
+                        Err(error) => {
+                            tracing::error!(%error, stream_name, "unexpected error when starting a new consumer");
+                            return Ok(());
+                        }
 
-                // let mut streaming = local_reader_client
-                //     .read(
-                //         &stream_name,
-                //         Revision::Start,
-                //         Direction::Forward,
-                //         usize::MAX,
-                //     )
-                //     .await?
-                //     .success()?;
+                        Ok(result) => match result {
+                            ConsumerResult::Success(c) => c,
+                            ConsumerResult::StreamDeleted => {
+                                tracing::error!(reason = "stream deleted", stream_name, "cannot start a new consumer");
+                                return Ok(());
+                            }
+                        }
+                    };
 
                 loop {
-                    match streaming.next().await {
-                        Err(e) => {
+                    match consumer.next().await {
+                        Err(error) => {
                             tracing::error!(
                                 name = name_subscribe_local,
                                 target = "subscription",
-                                proc_id = proc_id,
+                                proc_id,
                                 kind = "pyro",
-                                stream_name = stream_name,
+                                stream_name,
                                 reason = "error",
-                                error = %e,
+                                %error,
                                 "unexpected subscription error"
                             );
+
+                            let _ = local_send_notification.send(PyroRuntimeNotification::UnsubscribedToStream(name_subscribe_local.clone()));
 
                             break;
                         }
@@ -363,8 +370,7 @@ pub fn create_pyro_runtime(
                                                 "subscription is confirmed"
                                             );
 
-                                            let mut streams = subs_subscribe_local.write().await;
-                                            streams.push(stream_name);
+                                            let _ = local_send_notification.send(PyroRuntimeNotification::SubscribedToStream(stream_name));
                                         }
                                     }
 
@@ -378,27 +384,41 @@ pub fn create_pyro_runtime(
                                             reason = ?reason,
                                             "subscription was dropped"
                                         );
+
+                                        let _ = local_send_notification.send(PyroRuntimeNotification::UnsubscribedToStream(name_subscribe_local.clone()));
+
                                         break;
                                     }
 
                                     SubscriptionEvent::EventAppeared(record) => {
-                                        if input.send(EventRecord(record).serialize()?).is_err() {
+                                        let serialized = EventRecord(record)
+                                            .serialize()
+                                            .inspect_err(|error| {
+                                                tracing::error!(
+                                                    %error,
+                                                    proc_id,
+                                                    stream_name,
+                                                    name = name_subscribe_local,
+                                                    "serialization error"
+                                                );
+                                            })?;
+
+                                        if input.send(serialized).is_err() {
                                             tracing::debug!(
                                                 name = name_subscribe_local,
                                                 target = "subscription",
-                                                proc_id = proc_id,
+                                                proc_id,
                                                 kind = "pyro",
-                                                stream_name = stream_name,
+                                                stream_name,
                                                 reason = "User",
                                                 "subscription was dropped"
                                             );
 
                                             break;
                                         }
-
-                                        pushed_events_subscribe_local
-                                            .fetch_add(1, atomic::Ordering::SeqCst);
                                     }
+
+                                    SubscriptionEvent::Notification(_) => {}
                                 }
                             } else {
                                 break;
@@ -412,9 +432,11 @@ pub fn create_pyro_runtime(
                     target = "subscription",
                     kind = "pyro",
                     proc_id = proc_id,
-                    stream_name = stream_name,
+                    stream_name,
                     "subscription has completed"
                 );
+
+                let _ = local_send_notification.send(PyroRuntimeNotification::UnsubscribedToStream(name_subscribe_local));
 
                 Ok::<_, eyre::Report>(())
             });
@@ -426,8 +448,7 @@ pub fn create_pyro_runtime(
     Ok(PyroRuntime {
         engine,
         output: recv_output,
-        subs,
-        pushed_events,
+        notifications: recv_notification,
         started: Utc::now(),
     })
 }

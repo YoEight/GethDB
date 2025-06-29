@@ -5,17 +5,22 @@ mod names;
 mod options;
 mod process;
 
+use geth_mikoshi::{
+    storage::Storage, wal::chunks::ChunkContainer, FileSystemStorage, InMemoryStorage,
+};
 use opentelemetry::{trace::TracerProvider, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resource};
 pub use process::{
     indexing::IndexClient,
+    manager::{start_process_manager_with_catalog, Catalog, CatalogBuilder, ManagerClient},
     reading::{self, ReaderClient},
-    start_process_manager, start_process_manager_with_catalog,
+    start_process_manager,
     writing::WriterClient,
-    Catalog, CatalogBuilder, ManagerClient, Proc, RequestContext,
+    Proc, RequestContext,
 };
+use tokio::sync::OnceCell;
 use tracing_opentelemetry::OpenTelemetryLayer;
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};
 use tracing_subscriber::{prelude::*, EnvFilter};
@@ -25,16 +30,35 @@ pub mod built_info {
     include!(concat!(env!("OUT_DIR"), "/built.rs"));
 }
 
+static STORAGE: OnceCell<Storage> = OnceCell::const_new();
+static CHUNK_CONTAINER: OnceCell<ChunkContainer> = OnceCell::const_new();
+
+pub(crate) fn get_storage() -> Storage {
+    STORAGE.get().unwrap().clone()
+}
+
+pub(crate) fn get_chunk_container() -> ChunkContainer {
+    CHUNK_CONTAINER.get().unwrap().clone()
+}
+
+fn configure_storage(options: &Options) -> eyre::Result<Storage> {
+    let storage = if options.db == "in_mem" {
+        InMemoryStorage::new_storage()
+    } else {
+        FileSystemStorage::new_storage(options.db.as_str().into())?
+    };
+
+    storage.init()?;
+
+    Ok(storage)
+}
+
 pub async fn run(options: Options) -> eyre::Result<()> {
-    let handles = init_telemetry(&options)?;
+    let client = run_embedded(&options).await?;
 
-    let manager = start_process_manager(options).await?;
-
-    manager.wait_for(Proc::Grpc).await?;
     // TODO - handle CTRL-C signal to properly flush telemetry data before exiting
-    manager.manager_exited().await;
-
-    handles.shutdown()?;
+    client.manager.manager_exited().await;
+    client.handles.shutdown()?;
 
     Ok(())
 }
@@ -51,6 +75,10 @@ impl EmbeddedClient {
         self.handles.shutdown()?;
 
         Ok(())
+    }
+
+    pub fn manager(&self) -> &ManagerClient {
+        &self.manager
     }
 }
 
@@ -76,9 +104,21 @@ impl TelemetryHandles {
 
 pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
     let handles = init_telemetry(options)?;
+    let storage = configure_storage(options)?;
+    let container = ChunkContainer::load(storage)?;
+
+    STORAGE
+        .set(container.storage().clone())
+        .expect("to always work");
+    CHUNK_CONTAINER
+        .set(container)
+        .expect("expect to always work");
+
     let manager = start_process_manager(options.clone()).await?;
 
-    manager.wait_for(Proc::Grpc).await?;
+    if !options.disable_grpc {
+        manager.wait_for(Proc::Grpc).await?;
+    }
 
     Ok(EmbeddedClient { handles, manager })
 }
