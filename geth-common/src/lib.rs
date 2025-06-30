@@ -359,7 +359,7 @@ impl<D: Display> Display for Revision<D> {
         match self {
             Revision::Start => write!(f, "Start"),
             Revision::End => write!(f, "End"),
-            Revision::Revision(v) => write!(f, "{}", v),
+            Revision::Revision(v) => write!(f, "{v}"),
         }
     }
 }
@@ -581,7 +581,7 @@ impl ExpectedRevision {
 impl Display for ExpectedRevision {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            ExpectedRevision::Revision(v) => write!(f, "{}", v),
+            ExpectedRevision::Revision(v) => write!(f, "{v}"),
             ExpectedRevision::NoStream => write!(f, "'no stream'"),
             ExpectedRevision::Any => write!(f, "'any'"),
             ExpectedRevision::StreamExists => write!(f, "'stream exists'"),

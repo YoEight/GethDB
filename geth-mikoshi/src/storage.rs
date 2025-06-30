@@ -42,9 +42,9 @@ impl FileId {
 impl fmt::Debug for FileId {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            FileId::SSTable(uuid) => write!(f, "ss_table-{}", uuid),
+            FileId::SSTable(uuid) => write!(f, "ss_table-{uuid}"),
             FileId::IndexMap => write!(f, "indexmap"),
-            FileId::Chunk { num, version } => write!(f, "chunk-{:06}.{:06}", num, version),
+            FileId::Chunk { num, version } => write!(f, "chunk-{num:06}.{version:06}"),
             FileId::Checkpoint(checkpoint) => write!(f, "{}", checkpoint.as_str()),
         }
     }

@@ -29,11 +29,11 @@ pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContex
     let metadata = req.metadata();
     if let Some(correlation) = metadata.get("correlation") {
         let correlation = correlation.to_str().map_err(|e| {
-            tonic::Status::invalid_argument(format!("invalid correlation metadata value: {}", e))
+            tonic::Status::invalid_argument(format!("invalid correlation metadata value: {e}"))
         })?;
 
         let correlation = Uuid::parse_str(correlation).map_err(|e| {
-            tonic::Status::invalid_argument(format!("invalid correlation UUID value: {}", e))
+            tonic::Status::invalid_argument(format!("invalid correlation UUID value: {e}"))
         })?;
 
         return Ok(RequestContext { correlation });
