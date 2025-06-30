@@ -3,20 +3,28 @@ use geth_common::{
     AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
     ProgramSummary, Propose, ReadStreamCompleted, Revision,
 };
-use geth_engine::{ManagerClient, ReaderClient, RequestContext, WriterClient};
+use geth_engine::{EmbeddedClient, Options, ReaderClient, RequestContext, WriterClient};
 
 #[derive(Clone)]
 pub struct LocalClient {
+    client: EmbeddedClient,
     writer: WriterClient,
     reader: ReaderClient,
 }
 
 impl LocalClient {
-    pub async fn new(client: ManagerClient) -> eyre::Result<Self> {
+    pub async fn new(options: Options) -> eyre::Result<Self> {
+        let client = geth_engine::run_embedded(&options).await?;
+
         Ok(Self {
-            writer: client.new_writer_client().await?,
-            reader: client.new_reader_client().await?,
+            writer: client.manager().new_writer_client().await?,
+            reader: client.manager().new_reader_client().await?,
+            client,
         })
+    }
+
+    pub async fn shutdown(self) -> eyre::Result<()> {
+        self.client.shutdown().await
     }
 }
 

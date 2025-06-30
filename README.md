@@ -27,6 +27,7 @@ The core engine is a NoSQL, append-only, and immutable database with the followi
 * Client communication is handled via gRPC.
 * Full-featured REPL for database interaction.
 * Capability to spawn programs using the [Pyro] programming language.
+* Supports OpenTelemetry logs and traces, which can be sent to any OpenTelemetry-compatible server when configured, or disabled entirely if preferred.
 * Cluster functionality using a homemade Raft implementation (though it is not fully integrated yet).
 
 ## What's next?

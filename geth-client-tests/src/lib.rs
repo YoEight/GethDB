@@ -23,7 +23,7 @@ pub mod tests {
             temp_dir.path().as_os_str().to_str().unwrap().to_string(),
         );
 
-        opts.telemetry_event_filters = vec![
+        opts.telemetry.event_filters = vec![
             "geth_client=debug".to_string(),
             "geth_client_tests=debug".to_string(),
             "pyro_runtime=debug".to_string(),

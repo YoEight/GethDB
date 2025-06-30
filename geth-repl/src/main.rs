@@ -3,7 +3,7 @@ use std::{fs, fs::File, io, path::PathBuf};
 
 use cli::AppendStream;
 use directories::UserDirs;
-use geth_engine::{start_process_manager_with_catalog, Catalog, Options, Proc};
+use geth_engine::Options;
 use glyph::{FileBackedInputs, Input, PromptOptions};
 use local::LocalClient;
 use serde::Deserialize;
@@ -60,21 +60,15 @@ async fn main() -> eyre::Result<()> {
 
                     OfflineCommands::Mikoshi { directory } => {
                         let directory = expand_path(directory);
-                        let catalog = Catalog::builder()
-                            .register(Proc::Writing)
-                            .register(Proc::Reading)
-                            .register(Proc::PubSub)
-                            .register(Proc::Indexing)
-                            .build();
-
                         let options = Options::new(
                             "<repl>".to_string(),
                             0,
                             directory.clone().to_string_lossy().to_string(),
-                        );
+                        )
+                        .disable_telemetry()
+                        .disable_grpc();
 
-                        let mgr = start_process_manager_with_catalog(options, catalog).await?;
-                        let client = LocalClient::new(mgr).await?;
+                        let client = LocalClient::new(options).await?;
                         repl_state = ReplState::Mikoshi(MikoshiState { directory, client });
                     }
 
@@ -207,7 +201,11 @@ async fn main() -> eyre::Result<()> {
                     }
 
                     MikoshiCommands::Leave => {
-                        repl_state = ReplState::Offline;
+                        if let ReplState::Mikoshi(state) =
+                            std::mem::replace(&mut repl_state, ReplState::Offline)
+                        {
+                            state.client.shutdown().await?
+                        }
                     }
                 },
             },
