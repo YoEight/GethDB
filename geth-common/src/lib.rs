@@ -156,7 +156,6 @@ pub enum Direction {
     Backward,
 }
 
-
 impl TryFrom<i32> for Direction {
     type Error = WrongDirectionError;
 
@@ -225,7 +224,6 @@ impl Propose {
     }
 }
 
-
 #[derive(Debug, Clone)]
 pub struct Record {
     pub id: Uuid,
@@ -236,7 +234,6 @@ pub struct Record {
     pub revision: u64,
     pub data: Bytes,
 }
-
 
 impl Record {
     pub fn as_value<'a, A>(&'a self) -> eyre::Result<A>
@@ -395,8 +392,6 @@ pub enum ReadStreamResponse {
     StreamDeleted,
 }
 
-
-
 #[derive(Debug)]
 pub enum ReadError {
     StreamDeleted,
@@ -502,7 +497,6 @@ pub struct ProgramSummary {
     pub name: String,
     pub started_at: DateTime<Utc>,
 }
-
 
 #[derive(Clone, Copy, Debug)]
 pub enum ProgramKilled {

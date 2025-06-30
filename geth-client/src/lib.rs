@@ -6,10 +6,10 @@ use geth_common::{
     ProgramSummary, Propose, ReadStreamCompleted, ReadStreamResponse, Record, Revision,
     SubscriptionConfirmation, SubscriptionEvent,
 };
-pub use next::grpc::GrpcClient;
+pub use grpc::GrpcClient;
 use tonic::Streaming;
 
-mod next;
+mod grpc;
 mod types;
 
 pub enum ReadStreaming {

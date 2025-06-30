@@ -1,8 +1,16 @@
-use chrono::{TimeZone, Utc};
 pub use crate::generated::protocol;
+use chrono::{TimeZone, Utc};
 
+use geth_common::{
+    AppendError, AppendStream, AppendStreamCompleted, ContentType, DeleteError, DeleteStream,
+    DeleteStreamCompleted, Direction, EndPoint, ExpectedRevision, GetProgramError, GetProgramStats,
+    KillProgram, ListPrograms, ProgramKillError, ProgramKilled, ProgramListed, ProgramObtained,
+    ProgramStats, ProgramSummary, Propose, ReadError, ReadStream, ReadStreamResponse, Record,
+    Revision, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionConfirmation,
+    SubscriptionEvent, SubscriptionNotification, UnsubscribeReason, WriteResult,
+    WrongExpectedRevisionError,
+};
 use uuid::Uuid;
-use geth_common::{AppendError, AppendStream, AppendStreamCompleted, ContentType, DeleteError, DeleteStream, DeleteStreamCompleted, Direction, EndPoint, ExpectedRevision, GetProgramError, GetProgramStats, KillProgram, ListPrograms, ProgramKillError, ProgramKilled, ProgramListed, ProgramObtained, ProgramStats, ProgramSummary, Propose, ReadError, ReadStream, ReadStreamResponse, Record, Revision, Subscribe, SubscribeToProgram, SubscribeToStream, SubscriptionConfirmation, SubscriptionEvent, SubscriptionNotification, UnsubscribeReason, WriteResult, WrongExpectedRevisionError};
 
 pub mod generated {
     pub mod protocol {
@@ -165,7 +173,7 @@ impl From<Revision<u64>> for protocol::subscribe_request::stream::Start {
 }
 
 impl From<protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision,
@@ -182,7 +190,7 @@ for ExpectedRevision
 }
 
 impl From<protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision,
@@ -282,7 +290,7 @@ impl From<ExpectedRevision> for protocol::append_stream_request::ExpectedRevisio
 }
 
 impl From<ExpectedRevision>
-for protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision
+    for protocol::append_stream_response::error::wrong_expected_revision::CurrentRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -298,7 +306,7 @@ for protocol::append_stream_response::error::wrong_expected_revision::CurrentRev
 }
 
 impl From<ExpectedRevision>
-for protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision
+    for protocol::delete_stream_response::error::wrong_expected_revision::CurrentRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -314,7 +322,7 @@ for protocol::delete_stream_response::error::wrong_expected_revision::CurrentRev
 }
 
 impl From<ExpectedRevision>
-for protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision
+    for protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -335,7 +343,7 @@ for protocol::append_stream_response::error::wrong_expected_revision::ExpectedRe
 }
 
 impl From<ExpectedRevision>
-for protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision
+    for protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision
 {
     fn from(value: ExpectedRevision) -> Self {
         match value {
@@ -407,7 +415,7 @@ impl From<ExpectedRevision> for protocol::delete_stream_request::ExpectedRevisio
 }
 
 impl From<protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: protocol::append_stream_response::error::wrong_expected_revision::ExpectedRevision,
@@ -430,7 +438,7 @@ for ExpectedRevision
 }
 
 impl From<protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision>
-for ExpectedRevision
+    for ExpectedRevision
 {
     fn from(
         value: protocol::delete_stream_response::error::wrong_expected_revision::ExpectedRevision,
@@ -453,7 +461,7 @@ for ExpectedRevision
 }
 
 impl From<WrongExpectedRevisionError>
-for protocol::append_stream_response::error::WrongExpectedRevision
+    for protocol::append_stream_response::error::WrongExpectedRevision
 {
     fn from(value: WrongExpectedRevisionError) -> Self {
         Self {
@@ -464,7 +472,7 @@ for protocol::append_stream_response::error::WrongExpectedRevision
 }
 
 impl From<WrongExpectedRevisionError>
-for protocol::delete_stream_response::error::WrongExpectedRevision
+    for protocol::delete_stream_response::error::WrongExpectedRevision
 {
     fn from(value: WrongExpectedRevisionError) -> Self {
         Self {
@@ -792,7 +800,6 @@ impl From<SubscriptionEvent> for protocol::SubscribeResponse {
         }
     }
 }
-
 
 impl From<protocol::list_programs_response::ProgramSummary> for ProgramSummary {
     fn from(value: protocol::list_programs_response::ProgramSummary) -> Self {
