@@ -42,7 +42,7 @@ async fn main() -> eyre::Result<()> {
             Input::Exit => break,
 
             Input::String(s) => {
-                println!(">> {}", s);
+                println!(">> {s}");
             }
 
             Input::Command(cmd) => match cmd {
@@ -347,7 +347,7 @@ where
                     println!("ERR: stream '{}' has been deleted", opts.stream);
                 }
                 AppendError::WrongExpectedRevision(_) => {
-                    println!("ERR: {}", e);
+                    println!("ERR: {e}");
                 }
             },
             AppendStreamCompleted::Success(result) => {
@@ -397,7 +397,7 @@ async fn display_stream(mut stream: ReadStreaming) {
     loop {
         match stream.next().await {
             Err(e) => {
-                println!("ERR: error when reading stream: {}", e);
+                println!("ERR: error when reading stream: {e}");
                 break;
             }
 
@@ -422,7 +422,7 @@ async fn display_stream(mut stream: ReadStreaming) {
 async fn list_programmable_subscriptions(state: &mut OnlineState) {
     let summaries = match state.client.list_programs().await {
         Err(e) => {
-            println!("Err: Error when listing programmable subscriptions: {}", e);
+            println!("Err: Error when listing programmable subscriptions: {e}");
             return;
         }
 
@@ -445,8 +445,7 @@ async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
-                e
+                "Err: provided programmable subscription id is not a valid unsigned integer: {e}",
             );
 
             return;
@@ -454,7 +453,7 @@ async fn kill_programmable_subscription(state: &mut OnlineState, id: String) {
     };
 
     if let Err(e) = state.client.stop_program(id).await {
-        println!("Err: Error when killing programmable subscription: {}", e);
+        println!("Err: Error when killing programmable subscription: {e}");
     }
 }
 
@@ -463,8 +462,7 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
         Ok(id) => id,
         Err(e) => {
             println!(
-                "Err: provided programmable subscription id is not a valid unsigned integer: {}",
-                e
+                "Err: provided programmable subscription id is not a valid unsigned integer: {e}",
             );
 
             return;
@@ -473,7 +471,7 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
 
     let stats = match state.client.get_program(id).await {
         Err(e) => {
-            println!("Err: Error when getting programmable subscription: {}", e);
+            println!("Err: Error when getting programmable subscription: {e}");
             return;
         }
 
@@ -481,10 +479,7 @@ async fn get_programmable_subscription_stats(state: &mut OnlineState, id: String
             if let Some(stats) = prog {
                 stats
             } else {
-                println!(
-                    "Err: programmable subscription with id {} does not exist",
-                    id
-                );
+                println!("Err: programmable subscription with id {id} does not exist");
                 return;
             }
         }

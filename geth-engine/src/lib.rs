@@ -144,7 +144,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
             // .with_tonic()
             // .with_endpoint(options.telemetry_endpoint.clone())
             .with_http()
-            .with_endpoint(format!("{}/ingest/otlp/v1/traces", endpoint))
+            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/traces"))
             .build()?;
 
         let tracer_provider = SdkTracerProvider::builder()
@@ -165,7 +165,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
     let log_layer = if let Some(endpoint) = &options.telemetry_endpoint {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
-            .with_endpoint(format!("{}/ingest/otlp/v1/logs", endpoint))
+            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/logs"))
             .build()?;
 
         let log_provider = SdkLoggerProvider::builder()

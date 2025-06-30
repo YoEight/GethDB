@@ -171,7 +171,7 @@ impl FileSystemStorage {
 }
 
 fn chunk_filename_from(seq_number: usize, version: usize) -> String {
-    format!("chunk-{:06}.{:06}", seq_number, version)
+    format!("chunk-{seq_number:06}.{version:06}")
 }
 
 #[cfg(target_os = "windows")]

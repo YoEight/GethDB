@@ -168,7 +168,7 @@ impl Catalog {
             if let Some(run) = prev.as_ref().and_then(|p| self.monitor.get(p)) {
                 Ok(Some(ProgramSummary {
                     id: run.id,
-                    name: format!("{:?}", proc),
+                    name: format!("{proc:?}"),
                     started_at: Utc::now(), // TODO - no use for date times.
                 }))
             } else {

@@ -133,7 +133,7 @@ impl InMemoryStorage {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("offset: file {:?} does not exist", id),
+            format!("offset: file {id:?} does not exist"),
         ))
     }
 
@@ -155,7 +155,7 @@ impl InMemoryStorage {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("read_from: {:?} file doesnt exist", id),
+            format!("read_from: {id:?} file doesnt exist"),
         ))
     }
 
@@ -168,7 +168,7 @@ impl InMemoryStorage {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("read_all: {:?} file doesnt exist", id),
+            format!("read_all: {id:?} file doesnt exist"),
         ))
     }
 
@@ -193,7 +193,7 @@ impl InMemoryStorage {
 
         Err(io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("len: {:?} file doesnt exist", id),
+            format!("len: {id:?} file doesnt exist"),
         ))
     }
 
