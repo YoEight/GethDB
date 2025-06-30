@@ -13,7 +13,7 @@ mod next;
 mod types;
 
 pub enum ReadStreaming {
-    Grpc(Streaming<geth_common::protocol::ReadStreamResponse>),
+    Grpc(Streaming<geth_grpc::protocol::ReadStreamResponse>),
     Local(geth_engine::reading::Streaming),
     Subscription(SubscriptionStreaming),
 }
@@ -55,7 +55,7 @@ impl ReadStreaming {
 }
 
 enum SubscriptionType {
-    Grpc(Streaming<geth_common::protocol::SubscribeResponse>),
+    Grpc(Streaming<geth_grpc::protocol::SubscribeResponse>),
 }
 
 pub struct SubscriptionStreaming {
@@ -64,7 +64,7 @@ pub struct SubscriptionStreaming {
 }
 
 impl SubscriptionStreaming {
-    pub fn from_grpc(streaming: Streaming<geth_common::protocol::SubscribeResponse>) -> Self {
+    pub fn from_grpc(streaming: Streaming<geth_grpc::protocol::SubscribeResponse>) -> Self {
         Self {
             confirmation: None,
             r#type: SubscriptionType::Grpc(streaming),

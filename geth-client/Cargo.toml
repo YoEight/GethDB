@@ -7,6 +7,9 @@ edition = "2021"
 [dependencies.geth-common]
 path = "../geth-common"
 
+[dependencies.geth-grpc]
+path = "../geth-grpc"
+
 [dependencies.geth-engine]
 path = "../geth-engine"
 

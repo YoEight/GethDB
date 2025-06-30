@@ -1,13 +1,9 @@
-use geth_common::protocol::protocol_server::Protocol;
-use geth_common::protocol::{self, SubscribeResponse};
+use geth_grpc::protocol::protocol_server::Protocol;
+use geth_grpc::protocol::{self, SubscribeResponse};
 use tokio::sync::mpsc::unbounded_channel;
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 
-use geth_common::{
-    AppendStream, DeleteStream, GetProgramStats, KillProgram, ProgramKilled, ProgramListed,
-    ProgramObtained, ReadStream, ReadStreamCompleted, ReadStreamResponse, Subscribe,
-    SubscriptionEvent, UnsubscribeReason,
-};
+use geth_common::{AppendStream, DeleteStream, GetProgramStats, KillProgram, ProgramKilled, ProgramListed, ProgramObtained, ReadStream, ReadStreamCompleted, ReadStreamResponse, Subscribe, SubscriptionEvent, UnsubscribeReason};
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 

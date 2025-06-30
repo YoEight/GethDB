@@ -8,10 +8,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ".geth.RecordedEvent.payload",
             ".geth.RecordedEvent.metadata",
         ])
-        .compile(
-            &["../geth-grpc/protos/protocol.proto"],
-            &["../geth-grpc/protos/"],
-        )?;
+        .compile(&["protos/protocol.proto"], &["protos/"])?;
 
     Ok(())
 }

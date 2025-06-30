@@ -11,6 +11,9 @@ path = "../geth-mikoshi"
 [dependencies.geth-common]
 path = "../geth-common"
 
+[dependencies.geth-grpc]
+path = "../geth-grpc"
+
 [dependencies.geth-domain]
 path = "../geth-domain"
 

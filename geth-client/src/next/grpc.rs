@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use geth_common::generated::protocol::protocol_client::ProtocolClient;
-use geth_common::protocol::ProgramStatsRequest;
+use geth_grpc::generated::protocol::protocol_client::ProtocolClient;
+use geth_grpc::protocol::ProgramStatsRequest;
 use tonic::service::interceptor::InterceptedService;
 use tonic::service::Interceptor;
 use tonic::transport::{Channel, Uri};
