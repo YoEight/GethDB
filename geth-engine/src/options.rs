@@ -1,4 +1,17 @@
-use clap::Parser;
+use clap::{Args, Parser};
+
+#[derive(Args, Debug, Clone, Default)]
+pub struct Telemetry {
+    #[arg(long = "telemetry-disabled", default_value = "false")]
+    pub disabled: bool,
+
+    /// OpenTelemetry compatible endpoint where telemetry data is sent
+    #[arg(long = "telemetry-endpoint")]
+    pub endpoint: Option<String>,
+
+    #[arg(long = "telemetry-event-filters")]
+    pub event_filters: Vec<String>,
+}
 
 #[derive(Parser, Debug, Clone)]
 #[command(name = "geth-db")]
@@ -17,11 +30,8 @@ pub struct Options {
     #[arg(long, default_value = "./geth")]
     pub db: String,
 
-    /// OpenTelemetry compatible endpoint where telemetry data is sent
-    #[arg(long)]
-    pub telemetry_endpoint: Option<String>,
-
-    pub telemetry_event_filters: Vec<String>,
+    #[command(flatten)]
+    pub telemetry: Telemetry,
 
     pub disable_grpc: bool,
 }
@@ -32,15 +42,38 @@ impl Options {
             host,
             port,
             db,
-            telemetry_endpoint: None,
-            telemetry_event_filters: vec![],
+            telemetry: Telemetry::default(),
             disable_grpc: false,
         }
     }
 
     pub fn with_telemetry_sent_to_seq(self) -> Options {
+        let telemetry = Telemetry::default();
+
         Self {
-            telemetry_endpoint: Some("http://localhost:5341".to_string()),
+            telemetry: Telemetry {
+                endpoint: Some("http://localhost:5341".to_string()),
+                ..telemetry
+            },
+            ..self
+        }
+    }
+
+    pub fn disable_telemetry(self) -> Self {
+        let telemetry = Telemetry::default();
+
+        Self {
+            telemetry: Telemetry {
+                disabled: true,
+                ..telemetry
+            },
+            ..self
+        }
+    }
+
+    pub fn disable_grpc(self) -> Self {
+        Self {
+            disable_grpc: true,
             ..self
         }
     }

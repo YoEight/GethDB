@@ -63,6 +63,7 @@ pub async fn run(options: Options) -> eyre::Result<()> {
     Ok(())
 }
 
+#[derive(Clone)]
 pub struct EmbeddedClient {
     handles: TelemetryHandles,
     manager: ManagerClient,
@@ -82,7 +83,7 @@ impl EmbeddedClient {
     }
 }
 
-#[derive(Default)]
+#[derive(Default, Clone)]
 struct TelemetryHandles {
     traces: Option<SdkTracerProvider>,
     logs: Option<SdkLoggerProvider>,
@@ -103,7 +104,12 @@ impl TelemetryHandles {
 }
 
 pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
-    let handles = init_telemetry(options)?;
+    let handles = if options.telemetry.disabled {
+        TelemetryHandles::default()
+    } else {
+        init_telemetry(options)?
+    };
+
     let storage = configure_storage(options)?;
     let container = ChunkContainer::load(storage)?;
 
@@ -138,7 +144,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         ))
         .build();
 
-    let tracer_layer = if let Some(endpoint) = &options.telemetry_endpoint {
+    let tracer_layer = if let Some(endpoint) = &options.telemetry.endpoint {
         // TLS must be configured to use gRPC
         let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
             // .with_tonic()
@@ -162,7 +168,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         None
     };
 
-    let log_layer = if let Some(endpoint) = &options.telemetry_endpoint {
+    let log_layer = if let Some(endpoint) = &options.telemetry.endpoint {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
             .with_endpoint(format!("{endpoint}/ingest/otlp/v1/logs"))
@@ -180,7 +186,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         None
     };
 
-    let fmt_layer = if options.telemetry_endpoint.is_none() {
+    let fmt_layer = if options.telemetry.endpoint.is_none() {
         let layer = tracing_subscriber::fmt::layer()
             .with_file(true)
             .with_line_number(true)
@@ -215,7 +221,7 @@ fn create_event_filter(options: &Options) -> eyre::Result<EnvFilter> {
         filter = filter.add_directive(directive.parse()?);
     }
 
-    for directive in &options.telemetry_event_filters {
+    for directive in &options.telemetry.event_filters {
         filter = filter.add_directive(directive.parse()?);
     }
 
