@@ -770,16 +770,12 @@ dependencies = [
 name = "geth-common"
 version = "0.1.0"
 dependencies = [
- "async-trait",
  "bytes",
  "chrono",
  "eyre",
- "prost 0.12.6",
  "serde",
  "serde_json",
  "thiserror 1.0.69",
- "tonic 0.10.2",
- "tonic-build",
  "uuid",
 ]
 
