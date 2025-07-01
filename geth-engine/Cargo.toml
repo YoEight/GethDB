@@ -44,7 +44,7 @@ version = "0.30"
 features = ["trace", "logs", "grpc-tonic"]
 
 [dependencies]
-tonic = "0.10"
+tonic = "0.13"
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
 opentelemetry = "0.30"
