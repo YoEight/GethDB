@@ -1,24 +1,17 @@
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
-    Messages, Notifications, ProgramRequests, ProgramResponses, SubscribeRequests,
-    SubscribeResponses, SubscriptionType,
+    Messages, Notifications, ProgramProcess, ProgramRequests, ProgramResponses, Responses,
+    SubscribeInternal, SubscribeRequests, SubscribeResponses, SubscriptionType,
 };
 use crate::process::subscription::program::{ProgramClient, ProgramStartResult};
-use crate::process::{Item, Managed, ProcessEnv};
-use crate::Proc;
-use chrono::{DateTime, Utc};
+use crate::process::{Item, Managed, ProcId, ProcessEnv};
+use crate::{ManagerClient, Proc, RequestContext};
+use chrono::Utc;
 use geth_common::{ProgramSummary, Record};
 use std::collections::HashMap;
 use tokio::sync::mpsc::UnboundedSender;
 
 const ALL_IDENT: &str = "$all";
-
-pub struct ProgramProcess {
-    client: ProgramClient,
-    name: String,
-    sender: UnboundedSender<Messages>,
-    started_at: DateTime<Utc>,
-}
 
 #[derive(Default)]
 struct Register {
@@ -50,10 +43,86 @@ impl Register {
     }
 }
 
+fn unit() -> eyre::Result<()> {
+    Ok(())
+}
+
+struct StartPyroWorker {
+    context: RequestContext,
+    client: ManagerClient,
+    sender: UnboundedSender<Messages>,
+    name: String,
+    code: String,
+}
+
+fn start_pyro_worker(args: StartPyroWorker) {
+    tokio::spawn(async move {
+        let result = args.client.wait_for(Proc::PyroWorker).await?;
+        let id = match result.must_succeed() {
+            Err(e) => {
+                tracing::error!(error = %e, correlation = %args.context.correlation, "error when spawning a pyro worker");
+
+                let _ = args.sender.send(SubscribeResponses::Error(e).into());
+                return unit();
+            }
+
+            Ok(id) => id,
+        };
+
+        let client = ProgramClient::new(id, args.client.clone());
+
+        tracing::debug!(
+            id = %id,
+            name = args.name,
+            correlation = %args.context.correlation,
+            "program is starting"
+        );
+
+        match client
+            .start(
+                args.context,
+                args.name.clone(),
+                args.code,
+                args.sender.clone(),
+            )
+            .await?
+        {
+            ProgramStartResult::Started => {
+                tracing::debug!(
+                    id = %id,
+                    name = args.name,
+                    correlation = %args.context.correlation,
+                    "program has started successfully"
+                );
+
+                args.client.send_to_self(
+                    args.context,
+                    SubscribeResponses::Internal(SubscribeInternal::ProgramStarted(
+                        ProgramProcess {
+                            client,
+                            name: args.name,
+                            sender: args.sender,
+                            started_at: Utc::now(),
+                        },
+                    ))
+                    .into(),
+                )?;
+            }
+
+            ProgramStartResult::Failed(e) => {
+                tracing::error!(id = %id, name = args.name, error = %e, "error when starting program");
+                let _ = args.sender.send(SubscribeResponses::Error(e).into());
+            }
+        };
+
+        unit()
+    });
+}
+
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut reg = Register::default();
-    let mut programs = HashMap::new();
+    let mut programs = HashMap::<ProcId, ProgramProcess>::new();
 
     while let Some(item) = env.recv().await {
         match item {
@@ -75,78 +144,16 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                             }
 
                             SubscriptionType::Program { name, code } => {
-                                let result = env.client.wait_for(Proc::PyroWorker).await?;
-                                let id = match result.must_succeed() {
-                                    Err(e) => {
-                                        tracing::error!(error = %e, correlation = %stream.context.correlation, "error when spawning a pyro worker");
-
-                                        let _ =
-                                            stream.sender.send(SubscribeResponses::Error(e).into());
-
-                                        continue;
-                                    }
-
-                                    Ok(id) => id,
-                                };
-
-                                let client = ProgramClient::new(id, env.client.clone());
-
-                                tracing::debug!(
-                                    id = %id,
-                                    name = name,
-                                    correlation = %stream.context.correlation,
-                                    "program is starting"
-                                );
-
-                                match client
-                                    .start(
-                                        stream.context,
-                                        name.clone(),
-                                        code,
-                                        stream.sender.clone(),
-                                    )
-                                    .await?
-                                {
-                                    ProgramStartResult::Started => {
-                                        tracing::debug!(
-                                            id = %id,
-                                            name = name,
-                                            correlation = %stream.context.correlation,
-                                            "program has started successfully"
-                                        );
-
-                                        if stream
-                                            .sender
-                                            .send(SubscribeResponses::Confirmed(Some(id)).into())
-                                            .is_ok()
-                                        {
-                                            tracing::debug!(id = %id, name = name, correlation = %stream.context.correlation, "program was registered successfully");
-
-                                            programs.insert(
-                                                id,
-                                                ProgramProcess {
-                                                    client,
-                                                    name,
-                                                    sender: stream.sender,
-                                                    started_at: Utc::now(),
-                                                },
-                                            );
-
-                                            continue;
-                                        }
-
-                                        client.stop(stream.context).await?;
-                                        tracing::warn!(id = %id,  name = name, correlation = %stream.context.correlation, "program wasn't registered because nothing is listening to it");
-                                    }
-
-                                    ProgramStartResult::Failed(e) => {
-                                        tracing::error!(id = %id, name = name, error = %e, "error when starting program");
-                                        let _ =
-                                            stream.sender.send(SubscribeResponses::Error(e).into());
-                                    }
-                                };
+                                start_pyro_worker(StartPyroWorker {
+                                    context: stream.context,
+                                    client: env.client.clone(),
+                                    sender: stream.sender,
+                                    name,
+                                    code,
+                                });
                             }
                         },
+
                         _ => {
                             tracing::warn!(
                                 correlation = %stream.context.correlation,
@@ -171,6 +178,34 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                     if let Some(prog) = programs.remove(proc_id) {
                         tracing::info!(id = proc_id, name = prog.name, "program terminated");
                         let _ = prog.sender.send(SubscribeResponses::Unsubscribed.into());
+                    }
+
+                    continue;
+                }
+
+                if let Messages::Responses(Responses::Subscribe(SubscribeResponses::Internal(
+                    internal,
+                ))) = mail.payload
+                {
+                    match internal {
+                        SubscribeInternal::ProgramStarted(args) => {
+                            let program_id = args.client.id();
+                            let program_client = args.client.clone();
+
+                            if args
+                                .sender
+                                .send(SubscribeResponses::Confirmed(Some(args.client.id())).into())
+                                .is_ok()
+                            {
+                                tracing::debug!(name = args.name, correlation = %mail.context.correlation, "program was registered successfully");
+                                programs.insert(args.client.id(), args);
+
+                                continue;
+                            }
+
+                            tokio::spawn(program_client.stop(mail.context));
+                            tracing::warn!(id = %program_id,  name = args.name, correlation = %mail.context.correlation, "program wasn't registered because nothing is listening to it");
+                        }
                     }
 
                     continue;

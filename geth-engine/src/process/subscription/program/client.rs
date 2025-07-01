@@ -15,7 +15,7 @@ pub enum ProgramStartResult {
     Failed(eyre::Report),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct ProgramClient {
     target: ProcId,
     inner: ManagerClient,

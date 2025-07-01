@@ -72,6 +72,10 @@ impl ManagerClient {
         Ok(())
     }
 
+    pub fn send_to_self(&self, context: RequestContext, payload: Messages) -> eyre::Result<()> {
+        self.send(context, self.id, payload)
+    }
+
     pub async fn find(&self, proc: Proc) -> eyre::Result<Option<ProgramSummary>> {
         let (resp, receiver) = oneshot::channel();
 
