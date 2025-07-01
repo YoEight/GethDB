@@ -238,9 +238,9 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
             Item::Mail(mail) => {
                 if let Messages::Notifications(Notifications::ProcessTerminated(proc_id)) =
-                    &mail.payload
+                    mail.payload
                 {
-                    if let Some(prog) = programs.remove(proc_id) {
+                    if let Some(prog) = programs.remove(&proc_id) {
                         tracing::info!(id = proc_id, name = prog.name, "program terminated");
                         let _ = prog.sender.send(SubscribeResponses::Unsubscribed.into());
                     }
@@ -337,7 +337,24 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
                             ProgramRequests::Stop { id } => {
                                 if let Some(prog) = programs.remove(&id) {
-                                    prog.client.stop(mail.context).await?;
+                                    let client = env.client.clone();
+                                    tokio::spawn(async move {
+                                        let _ = tokio::time::timeout(
+                                            Duration::from_secs(5),
+                                            prog.client.stop(mail.context),
+                                        )
+                                        .await;
+
+                                        let _ = client.reply(
+                                            mail.context,
+                                            mail.origin,
+                                            mail.correlation,
+                                            SubscribeResponses::Programs(ProgramResponses::Stopped)
+                                                .into(),
+                                        );
+                                    });
+
+                                    continue;
                                 }
 
                                 env.client.reply(
