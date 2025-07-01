@@ -9,7 +9,9 @@ use crate::{ManagerClient, Proc, RequestContext};
 use chrono::Utc;
 use geth_common::{ProgramSummary, Record};
 use std::collections::HashMap;
+use std::time::Duration;
 use tokio::sync::mpsc::UnboundedSender;
+use uuid::Uuid;
 
 const ALL_IDENT: &str = "$all";
 
@@ -117,6 +119,69 @@ fn start_pyro_worker(args: StartPyroWorker) {
 
         unit()
     });
+}
+
+struct PyroWorkerStats {
+    context: RequestContext,
+    correlation: Uuid,
+    client: ManagerClient,
+    prog: ProgramClient,
+    origin: ProcId,
+    timeout: Duration,
+}
+
+fn spawn_pyro_worker_stats(args: PyroWorkerStats) {
+    tokio::spawn(pyro_worker_stats(args));
+}
+
+#[tracing::instrument(skip_all, fields(parent_proc_id = args.client.id(), prog_id = args.prog.id(), correlation = %args.correlation))]
+async fn pyro_worker_stats(args: PyroWorkerStats) -> eyre::Result<()> {
+    match tokio::time::timeout(args.timeout, args.prog.stats(args.context)).await {
+        Err(_) => {
+            tracing::error!(deadline = ?args.timeout, "retrieving stats timeout out");
+
+            args.client.reply(
+                args.context,
+                args.origin,
+                args.correlation,
+                SubscribeResponses::Programs(ProgramResponses::Error(eyre::eyre!("timed out")))
+                    .into(),
+            )?
+        }
+
+        Ok(stats) => match stats {
+            Err(e) => {
+                tracing::error!(error = %e, "unexpected erorr when retrieving program stats");
+
+                args.client.reply(
+                    args.context,
+                    args.origin,
+                    args.correlation,
+                    SubscribeResponses::Programs(ProgramResponses::Error(e)).into(),
+                )?
+            }
+
+            Ok(stats) => {
+                if let Some(stats) = stats {
+                    args.client.reply(
+                        args.context,
+                        args.origin,
+                        args.correlation,
+                        SubscribeResponses::Programs(ProgramResponses::Stats(stats)).into(),
+                    )?;
+                } else {
+                    args.client.reply(
+                        args.context,
+                        args.origin,
+                        args.correlation,
+                        SubscribeResponses::Programs(ProgramResponses::NotFound).into(),
+                    )?
+                }
+            }
+        },
+    }
+
+    Ok(())
 }
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
@@ -230,19 +295,16 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                         SubscribeRequests::Program(req) => match req {
                             ProgramRequests::Stats { id } => {
                                 if let Some(prog) = programs.get(&id) {
-                                    if let Some(stats) = prog.client.stats(mail.context).await? {
-                                        env.client.reply(
-                                            mail.context,
-                                            mail.origin,
-                                            mail.correlation,
-                                            SubscribeResponses::Programs(ProgramResponses::Stats(
-                                                stats,
-                                            ))
-                                            .into(),
-                                        )?;
+                                    spawn_pyro_worker_stats(PyroWorkerStats {
+                                        context: mail.context,
+                                        correlation: mail.correlation,
+                                        client: env.client.clone(),
+                                        prog: prog.client.clone(),
+                                        origin: mail.origin,
+                                        timeout: Duration::from_secs(5),
+                                    });
 
-                                        continue;
-                                    }
+                                    continue;
                                 }
 
                                 env.client.reply(

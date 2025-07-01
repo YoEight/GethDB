@@ -1,0 +1,45 @@
+    2025-07-01T17:01:13.747798Z DEBUG wait_for{proc=Indexing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+    2025-07-01T17:01:13.748004Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:33: rebuilding index...
+    2025-07-01T17:01:13.748476Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:35: index rebuilt successfully
+    2025-07-01T17:01:13.748550Z  INFO wait_for{proc=Indexing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+    2025-07-01T17:01:13.748576Z DEBUG wait_for{proc=PubSub origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+    2025-07-01T17:01:13.748637Z  INFO wait_for{proc=PubSub origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+    2025-07-01T17:01:13.748654Z DEBUG wait_for{proc=Reading origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Reading
+    2025-07-01T17:01:13.748725Z DEBUG wait_for{proc=Indexing origin=Reading}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+    2025-07-01T17:01:13.748743Z  INFO wait_for{proc=Indexing origin=Reading}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+    2025-07-01T17:01:13.748775Z  INFO wait_for{proc=Reading origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Reading id=3
+    2025-07-01T17:01:13.748790Z DEBUG wait_for{proc=Writing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Writing
+    2025-07-01T17:01:13.748853Z DEBUG wait_for{proc=Indexing origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+    2025-07-01T17:01:13.748864Z  INFO wait_for{proc=Indexing origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+    2025-07-01T17:01:13.748885Z DEBUG wait_for{proc=PubSub origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+    2025-07-01T17:01:13.748893Z  INFO wait_for{proc=PubSub origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+    2025-07-01T17:01:13.748928Z  INFO wait_for{proc=Writing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Writing id=4
+    2025-07-01T17:01:13.748956Z DEBUG wait_for{proc=Grpc origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Grpc
+    2025-07-01T17:01:13.749013Z DEBUG wait_for{proc=Writing origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Writing
+    2025-07-01T17:01:13.749034Z  INFO wait_for{proc=Writing origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Writing id=4
+    2025-07-01T17:01:13.749050Z DEBUG wait_for{proc=Reading origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Reading
+    2025-07-01T17:01:13.749063Z  INFO wait_for{proc=Reading origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Reading id=3
+    2025-07-01T17:01:13.749079Z DEBUG wait_for{proc=PubSub origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+    2025-07-01T17:01:13.749092Z  INFO wait_for{proc=PubSub origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+    2025-07-01T17:01:13.749103Z  INFO geth_engine::process::grpc: geth-engine/src/process/grpc/mod.rs:27: GethDB is listening addr=127.0.0.1:1660 db="/var/folders/7x/gnn8wjks5qg81q_40t9vshv00000gn/T/t5b21-0"
+    2025-07-01T17:01:13.749239Z  INFO wait_for{proc=Grpc origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Grpc id=5
+    2025-07-01T17:01:13.749253Z DEBUG geth_client::grpc: geth-client/src/grpc.rs:47: connecting to node endpoint=127.0.0.1:1660 attempt=1 max_attempts=10
+    2025-07-01T17:01:13.749458Z DEBUG geth_client::grpc: geth-client/src/grpc.rs:64: connected to node attempt=1 max_attempts=10 endpoint=127.0.0.1:1660
+    test delete_tests::simple_delete ... FAILED
+
+    failures:
+
+    failures:
+        delete_tests::simple_delete
+
+    test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 5.13s
+
+  stderr ───
+    Error: status: Internal, message: "process 4 doesn't exist or is down", details: [], metadata: MetadataMap { headers: {"content-type": "application/grpc", "date": "Tue, 01 Jul 2025 17:01:18 GMT"} }
+
+    Location:
+        geth-client/src/grpc.rs:84:22
+
+────────────
+     Summary [   5.148s] 92 tests run: 91 passed, 1 failed, 0 skipped
+        FAIL [   5.145s] geth-client-tests delete_tests::simple_delete
