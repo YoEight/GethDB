@@ -1,9 +1,10 @@
+use chrono::{DateTime, Utc};
 use geth_common::{Direction, ExpectedRevision, ProgramStats, ProgramSummary, Propose, Record};
 use geth_domain::index::BlockEntry;
 use geth_mikoshi::wal::LogEntry;
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::domain::index::CurrentRevision;
+use crate::{domain::index::CurrentRevision, process::subscription::ProgramClient};
 
 use super::ProcId;
 
@@ -378,6 +379,20 @@ pub enum SubscribeResponses {
     Pushed,
     Record(Record),
     Unsubscribed,
+    Internal(SubscribeInternal),
+}
+
+#[derive(Debug)]
+pub struct ProgramProcess {
+    pub client: ProgramClient,
+    pub name: String,
+    pub sender: UnboundedSender<Messages>,
+    pub started_at: DateTime<Utc>,
+}
+
+#[derive(Debug)]
+pub enum SubscribeInternal {
+    ProgramStarted(ProgramProcess),
 }
 
 #[derive(Debug)]
