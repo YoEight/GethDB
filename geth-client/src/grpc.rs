@@ -193,7 +193,7 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        Ok(result.into_inner().into())
+        Ok(result.into_inner().try_into()?)
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {

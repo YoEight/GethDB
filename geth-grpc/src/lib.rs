@@ -59,13 +59,22 @@ impl From<AppendStream> for protocol::AppendStreamRequest {
     }
 }
 
-impl From<protocol::AppendStreamRequest> for AppendStream {
-    fn from(value: protocol::AppendStreamRequest) -> Self {
-        Self {
+impl TryFrom<protocol::AppendStreamRequest> for AppendStream {
+    type Error = tonic::Status;
+    fn try_from(value: protocol::AppendStreamRequest) -> Result<Self, Self::Error> {
+        let expected_revision = if let Some(e) = value.expected_revision.map(Into::into) {
+            e
+        } else {
+            return Err(tonic::Status::invalid_argument(
+                "expected revision is not provided",
+            ));
+        };
+
+        Ok(Self {
             stream_name: value.stream_name,
             events: value.events.into_iter().map(|p| p.into()).collect(),
-            expected_revision: value.expected_revision.unwrap().into(),
-        }
+            expected_revision,
+        })
     }
 }
 
@@ -78,12 +87,19 @@ impl From<DeleteStream> for protocol::DeleteStreamRequest {
     }
 }
 
-impl From<protocol::DeleteStreamRequest> for DeleteStream {
-    fn from(value: protocol::DeleteStreamRequest) -> Self {
-        Self {
+impl TryFrom<protocol::DeleteStreamRequest> for DeleteStream {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::DeleteStreamRequest) -> Result<Self, Self::Error> {
+        let expected_revision = value
+            .expected_revision
+            .map(Into::into)
+            .ok_or_else(|| tonic::Status::invalid_argument("expected_revision is missing"))?;
+
+        Ok(Self {
             stream_name: value.stream_name,
-            expected_revision: value.expected_revision.unwrap().into(),
-        }
+            expected_revision,
+        })
     }
 }
 
@@ -98,14 +114,28 @@ impl From<ReadStream> for protocol::ReadStreamRequest {
     }
 }
 
-impl From<protocol::ReadStreamRequest> for ReadStream {
-    fn from(value: protocol::ReadStreamRequest) -> Self {
-        Self {
+impl TryFrom<protocol::ReadStreamRequest> for ReadStream {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::ReadStreamRequest) -> Result<Self, Self::Error> {
+        let direction = if let Some(d) = value.direction.map(Into::into) {
+            d
+        } else {
+            return Err(tonic::Status::invalid_argument("direction is missing"));
+        };
+
+        let revision = if let Some(s) = value.start.map(Into::into) {
+            s
+        } else {
+            return Err(tonic::Status::invalid_argument("start is missing"));
+        };
+
+        Ok(Self {
             stream_name: value.stream_name,
-            direction: value.direction.unwrap().into(),
-            revision: value.start.unwrap().into(),
+            direction,
+            revision,
             max_count: value.max_count,
-        }
+        })
     }
 }
 
@@ -123,11 +153,17 @@ impl From<Subscribe> for protocol::SubscribeRequest {
     }
 }
 
-impl From<protocol::SubscribeRequest> for Subscribe {
-    fn from(value: protocol::SubscribeRequest) -> Self {
-        match value.to.unwrap() {
-            protocol::subscribe_request::To::Program(v) => Subscribe::ToProgram(v.into()),
-            protocol::subscribe_request::To::Stream(v) => Subscribe::ToStream(v.into()),
+impl TryFrom<protocol::SubscribeRequest> for Subscribe {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::SubscribeRequest) -> Result<Self, Self::Error> {
+        let value = value
+            .to
+            .ok_or_else(|| tonic::Status::invalid_argument("to is missing"))?;
+
+        match value {
+            protocol::subscribe_request::To::Program(v) => Ok(Subscribe::ToProgram(v.into())),
+            protocol::subscribe_request::To::Stream(v) => Ok(Subscribe::ToStream(v.into())),
         }
     }
 }
@@ -626,38 +662,56 @@ impl TryFrom<ReadStreamResponse> for protocol::ReadStreamResponse {
     }
 }
 
-impl From<protocol::DeleteStreamResponse> for DeleteStreamCompleted {
-    fn from(value: protocol::DeleteStreamResponse) -> Self {
-        match value.result.unwrap() {
+impl TryFrom<protocol::DeleteStreamResponse> for DeleteStreamCompleted {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::DeleteStreamResponse) -> Result<Self, tonic::Status> {
+        let result = value
+            .result
+            .ok_or_else(|| tonic::Status::invalid_argument("result is missing"))?;
+
+        match result {
             protocol::delete_stream_response::Result::WriteResult(r) => {
-                DeleteStreamCompleted::Success(WriteResult {
+                Ok(DeleteStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: r.position,
                     next_logical_position: 0,
-                })
+                }))
             }
 
-            protocol::delete_stream_response::Result::Error(e) => match e.error.unwrap() {
-                protocol::delete_stream_response::error::Error::WrongRevision(e) => {
-                    DeleteStreamCompleted::Error(DeleteError::WrongExpectedRevision(
-                        WrongExpectedRevisionError {
-                            expected: e.expected_revision.unwrap().into(),
-                            current: e.current_revision.unwrap().into(),
-                        },
-                    ))
-                }
+            protocol::delete_stream_response::Result::Error(e) => {
+                let error = e
+                    .error
+                    .ok_or_else(|| tonic::Status::invalid_argument("error is missing"))?;
+                match error {
+                    protocol::delete_stream_response::error::Error::WrongRevision(e) => {
+                        let expected = e.expected_revision.map(Into::into).ok_or_else(|| {
+                            tonic::Status::invalid_argument("expected_revision is missing")
+                        })?;
+                        let current = e.current_revision.map(Into::into).ok_or_else(|| {
+                            tonic::Status::invalid_argument("current_revision is missing")
+                        })?;
 
-                protocol::delete_stream_response::error::Error::NotLeader(e) => {
-                    DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
-                        host: e.leader_host,
-                        port: e.leader_port as u16,
-                    }))
-                }
+                        Ok(DeleteStreamCompleted::Error(
+                            DeleteError::WrongExpectedRevision(WrongExpectedRevisionError {
+                                expected,
+                                current,
+                            }),
+                        ))
+                    }
 
-                protocol::delete_stream_response::error::Error::StreamDeleted(_) => {
-                    DeleteStreamCompleted::Error(DeleteError::StreamDeleted)
+                    protocol::delete_stream_response::error::Error::NotLeader(e) => Ok(
+                        DeleteStreamCompleted::Error(DeleteError::NotLeaderException(EndPoint {
+                            host: e.leader_host,
+                            port: e.leader_port as u16,
+                        })),
+                    ),
+
+                    protocol::delete_stream_response::error::Error::StreamDeleted(_) => {
+                        Ok(DeleteStreamCompleted::Error(DeleteError::StreamDeleted))
+                    }
                 }
-            },
+            }
         }
     }
 }
