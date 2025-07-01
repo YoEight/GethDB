@@ -23,7 +23,7 @@ impl ReadStreaming {
         match self {
             ReadStreaming::Grpc(streaming) => {
                 if let Some(resp) = streaming.try_next().await? {
-                    match resp.into() {
+                    match resp.try_into()? {
                         ReadStreamResponse::EventAppeared(record) => return Ok(Some(record)),
                         ReadStreamResponse::EndOfStream => return Ok(None),
                         ReadStreamResponse::StreamDeleted => unreachable!(),
@@ -88,7 +88,7 @@ impl SubscriptionStreaming {
         match &mut self.r#type {
             SubscriptionType::Grpc(streaming) => {
                 if let Some(resp) = streaming.try_next().await? {
-                    return Ok(Some(resp.into()));
+                    return Ok(Some(resp.try_into()?));
                 }
 
                 Ok(None)

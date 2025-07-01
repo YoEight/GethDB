@@ -1,6 +1,5 @@
 pub use crate::generated::protocol;
 use chrono::{TimeZone, Utc};
-
 use geth_common::{
     AppendError, AppendStream, AppendStreamCompleted, ContentType, DeleteError, DeleteStream,
     DeleteStreamCompleted, Direction, EndPoint, ExpectedRevision, GetProgramError, GetProgramStats,
@@ -70,9 +69,15 @@ impl TryFrom<protocol::AppendStreamRequest> for AppendStream {
             ));
         };
 
+        let mut events = Vec::with_capacity(value.events.len());
+
+        for event in value.events {
+            events.push(event.try_into()?);
+        }
+
         Ok(Self {
             stream_name: value.stream_name,
-            events: value.events.into_iter().map(|p| p.into()).collect(),
+            events,
             expected_revision,
         })
     }
@@ -163,7 +168,7 @@ impl TryFrom<protocol::SubscribeRequest> for Subscribe {
 
         match value {
             protocol::subscribe_request::To::Program(v) => Ok(Subscribe::ToProgram(v.into())),
-            protocol::subscribe_request::To::Stream(v) => Ok(Subscribe::ToStream(v.into())),
+            protocol::subscribe_request::To::Stream(v) => Ok(Subscribe::ToStream(v.try_into()?)),
         }
     }
 }
@@ -264,23 +269,37 @@ impl From<Propose> for protocol::append_stream_request::Propose {
     }
 }
 
-impl From<protocol::append_stream_request::Propose> for Propose {
-    fn from(value: protocol::append_stream_request::Propose) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
+impl TryFrom<protocol::append_stream_request::Propose> for Propose {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::append_stream_request::Propose) -> Result<Self, Self::Error> {
+        let id = value
+            .id
+            .map(Into::into)
+            .ok_or_else(|| tonic::Status::invalid_argument("id is missing"))?;
+
+        Ok(Self {
+            id,
             content_type: protocol::ContentType::try_from(value.content_type)
                 .map(ContentType::from)
                 .unwrap_or(ContentType::Unknown),
             class: value.class,
             data: value.payload,
-        }
+        })
     }
 }
 
-impl From<protocol::RecordedEvent> for Record {
-    fn from(value: protocol::RecordedEvent) -> Self {
-        Self {
-            id: value.id.unwrap().into(),
+impl TryFrom<protocol::RecordedEvent> for Record {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::RecordedEvent) -> Result<Self, Self::Error> {
+        let id = value
+            .id
+            .map(Into::into)
+            .ok_or_else(|| tonic::Status::invalid_argument("id is missing"))?;
+
+        Ok(Self {
+            id,
             content_type: protocol::ContentType::try_from(value.content_type)
                 .map(ContentType::from)
                 .unwrap_or(ContentType::Unknown),
@@ -289,7 +308,7 @@ impl From<protocol::RecordedEvent> for Record {
             position: value.position,
             revision: value.revision,
             data: value.payload,
-        }
+        })
     }
 }
 
@@ -527,12 +546,19 @@ impl From<SubscribeToStream> for protocol::subscribe_request::Stream {
     }
 }
 
-impl From<protocol::subscribe_request::Stream> for SubscribeToStream {
-    fn from(value: protocol::subscribe_request::Stream) -> Self {
-        Self {
+impl TryFrom<protocol::subscribe_request::Stream> for SubscribeToStream {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::subscribe_request::Stream) -> Result<Self, Self::Error> {
+        let start = value
+            .start
+            .map(Into::into)
+            .ok_or_else(|| tonic::Status::invalid_argument("start is missing"))?;
+
+        Ok(Self {
             stream_name: value.stream_name,
-            start: value.start.unwrap().into(),
-        }
+            start,
+        })
     }
 }
 
@@ -554,30 +580,49 @@ impl From<protocol::subscribe_request::Program> for SubscribeToProgram {
     }
 }
 
-impl From<protocol::AppendStreamResponse> for AppendStreamCompleted {
-    fn from(value: protocol::AppendStreamResponse) -> Self {
-        match value.append_result.unwrap() {
+impl TryFrom<protocol::AppendStreamResponse> for AppendStreamCompleted {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::AppendStreamResponse) -> Result<Self, tonic::Status> {
+        let append_result = value
+            .append_result
+            .ok_or_else(|| tonic::Status::invalid_argument("append_result is missing"))?;
+
+        match append_result {
             protocol::append_stream_response::AppendResult::WriteResult(r) => {
-                AppendStreamCompleted::Success(WriteResult {
+                Ok(AppendStreamCompleted::Success(WriteResult {
                     next_expected_version: ExpectedRevision::Revision(r.next_revision),
                     position: r.position,
                     next_logical_position: 0,
-                })
+                }))
             }
 
-            protocol::append_stream_response::AppendResult::Error(e) => match e.error.unwrap() {
-                protocol::append_stream_response::error::Error::WrongRevision(e) => {
-                    AppendStreamCompleted::Error(AppendError::WrongExpectedRevision(
-                        WrongExpectedRevisionError {
-                            expected: e.expected_revision.unwrap().into(),
-                            current: e.current_revision.unwrap().into(),
-                        },
-                    ))
+            protocol::append_stream_response::AppendResult::Error(e) => {
+                let error = e
+                    .error
+                    .ok_or_else(|| tonic::Status::invalid_argument("error is missing"))?;
+
+                match error {
+                    protocol::append_stream_response::error::Error::WrongRevision(e) => {
+                        let expected = e.expected_revision.map(Into::into).ok_or_else(|| {
+                            tonic::Status::invalid_argument("expected_revision is missing")
+                        })?;
+                        let current = e.current_revision.map(Into::into).ok_or_else(|| {
+                            tonic::Status::invalid_argument("current_revision is missing")
+                        })?;
+
+                        Ok(AppendStreamCompleted::Error(
+                            AppendError::WrongExpectedRevision(WrongExpectedRevisionError {
+                                expected,
+                                current,
+                            }),
+                        ))
+                    }
+                    protocol::append_stream_response::error::Error::StreamDeleted(_) => {
+                        Ok(AppendStreamCompleted::Error(AppendError::StreamDeleted))
+                    }
                 }
-                protocol::append_stream_response::error::Error::StreamDeleted(_) => {
-                    AppendStreamCompleted::Error(AppendError::StreamDeleted)
-                }
-            },
+            }
         }
     }
 }
@@ -629,14 +674,20 @@ impl From<WriteResult> for protocol::delete_stream_response::DeleteResult {
     }
 }
 
-impl From<protocol::ReadStreamResponse> for ReadStreamResponse {
-    fn from(value: protocol::ReadStreamResponse) -> Self {
-        match value.read_result.unwrap() {
+impl TryFrom<protocol::ReadStreamResponse> for ReadStreamResponse {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::ReadStreamResponse) -> Result<Self, Self::Error> {
+        let read_result = value
+            .read_result
+            .ok_or_else(|| tonic::Status::invalid_argument("read_result is missing"))?;
+
+        match read_result {
             protocol::read_stream_response::ReadResult::EndOfStream(_) => {
-                ReadStreamResponse::EndOfStream
+                Ok(ReadStreamResponse::EndOfStream)
             }
             protocol::read_stream_response::ReadResult::EventAppeared(e) => {
-                ReadStreamResponse::EventAppeared(e.into())
+                Ok(ReadStreamResponse::EventAppeared(e.try_into()?))
             }
         }
     }
@@ -755,12 +806,19 @@ impl From<DeleteStreamCompleted> for protocol::DeleteStreamResponse {
     }
 }
 
-impl From<protocol::subscribe_response::Notification> for SubscriptionNotification {
-    fn from(value: protocol::subscribe_response::Notification) -> Self {
-        match value.kind.unwrap() {
-            protocol::subscribe_response::notification::Kind::Subscribed(s) => Self::Subscribed(s),
+impl TryFrom<protocol::subscribe_response::Notification> for SubscriptionNotification {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::subscribe_response::Notification) -> Result<Self, Self::Error> {
+        let kind = value
+            .kind
+            .ok_or_else(|| tonic::Status::invalid_argument("kind is missing"))?;
+        match kind {
+            protocol::subscribe_response::notification::Kind::Subscribed(s) => {
+                Ok(Self::Subscribed(s))
+            }
             protocol::subscribe_response::notification::Kind::Unsubscribed(s) => {
-                Self::Unsubscribed(s)
+                Ok(Self::Unsubscribed(s))
             }
         }
     }
@@ -782,26 +840,41 @@ impl From<SubscriptionNotification> for protocol::subscribe_response::Notificati
     }
 }
 
-impl From<protocol::SubscribeResponse> for SubscriptionEvent {
-    fn from(value: protocol::SubscribeResponse) -> Self {
-        match value.event.unwrap() {
-            protocol::subscribe_response::Event::Confirmation(c) => match c.kind.unwrap() {
-                protocol::subscribe_response::confirmation::Kind::StreamName(s) => {
-                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(s))
+impl TryFrom<protocol::SubscribeResponse> for SubscriptionEvent {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::SubscribeResponse) -> Result<Self, Self::Error> {
+        let event = value
+            .event
+            .ok_or_else(|| tonic::Status::invalid_argument("event is missing"))?;
+
+        match event {
+            protocol::subscribe_response::Event::Confirmation(c) => {
+                let kind = c
+                    .kind
+                    .ok_or_else(|| tonic::Status::invalid_argument("kind is missing"))?;
+
+                match kind {
+                    protocol::subscribe_response::confirmation::Kind::StreamName(s) => Ok(
+                        SubscriptionEvent::Confirmed(SubscriptionConfirmation::StreamName(s)),
+                    ),
+                    protocol::subscribe_response::confirmation::Kind::ProcessId(p) => Ok(
+                        SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p)),
+                    ),
                 }
-                protocol::subscribe_response::confirmation::Kind::ProcessId(p) => {
-                    SubscriptionEvent::Confirmed(SubscriptionConfirmation::ProcessId(p))
-                }
-            },
-            protocol::subscribe_response::Event::EventAppeared(e) => {
-                SubscriptionEvent::EventAppeared(e.event.unwrap().into())
             }
-            protocol::subscribe_response::Event::CaughtUp(_) => SubscriptionEvent::CaughtUp,
+            protocol::subscribe_response::Event::EventAppeared(e) => {
+                let event = e
+                    .event
+                    .ok_or_else(|| tonic::Status::invalid_argument("event is missing"))?;
+                Ok(SubscriptionEvent::EventAppeared(event.try_into()?))
+            }
+            protocol::subscribe_response::Event::CaughtUp(_) => Ok(SubscriptionEvent::CaughtUp),
             protocol::subscribe_response::Event::Error(_) => {
-                SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server)
+                Ok(SubscriptionEvent::Unsubscribed(UnsubscribeReason::Server))
             }
             protocol::subscribe_response::Event::Notification(n) => {
-                SubscriptionEvent::Notification(n.into())
+                Ok(SubscriptionEvent::Notification(n.try_into()?))
             }
         }
     }
@@ -855,13 +928,20 @@ impl From<SubscriptionEvent> for protocol::SubscribeResponse {
     }
 }
 
-impl From<protocol::list_programs_response::ProgramSummary> for ProgramSummary {
-    fn from(value: protocol::list_programs_response::ProgramSummary) -> Self {
-        Self {
+impl TryFrom<protocol::list_programs_response::ProgramSummary> for ProgramSummary {
+    type Error = tonic::Status;
+
+    fn try_from(
+        value: protocol::list_programs_response::ProgramSummary,
+    ) -> Result<Self, Self::Error> {
+        Ok(Self {
             id: value.id,
             name: value.name,
-            started_at: Utc.timestamp_opt(value.started_at, 0).unwrap(),
-        }
+            started_at: Utc
+                .timestamp_opt(value.started_at, 0)
+                .single()
+                .ok_or_else(|| tonic::Status::invalid_argument("started_at is out of range"))?,
+        })
     }
 }
 
@@ -875,11 +955,15 @@ impl From<ProgramSummary> for protocol::list_programs_response::ProgramSummary {
     }
 }
 
-impl From<protocol::ListProgramsResponse> for ProgramListed {
-    fn from(value: protocol::ListProgramsResponse) -> Self {
-        Self {
-            programs: value.programs.into_iter().map(|p| p.into()).collect(),
-        }
+impl TryFrom<protocol::ListProgramsResponse> for ProgramListed {
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::ListProgramsResponse) -> Result<Self, Self::Error> {
+        let programs: Result<Vec<ProgramSummary>, tonic::Status> =
+            value.programs.into_iter().map(|p| p.try_into()).collect();
+        Ok(Self {
+            programs: programs?,
+        })
     }
 }
 
