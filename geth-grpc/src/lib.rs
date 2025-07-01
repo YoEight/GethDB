@@ -999,13 +999,22 @@ impl From<protocol::StopProgramRequest> for KillProgram {
     }
 }
 
-impl From<protocol::StopProgramResponse> for ProgramKilled {
-    fn from(value: protocol::StopProgramResponse) -> Self {
-        match value.result.unwrap() {
-            protocol::stop_program_response::Result::Success(_) => ProgramKilled::Success,
-            protocol::stop_program_response::Result::Error(e) => match e.error.unwrap() {
-                protocol::stop_program_response::error::Error::NotExists(_) => {
-                    ProgramKilled::Error(ProgramKillError::NotExists)
+impl TryFrom<protocol::StopProgramResponse> for ProgramKilled {
+
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::StopProgramResponse) -> Result<Self, tonic::Status> {
+        let result = value.result.ok_or_else(|| tonic::Status::invalid_argument("result is missing"))?;
+
+        match result {
+            protocol::stop_program_response::Result::Success(_) => Ok(ProgramKilled::Success),
+            protocol::stop_program_response::Result::Error(e) => {
+                let error = e.error.ok_or_else(|| tonic::Status::invalid_argument("error is missing"))?;
+
+                match error {
+                    protocol::stop_program_response::error::Error::NotExists(_) => {
+                        Ok(ProgramKilled::Error(ProgramKillError::NotExists))
+                    }
                 }
             },
         }
@@ -1034,16 +1043,25 @@ impl From<ProgramKilled> for protocol::StopProgramResponse {
     }
 }
 
-impl From<protocol::ProgramStatsResponse> for ProgramObtained {
-    fn from(value: protocol::ProgramStatsResponse) -> Self {
-        match value.result.unwrap() {
+impl TryFrom<protocol::ProgramStatsResponse> for ProgramObtained {
+
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::ProgramStatsResponse) -> Result<Self, tonic::Status> {
+        let result = value.result.ok_or_else(|| tonic::Status::invalid_argument("result is missing"))?;
+
+        match result {
             protocol::program_stats_response::Result::Program(stats) => {
-                ProgramObtained::Success(stats.into())
+                Ok(ProgramObtained::Success(stats.try_into()?))
             }
 
-            protocol::program_stats_response::Result::Error(e) => match e.error.unwrap() {
-                protocol::program_stats_response::error::Error::NotExists(_) => {
-                    ProgramObtained::Error(GetProgramError::NotExists)
+            protocol::program_stats_response::Result::Error(e) => {
+                let error = e.error.ok_or_else(|| tonic::Status::invalid_argument("error is missing"))?;
+
+                match error {
+                    protocol::program_stats_response::error::Error::NotExists(_) => {
+                        Ok(ProgramObtained::Error(GetProgramError::NotExists))
+                    }
                 }
             },
         }
@@ -1074,16 +1092,19 @@ impl From<ProgramObtained> for protocol::ProgramStatsResponse {
     }
 }
 
-impl From<protocol::program_stats_response::ProgramStats> for ProgramStats {
-    fn from(value: protocol::program_stats_response::ProgramStats) -> Self {
-        Self {
+impl TryFrom<protocol::program_stats_response::ProgramStats> for ProgramStats {
+
+    type Error = tonic::Status;
+
+    fn try_from(value: protocol::program_stats_response::ProgramStats) -> Result<Self, tonic::Status> {
+        Ok(Self {
             id: value.id,
             name: value.name,
             source_code: value.source_code,
             subscriptions: value.subscriptions,
             pushed_events: value.pushed_events as usize,
-            started: Utc.timestamp_opt(value.started_at, 0).unwrap(),
-        }
+            started: Utc.timestamp_opt(value.started_at, 0).single().ok_or_else(|| tonic::Status::invalid_argument("started_at is out of range"))?,
+        })
     }
 }
 

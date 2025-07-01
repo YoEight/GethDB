@@ -231,7 +231,7 @@ impl Client for GrpcClient {
                 }
             }
 
-            Ok(resp) => match resp.into_inner().into() {
+            Ok(resp) => match resp.into_inner().try_into()? {
                 ProgramObtained::Success(stats) => Ok(Some(stats)),
                 ProgramObtained::Error(e) => match e {
                     GetProgramError::NotExists => Ok(None),
