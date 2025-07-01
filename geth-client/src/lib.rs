@@ -6,14 +6,14 @@ use geth_common::{
     ProgramSummary, Propose, ReadStreamCompleted, ReadStreamResponse, Record, Revision,
     SubscriptionConfirmation, SubscriptionEvent,
 };
-pub use next::grpc::GrpcClient;
+pub use grpc::GrpcClient;
 use tonic::Streaming;
 
-mod next;
+mod grpc;
 mod types;
 
 pub enum ReadStreaming {
-    Grpc(Streaming<geth_common::protocol::ReadStreamResponse>),
+    Grpc(Streaming<geth_grpc::protocol::ReadStreamResponse>),
     Local(geth_engine::reading::Streaming),
     Subscription(SubscriptionStreaming),
 }
@@ -23,7 +23,7 @@ impl ReadStreaming {
         match self {
             ReadStreaming::Grpc(streaming) => {
                 if let Some(resp) = streaming.try_next().await? {
-                    match resp.into() {
+                    match resp.try_into()? {
                         ReadStreamResponse::EventAppeared(record) => return Ok(Some(record)),
                         ReadStreamResponse::EndOfStream => return Ok(None),
                         ReadStreamResponse::StreamDeleted => unreachable!(),
@@ -55,7 +55,7 @@ impl ReadStreaming {
 }
 
 enum SubscriptionType {
-    Grpc(Streaming<geth_common::protocol::SubscribeResponse>),
+    Grpc(Streaming<geth_grpc::protocol::SubscribeResponse>),
 }
 
 pub struct SubscriptionStreaming {
@@ -64,7 +64,7 @@ pub struct SubscriptionStreaming {
 }
 
 impl SubscriptionStreaming {
-    pub fn from_grpc(streaming: Streaming<geth_common::protocol::SubscribeResponse>) -> Self {
+    pub fn from_grpc(streaming: Streaming<geth_grpc::protocol::SubscribeResponse>) -> Self {
         Self {
             confirmation: None,
             r#type: SubscriptionType::Grpc(streaming),
@@ -88,7 +88,7 @@ impl SubscriptionStreaming {
         match &mut self.r#type {
             SubscriptionType::Grpc(streaming) => {
                 if let Some(resp) = streaming.try_next().await? {
-                    return Ok(Some(resp.into()));
+                    return Ok(Some(resp.try_into()?));
                 }
 
                 Ok(None)

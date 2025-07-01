@@ -1,7 +1,7 @@
 use std::time::Duration;
 
-use geth_common::generated::protocol::protocol_client::ProtocolClient;
-use geth_common::protocol::ProgramStatsRequest;
+use geth_grpc::generated::protocol::protocol_client::ProtocolClient;
+use geth_grpc::protocol::ProgramStatsRequest;
 use tonic::service::interceptor::InterceptedService;
 use tonic::service::Interceptor;
 use tonic::transport::{Channel, Uri};
@@ -94,7 +94,7 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        Ok(result.into_inner().into())
+        Ok(result.into_inner().try_into()?)
     }
 
     async fn read_stream(
@@ -193,7 +193,7 @@ impl Client for GrpcClient {
             ))
             .await?;
 
-        Ok(result.into_inner().into())
+        Ok(result.into_inner().try_into()?)
     }
 
     async fn list_programs(&self) -> eyre::Result<Vec<ProgramSummary>> {
@@ -205,12 +205,14 @@ impl Client for GrpcClient {
 
         // paying a premium just so we have a type that is not from the generated code
         // fortunately, that isn't a call that one should make often.
-        Ok(result
+        let res: Result<Vec<ProgramSummary>, tonic::Status> = result
             .into_inner()
             .programs
             .into_iter()
-            .map(|p| p.into())
-            .collect())
+            .map(|p| p.try_into())
+            .collect();
+
+        Ok(res?)
     }
 
     async fn get_program(&self, id: u64) -> eyre::Result<Option<ProgramStats>> {
@@ -229,7 +231,7 @@ impl Client for GrpcClient {
                 }
             }
 
-            Ok(resp) => match resp.into_inner().into() {
+            Ok(resp) => match resp.into_inner().try_into()? {
                 ProgramObtained::Success(stats) => Ok(Some(stats)),
                 ProgramObtained::Error(e) => match e {
                     GetProgramError::NotExists => Ok(None),

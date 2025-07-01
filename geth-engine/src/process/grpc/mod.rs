@@ -3,7 +3,7 @@ use std::sync::Arc;
 use tokio::sync::Notify;
 use tonic::transport::Server;
 
-use geth_common::generated::protocol::protocol_server::ProtocolServer;
+use geth_grpc::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{

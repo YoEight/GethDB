@@ -1,5 +1,5 @@
-use geth_common::protocol::protocol_server::Protocol;
-use geth_common::protocol::{self, SubscribeResponse};
+use geth_grpc::protocol::protocol_server::Protocol;
+use geth_grpc::protocol::{self, SubscribeResponse};
 use tokio::sync::mpsc::unbounded_channel;
 use tonic::codegen::tokio_stream::wrappers::UnboundedReceiverStream;
 
@@ -54,15 +54,12 @@ impl ProtocolImpl {
 
 #[tonic::async_trait]
 impl Protocol for ProtocolImpl {
-    type ReadStreamStream = UnboundedReceiverStream<Result<protocol::ReadStreamResponse, Status>>;
-    type SubscribeStream = UnboundedReceiverStream<Result<protocol::SubscribeResponse, Status>>;
-
     async fn append_stream(
         &self,
         request: Request<protocol::AppendStreamRequest>,
     ) -> Result<Response<protocol::AppendStreamResponse>, Status> {
         let ctx = try_get_request_context_from(&request)?;
-        let params: AppendStream = request.into_inner().into();
+        let params: AppendStream = request.into_inner().try_into()?;
         match self
             .writer
             .append(
@@ -77,13 +74,14 @@ impl Protocol for ProtocolImpl {
             Ok(result) => Ok(Response::new(result.into())),
         }
     }
+    type ReadStreamStream = UnboundedReceiverStream<Result<protocol::ReadStreamResponse, Status>>;
 
     async fn read_stream(
         &self,
         request: Request<protocol::ReadStreamRequest>,
     ) -> Result<Response<Self::ReadStreamStream>, Status> {
         let ctx = try_get_request_context_from(&request)?;
-        let params: ReadStream = request.into_inner().into();
+        let params: ReadStream = request.into_inner().try_into()?;
 
         match self
             .reader
@@ -131,7 +129,7 @@ impl Protocol for ProtocolImpl {
         request: Request<protocol::DeleteStreamRequest>,
     ) -> Result<Response<protocol::DeleteStreamResponse>, Status> {
         let ctx = try_get_request_context_from(&request)?;
-        let params: DeleteStream = request.into_inner().into();
+        let params: DeleteStream = request.into_inner().try_into()?;
 
         match self
             .writer
@@ -143,6 +141,8 @@ impl Protocol for ProtocolImpl {
         }
     }
 
+    type SubscribeStream = UnboundedReceiverStream<Result<protocol::SubscribeResponse, Status>>;
+
     async fn subscribe(
         &self,
         request: Request<protocol::SubscribeRequest>,
@@ -150,7 +150,7 @@ impl Protocol for ProtocolImpl {
         let ctx = try_get_request_context_from(&request)?;
         let (sender, recv) = unbounded_channel::<Result<SubscribeResponse, Status>>();
 
-        match request.into_inner().into() {
+        match request.into_inner().try_into()? {
             Subscribe::ToStream(params) => {
                 let mut consumer = match start_consumer(
                     ctx,
