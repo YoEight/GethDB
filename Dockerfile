@@ -1,5 +1,4 @@
-ARG TARGET_PLATFORM=linux/amd64
-FROM --platform=$TARGET_PLATFORM rust:slim-bookworm AS build
+FROM rust:slim-bookworm AS build
 
 WORKDIR /build
 COPY ./geth-common/ ./geth-common
