@@ -2,11 +2,15 @@ use clap::{Args, Parser};
 
 #[derive(Args, Debug, Clone, Default)]
 pub struct Telemetry {
-    #[arg(long = "telemetry-disabled", default_value = "false")]
+    #[arg(
+        long = "telemetry-disabled",
+        default_value = "false",
+        env = "GETH_TELEMETRY_DISABLED"
+    )]
     pub disabled: bool,
 
     /// OpenTelemetry compatible endpoint where telemetry data is sent
-    #[arg(long = "telemetry-endpoint")]
+    #[arg(long = "telemetry-endpoint", env = "GETH_TELEMETRY_ENDPOINT")]
     pub endpoint: Option<String>,
 
     #[arg(long = "telemetry-event-filters")]
@@ -19,15 +23,15 @@ pub struct Telemetry {
 #[command(propagate_version = true)]
 pub struct Options {
     /// Host IP address.
-    #[arg(long, default_value = "127.0.0.1")]
+    #[arg(long, default_value = "127.0.0.1", env = "GETH_HOST")]
     pub host: String,
 
     /// Host Port.
-    #[arg(long, default_value = "2113")]
+    #[arg(long, default_value = "2113", env = "GETH_PORT")]
     pub port: u16,
 
     /// Data directory. If you want to use the in-memory storage, set this to `in_mem`
-    #[arg(long, default_value = "./geth")]
+    #[arg(long, default_value = "./geth", env = "GETH_DB")]
     pub db: String,
 
     #[command(flatten)]

@@ -850,8 +850,6 @@ dependencies = [
  "eyre",
  "geth-engine",
  "tokio",
- "tracing",
- "tracing-subscriber",
 ]
 
 [[package]]

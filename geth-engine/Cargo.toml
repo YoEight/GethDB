@@ -33,7 +33,7 @@ git = "https://github.com/YoEight/pyro.git"
 
 [dependencies.clap]
 version = "4.5"
-features = ["derive"]
+features = ["derive", "env"]
 
 [dependencies.tracing-subscriber]
 version = "0.3"
