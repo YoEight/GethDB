@@ -13,11 +13,6 @@ data structures and observe their behavior in real-life scenarios.
 This is a side project that I work on during my spare time. It is not production-ready, and most of the code is
 undocumented. Although the code is written entirely in Rust, performance is not a primary focus.
 
-## Supported platforms
-
-The codebase should compile on any 64-bit platform supported by the Rust compiler. So far, it has been tested on Linux,
-macOS, and Windows. Please note that Linux will remain the primary target
-
 ## Features
 
 The core engine is a NoSQL, append-only, and immutable database with the following key features:
@@ -29,6 +24,31 @@ The core engine is a NoSQL, append-only, and immutable database with the followi
 * Capability to spawn programs using the [Pyro] programming language.
 * Supports OpenTelemetry logs and traces, which can be sent to any OpenTelemetry-compatible server when configured, or disabled entirely if preferred.
 * Cluster functionality using a homemade Raft implementation (though it is not fully integrated yet).
+
+## Supported platforms
+
+The codebase should compile on any 64-bit platform supported by the Rust compiler. So far, it has been tested on Linux,
+macOS, and Windows. Please note that Linux will remain the primary target
+
+## Build from source
+
+You need to have the latest Rust toolchain installed and also `protoc` in your $PATH. Then run this command:
+
+```
+cargo build
+```
+
+## Docker
+
+```
+docker pull yoeight/gethdb:latest
+```
+
+At that stage, there is no other version besides `latest`. A new image is pushed every time a commit is pushed to the `master` branch.
+
+The image supports:
+- linux/amd64
+- linux/arm64/v8
 
 ## What's next?
 
