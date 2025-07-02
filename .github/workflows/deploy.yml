@@ -19,7 +19,7 @@ jobs:
           - linux/arm64/v8
 
     runs-on: ubuntu-latest
-    name: Deploy container to DockerHub
+    name: Push container to DockerHub
 
     steps:
       - name: Checkout
@@ -37,6 +37,7 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v6
         with:
+          context: .
           platforms: ${{ matrix.platform }}
           push: true
           tags: yoeight/gethdb:latest
