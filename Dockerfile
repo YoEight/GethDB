@@ -19,8 +19,6 @@ RUN cargo install --path geth-node --root /geth
 
 FROM build AS binaries
 
-ENV GETH_HOST=0.0.0.0
-
 ARG UID=1000
 ARG GID=1000
 
