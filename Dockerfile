@@ -32,7 +32,7 @@ RUN addgroup --gid ${GID} "geth" && \
     --uid ${UID} \
     "geth"
 
-COPY --chown=geth:geth --from=build  ./geth/bin/* ./geth-node
+COPY --chown=geth:geth --from=build  ./geth/bin/geth-node ./geth-node
 
 RUN mkdir -p /var/lib/gethdb && \
     mkdir -p /var/log/gethdb && \
