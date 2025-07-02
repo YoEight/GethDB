@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy on DockerHub
 
 on:
   push:
@@ -11,15 +11,8 @@ on:
 
 jobs:
   docker:
-    strategy:
-      fail-fast: false
-      matrix:
-        platform:
-          - linux/amd64
-          - linux/arm64/v8
-
     runs-on: ubuntu-latest
-    name: Push container to DockerHub
+    name: Push
 
     steps:
       - name: Checkout
@@ -38,6 +31,6 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          platforms: ${{ matrix.platform }}
+          platforms: linux/amd64, linux/arm64/v8
           push: true
           tags: yoeight/gethdb:latest
