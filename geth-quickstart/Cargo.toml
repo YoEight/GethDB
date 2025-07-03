@@ -1,0 +1,23 @@
+[package]
+name = "geth-quickstart"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies.geth-client]
+path = "../geth-client"
+
+[dependencies.tokio]
+version = "1"
+features = ["full"]
+
+[dependencies.serde]
+version = "1"
+features = ["derive"]
+
+[dependencies.uuid]
+version = "1"
+features = ["v4"]
+
+[dependencies]
+eyre = "0.6"
+serde_json = "1"

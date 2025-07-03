@@ -11,4 +11,5 @@ members = [
     "geth-client-tests",
     "geth-node",
     "geth-grpc",
+    "geth-quickstart",
 ]
