@@ -1,0 +1,39 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gethdb
+  namespace: geth-app
+  labels:
+    app: gethdb
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: gethdb
+  template:
+    metadata:
+      labels:
+        app: gethdb
+    spec:
+      containers:
+        - name: gethdb
+          image: yoeight/gethdb:latest
+          ports:
+            - containerPort: 2113
+          env:
+            - name: GETH_TELEMETRY_ENDPOINT
+              value: "http://seq-service:5341"
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gethdb-service
+  namespace: geth-app
+spec:
+  selector:
+    app: gethdb
+  ports:
+    - protocol: TCP
+      port: 2113
+      targetPort: 2113
+  type: NodePort

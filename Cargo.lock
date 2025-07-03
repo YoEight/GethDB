@@ -853,6 +853,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "geth-quickstart"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+ "geth-client",
+ "serde",
+ "serde_json",
+ "tokio",
+ "uuid",
+]
+
+[[package]]
 name = "geth-repl"
 version = "0.1.0"
 dependencies = [

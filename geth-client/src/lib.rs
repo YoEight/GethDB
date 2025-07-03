@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use futures_util::TryStreamExt;
-use geth_common::{
-    AppendStreamCompleted, DeleteStreamCompleted, Direction, ExpectedRevision, ProgramStats,
-    ProgramSummary, Propose, ReadStreamCompleted, ReadStreamResponse, Record, Revision,
-    SubscriptionConfirmation, SubscriptionEvent,
+pub use geth_common::{
+    AppendStreamCompleted, ContentType, DeleteStreamCompleted, Direction, EndPoint,
+    ExpectedRevision, ProgramStats, ProgramSummary, Propose, ReadStreamCompleted,
+    ReadStreamResponse, Record, Revision, SubscriptionConfirmation, SubscriptionEvent,
 };
 pub use grpc::GrpcClient;
 use tonic::Streaming;

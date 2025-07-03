@@ -50,6 +50,28 @@ The image supports:
 - linux/amd64
 - linux/arm64/v8
 
+## Kubernetes
+The project includes an example configuration for deploying a GethDB node in Kubernetes. You can find the manifest files in the `/k8s` directory. The configuration includes a simple setup with a Datalust Seq instance for collecting OpenTelemetry traces and logs.
+
+To deploy the application (assuming you have Kubernetes properly configured on your machine):
+```
+kubectl apply -f k8s/manifests/
+```
+
+To test the application locally, forward the port to your machine:
+```
+kubectl port-forward -n geth-app service/gethdb-service 2113:2113
+```
+
+To view the traces sent by GethDB to Seq, you can also forward the Seq service port:
+```
+kubectl port-forward -n geth-app service/seq-service 5341:80
+```
+The Seq UI will be available at http://localhost:5341
+
+## Examples
+To quickly see how to interact with GethDB, use the `geth-quickstart` project, which is configured to work with any GethDB node running on `localhost:2113`. Currently, only a Rust client is available, but more clients will be added later.
+
 ## What's next?
 
 This is the features I want to work on
