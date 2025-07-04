@@ -1,6 +1,7 @@
 pub use crate::options::Options;
 
 mod domain;
+mod metrics;
 mod names;
 mod options;
 mod process;
