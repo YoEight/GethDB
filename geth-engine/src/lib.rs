@@ -91,6 +91,7 @@ impl EmbeddedClient {
 struct TelemetryHandles {
     traces: Option<SdkTracerProvider>,
     logs: Option<SdkLoggerProvider>,
+    metrics: Option<opentelemetry_sdk::metrics::SdkMeterProvider>,
 }
 
 impl TelemetryHandles {
@@ -100,6 +101,10 @@ impl TelemetryHandles {
         }
 
         if let Some(provider) = self.logs {
+            provider.shutdown()?;
+        }
+
+        if let Some(provider) = self.metrics {
             provider.shutdown()?;
         }
 
@@ -211,6 +216,8 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
             .with_reader(reader)
             .with_resource(resource)
             .build();
+
+        handles.metrics = Some(meter_provider.clone());
 
         opentelemetry::global::set_meter_provider(meter_provider);
     }

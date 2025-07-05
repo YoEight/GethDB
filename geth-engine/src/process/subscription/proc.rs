@@ -1,3 +1,4 @@
+use crate::metrics::get_metrics;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
     Messages, Notifications, ProgramProcess, ProgramRequests, ProgramResponses, Responses,
@@ -188,6 +189,7 @@ async fn pyro_worker_stats(args: PyroWorkerStats) -> eyre::Result<()> {
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     let mut reg = Register::default();
     let mut programs = HashMap::<ProcId, ProgramProcess>::new();
+    let metrics = get_metrics();
 
     while let Some(item) = env.recv().await {
         match item {
@@ -202,6 +204,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                                     .is_ok()
                                 {
                                     reg.register(ident, stream.sender);
+                                    metrics.observe_subscription_new();
                                     continue;
                                 }
 
@@ -243,6 +246,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                     if let Some(prog) = programs.remove(&proc_id) {
                         tracing::info!(id = proc_id, name = prog.name, "program terminated");
                         let _ = prog.sender.send(SubscribeResponses::Unsubscribed.into());
+                        metrics.observe_program_terminated();
                     }
 
                     continue;
@@ -264,6 +268,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                             {
                                 tracing::debug!(name = args.name, correlation = %mail.context.correlation, "program was registered successfully");
                                 programs.insert(args.client.id(), args);
+                                metrics.observe_program_new();
 
                                 continue;
                             }
