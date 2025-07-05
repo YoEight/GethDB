@@ -11,7 +11,6 @@ use geth_domain::{Lsm, LsmSettings};
 use geth_mikoshi::hashing::mikoshi_hash;
 use geth_mikoshi::wal::chunks::ChunkContainer;
 use geth_mikoshi::wal::LogReader;
-use opentelemetry::metrics;
 use std::cmp::min;
 use std::sync::{Arc, RwLock};
 use std::{io, mem};

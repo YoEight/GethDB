@@ -107,6 +107,9 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
             Item::Mail(mail) => {
                 if let Ok(ReadRequests::ReadAt { position }) = mail.payload.try_into() {
                     let entry = reader.read_at(position)?;
+
+                    metrics.observe_read_log_entry(&entry);
+
                     env.client.reply(
                         mail.context,
                         mail.origin,

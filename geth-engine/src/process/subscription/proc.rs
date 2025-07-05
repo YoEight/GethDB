@@ -1,4 +1,4 @@
-use crate::metrics::get_metrics;
+use crate::metrics::{get_metrics, Metrics};
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
     Messages, Notifications, ProgramProcess, ProgramRequests, ProgramResponses, Responses,
@@ -26,22 +26,28 @@ impl Register {
         self.inner.entry(key).or_default().push(sender);
     }
 
-    fn publish(&mut self, record: Record) {
+    fn publish(&mut self, metrics: &Metrics, record: Record) {
         if let Some(senders) = self.inner.get_mut(&record.stream_name) {
+            let before = senders.len();
             senders.retain(|sender| {
                 sender
                     .send(SubscribeResponses::Record(record.clone()).into())
                     .is_ok()
                     && record.class != STREAM_DELETED
             });
+            let after = senders.len();
+            metrics.observe_subscription_terminated(before - after);
         }
 
         if let Some(senders) = self.inner.get_mut(ALL_IDENT) {
+            let before = senders.len();
             senders.retain(|sender| {
                 sender
                     .send(SubscribeResponses::Record(record.clone()).into())
                     .is_ok()
             });
+            let after = senders.len();
+            metrics.observe_subscription_terminated(before - after);
         }
     }
 }
@@ -293,7 +299,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                             )?;
 
                             for event in events {
-                                reg.publish(event);
+                                reg.publish(&metrics, event);
                             }
                         }
 

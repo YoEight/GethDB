@@ -1,4 +1,4 @@
-use geth_mikoshi::wal::LogEntry;
+use geth_mikoshi::wal::{LogEntries, LogEntry};
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
 use tokio::sync::OnceCell;
 
@@ -18,6 +18,8 @@ pub struct Metrics {
     pub index_read_error_total: Counter<u64>,
     pub index_write_error_total: Counter<u64>,
     pub write_size_bytes: Histogram<f64>,
+    pub write_propose_event_total: Counter<u64>,
+    pub write_error_total: Counter<u64>,
 }
 
 impl Metrics {
@@ -53,8 +55,8 @@ impl Metrics {
         self.subscriptions_active_total.add(1.0, &[]);
     }
 
-    pub fn observe_subscription_terminated(&self) {
-        self.subscriptions_active_total.add(-1.0, &[]);
+    pub fn observe_subscription_terminated(&self, count: usize) {
+        self.subscriptions_active_total.add(-(count as f64), &[]);
     }
 
     pub fn observe_program_new(&self) {
@@ -64,6 +66,16 @@ impl Metrics {
 
     pub fn observe_program_terminated(&self) {
         self.programs_active_total.add(-1.0, &[]);
+    }
+
+    pub fn observe_written_propose_event<L: LogEntries>(&self, entries: &L) {
+        self.write_size_bytes
+            .record(entries.current_entry_size() as f64, &[]);
+        self.write_propose_event_total.add(1, &[]);
+    }
+
+    pub fn observe_write_error(&self) {
+        self.write_error_total.add(1, &[]);
     }
 }
 
@@ -157,6 +169,18 @@ fn init_meter() -> Metrics {
             .f64_histogram("geth_write_size_bytes")
             .with_description("Distribution of the writes size")
             .with_unit("bytes")
+            .build(),
+
+        write_propose_event_total: meter
+            .u64_counter("geth_write_propose_event_total")
+            .with_description("Total number of written propose events")
+            .with_unit("events")
+            .build(),
+
+        write_error_total: meter
+            .u64_counter("geth_write_error_total")
+            .with_description("Total number of write errors")
+            .with_unit("errors")
             .build(),
 
         subscriptions_active_total: meter
