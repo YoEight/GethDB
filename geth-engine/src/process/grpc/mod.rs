@@ -7,6 +7,7 @@ use geth_grpc::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{
+    metrics::get_metrics,
     process::{manager::ManagerClient, Managed, ProcessEnv},
     Options,
 };
@@ -22,7 +23,8 @@ pub async fn start_server(
         .parse()
         .unwrap();
 
-    let protocols = protocol::ProtocolImpl::connect(client).await?;
+    let metrics = get_metrics();
+    let protocols = protocol::ProtocolImpl::connect(metrics, client).await?;
 
     tracing::info!(%addr, db = options.db, "GethDB is listening",);
 

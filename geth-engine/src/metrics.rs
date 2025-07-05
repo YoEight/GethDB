@@ -77,9 +77,17 @@ impl Metrics {
     pub fn observe_write_error(&self) {
         self.write_error_total.add(1, &[]);
     }
+
+    pub fn observe_client_error(&self) {
+        self.client_errors_total.add(1, &[]);
+    }
+
+    pub fn observe_server_error(&self) {
+        self.server_errors_total.add(1, &[]);
+    }
 }
 
-const METRICS: OnceCell<Metrics> = OnceCell::const_new();
+static METRICS: OnceCell<Metrics> = OnceCell::const_new();
 
 pub fn get_metrics() -> Metrics {
     METRICS.get().unwrap().clone()
