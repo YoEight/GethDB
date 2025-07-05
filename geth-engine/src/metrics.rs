@@ -1,5 +1,7 @@
 use opentelemetry::metrics::{Counter, Histogram, UpDownCounter};
+use tokio::sync::OnceCell;
 
+#[derive(Debug, Clone)]
 pub struct Metrics {
     pub programs_total: Counter<u64>,
     pub programs_active_total: UpDownCounter<f64>,
@@ -8,6 +10,16 @@ pub struct Metrics {
     pub server_errors_total: Counter<u64>,
     pub read_size_bytes: Histogram<f64>,
     pub write_size_bytes: Histogram<f64>,
+}
+
+const METRICS: OnceCell<Metrics> = OnceCell::const_new();
+
+pub fn get_metrics() -> Metrics {
+    METRICS.get().unwrap().clone()
+}
+
+pub fn configure_metrics() {
+    METRICS.set(init_meter()).expect("not to be configured yet");
 }
 
 fn init_meter() -> Metrics {

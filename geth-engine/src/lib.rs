@@ -1,3 +1,4 @@
+use crate::metrics::configure_metrics;
 pub use crate::options::Options;
 
 mod domain;
@@ -12,7 +13,9 @@ use geth_mikoshi::{
 use opentelemetry::{trace::TracerProvider, KeyValue};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
-use opentelemetry_sdk::{logs::SdkLoggerProvider, trace::SdkTracerProvider, Resource};
+use opentelemetry_sdk::{
+    logs::SdkLoggerProvider, metrics::PeriodicReader, trace::SdkTracerProvider, Resource,
+};
 pub use process::{
     indexing::IndexClient,
     manager::{start_process_manager_with_catalog, Catalog, CatalogBuilder, ManagerClient},
@@ -105,6 +108,8 @@ impl TelemetryHandles {
 }
 
 pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
+    configure_metrics();
+
     let handles = if options.telemetry.disabled {
         TelemetryHandles::default()
     } else {
@@ -177,7 +182,7 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
 
         let log_provider = SdkLoggerProvider::builder()
             .with_batch_exporter(log_exporter)
-            .with_resource(resource)
+            .with_resource(resource.clone())
             .build();
 
         handles.logs = Some(log_provider.clone());
@@ -186,6 +191,29 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
     } else {
         None
     };
+
+    if let Some(endpoint) = options
+        .telemetry
+        .metrics_endpoint
+        .as_ref()
+        .or(options.telemetry.endpoint.as_ref())
+    {
+        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/metrics"))
+            .build()?;
+
+        let reader = PeriodicReader::builder(metric_exporter)
+            .with_interval(std::time::Duration::from_secs(10))
+            .build();
+
+        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+            .with_reader(reader)
+            .with_resource(resource)
+            .build();
+
+        opentelemetry::global::set_meter_provider(meter_provider);
+    }
 
     let fmt_layer = if options.telemetry.endpoint.is_none() {
         let layer = tracing_subscriber::fmt::layer()
