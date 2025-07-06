@@ -45,12 +45,13 @@ features = ["trace", "logs", "grpc-tonic"]
 
 [dependencies]
 tonic = "0.13"
+tower = "0.5"
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
 opentelemetry = "0.30"
 opentelemetry_sdk = "0.30"
 opentelemetry-appender-tracing = "0.30"
-
+http = "1"
 bytes = "1"
 eyre = "0.6"
 chrono = "0.4"
