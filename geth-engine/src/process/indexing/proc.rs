@@ -1,4 +1,5 @@
 use crate::domain::index::CurrentRevision;
+use crate::metrics::get_metrics;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{IndexRequests, IndexResponses, Messages};
 use crate::process::reading::record_try_from;
@@ -35,6 +36,7 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
     tracing::info!("index rebuilt successfully");
 
     let lsm = Arc::new(RwLock::new(lsm));
+    let metrics = get_metrics();
 
     while let Some(item) = env.recv() {
         match item {
@@ -58,7 +60,7 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                             let last = entries.last().copied().unwrap();
                             if let Err(e) = store_entries(&lsm, entries) {
                                 tracing::error!("error when storing index entries: {}", e);
-
+                                metrics.observe_index_write_error();
                                 let _ = env.client.reply(
                                     mail.context,
                                     mail.origin,
@@ -79,6 +81,8 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
 
                         IndexRequests::LatestRevision { key } => {
                             if let Some(current) = revision_cache.get(&key) {
+                                metrics.observe_index_cache_hit();
+
                                 env.client.reply(
                                     mail.context,
                                     mail.origin,
@@ -89,6 +93,8 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                                     .into(),
                                 )?;
                             } else {
+                                metrics.observe_index_cache_miss();
+
                                 let lsm_read = lsm.read().map_err(|e| {
                                     eyre::eyre!("poisoned lock when reading to the index: {}", e)
                                 })?;
@@ -145,6 +151,7 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                             dir,
                             stream: &stream.sender,
                         }) {
+                            get_metrics().observe_index_read_error();
                             tracing::error!(%error, "error when reading the index");
                             let _ = stream.sender.send(IndexResponses::Error.into());
                         }

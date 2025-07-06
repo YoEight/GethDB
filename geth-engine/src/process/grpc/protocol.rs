@@ -11,6 +11,7 @@ use geth_common::{
 use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
+use crate::metrics::Metrics;
 use crate::process::consumer::{start_consumer, ConsumerResult};
 use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
@@ -22,33 +23,40 @@ pub struct ProtocolImpl {
     writer: WriterClient,
     reader: ReaderClient,
     sub: SubscriptionClient,
-}
-
-#[allow(clippy::result_large_err)]
-pub fn try_get_request_context_from<A>(req: &Request<A>) -> Result<RequestContext, tonic::Status> {
-    let metadata = req.metadata();
-    if let Some(correlation) = metadata.get("correlation") {
-        let correlation = correlation.to_str().map_err(|e| {
-            tonic::Status::invalid_argument(format!("invalid correlation metadata value: {e}"))
-        })?;
-
-        let correlation = Uuid::parse_str(correlation).map_err(|e| {
-            tonic::Status::invalid_argument(format!("invalid correlation UUID value: {e}"))
-        })?;
-
-        return Ok(RequestContext { correlation });
-    }
-
-    Ok(RequestContext::new())
+    metrics: Metrics,
 }
 
 impl ProtocolImpl {
-    pub async fn connect(client: ManagerClient) -> eyre::Result<Self> {
+    pub async fn connect(metrics: Metrics, client: ManagerClient) -> eyre::Result<Self> {
         Ok(Self {
             writer: client.new_writer_client().await?,
             reader: client.new_reader_client().await?,
             sub: client.new_subscription_client().await?,
+            metrics,
         })
+    }
+
+    #[allow(clippy::result_large_err)]
+    pub fn try_get_request_context_from<A>(
+        &self,
+        req: &Request<A>,
+    ) -> Result<RequestContext, tonic::Status> {
+        let metadata = req.metadata();
+        if let Some(correlation) = metadata.get("correlation") {
+            let correlation = correlation.to_str().map_err(|e| {
+                self.metrics.observe_client_error();
+                tonic::Status::invalid_argument(format!("invalid correlation metadata value: {e}"))
+            })?;
+
+            let correlation = Uuid::parse_str(correlation).map_err(|e| {
+                self.metrics.observe_client_error();
+                tonic::Status::invalid_argument(format!("invalid correlation UUID value: {e}"))
+            })?;
+
+            return Ok(RequestContext { correlation });
+        }
+
+        Ok(RequestContext::new())
     }
 }
 
@@ -58,8 +66,12 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::AppendStreamRequest>,
     ) -> Result<Response<protocol::AppendStreamResponse>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
-        let params: AppendStream = request.into_inner().try_into()?;
+        let ctx = self.try_get_request_context_from(&request)?;
+        let params: AppendStream = request
+            .into_inner()
+            .try_into()
+            .inspect_err(|_| self.metrics.observe_client_error())?;
+
         match self
             .writer
             .append(
@@ -70,7 +82,11 @@ impl Protocol for ProtocolImpl {
             )
             .await
         {
-            Err(e) => Err(Status::internal(e.to_string())),
+            Err(e) => {
+                self.metrics.observe_server_error();
+                Err(Status::internal(e.to_string()))
+            }
+
             Ok(result) => Ok(Response::new(result.into())),
         }
     }
@@ -80,8 +96,11 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::ReadStreamRequest>,
     ) -> Result<Response<Self::ReadStreamStream>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
-        let params: ReadStream = request.into_inner().try_into()?;
+        let ctx = self.try_get_request_context_from(&request)?;
+        let params: ReadStream = request
+            .into_inner()
+            .try_into()
+            .inspect_err(|_| self.metrics.observe_client_error())?;
 
         match self
             .reader
@@ -94,7 +113,11 @@ impl Protocol for ProtocolImpl {
             )
             .await
         {
-            Err(e) => Err(Status::internal(e.to_string())),
+            Err(e) => {
+                self.metrics.observe_server_error();
+                Err(Status::internal(e.to_string()))
+            }
+
             Ok(outcome) => match outcome {
                 ReadStreamCompleted::StreamDeleted => {
                     Err(Status::failed_precondition("stream-deleted"))
@@ -128,15 +151,22 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::DeleteStreamRequest>,
     ) -> Result<Response<protocol::DeleteStreamResponse>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
-        let params: DeleteStream = request.into_inner().try_into()?;
+        let ctx = self.try_get_request_context_from(&request)?;
+        let params: DeleteStream = request
+            .into_inner()
+            .try_into()
+            .inspect_err(|_| self.metrics.observe_client_error())?;
 
         match self
             .writer
             .delete(ctx, params.stream_name, params.expected_revision)
             .await
         {
-            Err(e) => Err(Status::internal(e.to_string())),
+            Err(e) => {
+                self.metrics.observe_server_error();
+                Err(Status::internal(e.to_string()))
+            }
+
             Ok(result) => Ok(Response::new(result.into())),
         }
     }
@@ -147,7 +177,7 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::SubscribeRequest>,
     ) -> Result<Response<Self::SubscribeStream>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
+        let ctx = self.try_get_request_context_from(&request)?;
         let (sender, recv) = unbounded_channel::<Result<SubscribeResponse, Status>>();
 
         match request.into_inner().try_into()? {
@@ -169,10 +199,12 @@ impl Protocol for ProtocolImpl {
                     },
                 };
 
+                let metrics = self.metrics.clone();
                 tokio::spawn(async move {
                     loop {
                         match consumer.next().await {
                             Err(e) => {
+                                metrics.observe_server_error();
                                 let _ = sender.send(Err(Status::internal(e.to_string())));
 
                                 break;
@@ -213,7 +245,11 @@ impl Protocol for ProtocolImpl {
                     .subscribe_to_program(ctx, &params.name, &params.source)
                     .await
                 {
-                    Err(e) => return Err(Status::internal(e.to_string())),
+                    Err(e) => {
+                        self.metrics.observe_server_error();
+                        return Err(Status::internal(e.to_string()));
+                    }
+
                     Ok(mut stream) => {
                         tokio::spawn(async move {
                             loop {
@@ -263,9 +299,13 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::ListProgramsRequest>,
     ) -> Result<Response<protocol::ListProgramsResponse>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
+        let ctx = self.try_get_request_context_from(&request)?;
         match self.sub.list_programs(ctx).await {
-            Err(e) => Err(Status::internal(e.to_string())),
+            Err(e) => {
+                self.metrics.observe_server_error();
+                Err(Status::internal(e.to_string()))
+            }
+
             Ok(programs) => Ok(Response::new(ProgramListed { programs }.into())),
         }
     }
@@ -274,10 +314,14 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::ProgramStatsRequest>,
     ) -> Result<Response<protocol::ProgramStatsResponse>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
+        let ctx = self.try_get_request_context_from(&request)?;
         let params: GetProgramStats = request.into_inner().into();
         match self.sub.program_stats(ctx, params.id).await {
-            Err(e) => Err(Status::internal(e.to_string())),
+            Err(e) => {
+                self.metrics.observe_server_error();
+                Err(Status::internal(e.to_string()))
+            }
+
             Ok(stats) => {
                 if let Some(stats) = stats {
                     Ok(Response::new(ProgramObtained::Success(stats).into()))
@@ -292,9 +336,10 @@ impl Protocol for ProtocolImpl {
         &self,
         request: Request<protocol::StopProgramRequest>,
     ) -> Result<Response<protocol::StopProgramResponse>, Status> {
-        let ctx = try_get_request_context_from(&request)?;
+        let ctx = self.try_get_request_context_from(&request)?;
         let params: KillProgram = request.into_inner().into();
         if let Err(e) = self.sub.program_stop(ctx, params.id).await {
+            self.metrics.observe_server_error();
             return Err(Status::internal(e.to_string()));
         }
 
