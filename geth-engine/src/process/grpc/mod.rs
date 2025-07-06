@@ -1,7 +1,7 @@
 use std::{pin::Pin, sync::Arc};
 
 use tokio::sync::Notify;
-use tonic::transport::Server;
+use tonic::{transport::Server, Code, Status};
 
 use geth_grpc::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
@@ -23,8 +23,7 @@ pub async fn start_server(
         .parse()
         .unwrap();
 
-    let metrics = get_metrics();
-    let protocols = protocol::ProtocolImpl::connect(metrics, client).await?;
+    let protocols = protocol::ProtocolImpl::connect(client).await?;
 
     tracing::info!(%addr, db = options.db, "GethDB is listening",);
 
@@ -117,10 +116,41 @@ where
 
         Box::pin(async move {
             let resp = inner.call(req).await?;
+            if let Some(status) = Status::from_header_map(resp.headers()) {
+                if status.code() != Code::Ok {
+                    if is_client_error(status.code()) {
+                        metrics.observe_client_error();
+                    } else if is_server_error(status.code()) {
+                        metrics.observe_server_error();
+                    }
+                }
+            }
 
             Ok(resp)
         })
     }
 }
 
-fn on_status_error(metrics: &Metrics, status: tonic::Status) {}
+fn is_client_error(code: Code) -> bool {
+    matches!(
+        code,
+        Code::InvalidArgument
+            | Code::NotFound
+            | Code::AlreadyExists
+            | Code::PermissionDenied
+            | Code::FailedPrecondition
+            | Code::Unauthenticated
+            | Code::OutOfRange
+    )
+}
+
+fn is_server_error(code: Code) -> bool {
+    matches!(
+        code,
+        Code::Internal
+            | Code::Unavailable
+            | Code::DataLoss
+            | Code::Unimplemented
+            | Code::ResourceExhausted
+    )
+}
