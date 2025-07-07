@@ -13,6 +13,17 @@ pub struct Telemetry {
     #[arg(long = "telemetry-endpoint", env = "GETH_TELEMETRY_ENDPOINT")]
     pub endpoint: Option<String>,
 
+    /// OpenTelemetry compatible traces endpoint where telemetry data is sent
+    #[arg(
+        long = "telemetry-traces-endpoint",
+        env = "GETH_TELEMETRY_TRACES_ENDPOINT"
+    )]
+    pub traces_endpoint: Option<String>,
+
+    /// OpenTelemetry compatible logs endpoint where telemetry data is sent
+    #[arg(long = "telemetry-logs-endpoint", env = "GETH_TELEMETRY_LOGS_ENDPOINT")]
+    pub logs_endpoint: Option<String>,
+
     /// OpenTelemetry compatible metrics endpoint where telemetry data is sent
     #[arg(
         long = "telemetry-metrics-endpoint",

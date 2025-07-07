@@ -155,7 +155,12 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         ))
         .build();
 
-    let tracer_layer = if let Some(endpoint) = &options.telemetry.endpoint {
+    let tracer_layer = if let Some(endpoint) = options
+        .telemetry
+        .traces_endpoint
+        .as_ref()
+        .or(options.telemetry.endpoint.as_ref())
+    {
         // TLS must be configured to use gRPC
         let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
             // .with_tonic()
@@ -179,7 +184,12 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         None
     };
 
-    let log_layer = if let Some(endpoint) = &options.telemetry.endpoint {
+    let log_layer = if let Some(endpoint) = options
+        .telemetry
+        .logs_endpoint
+        .as_ref()
+        .or(options.telemetry.endpoint.as_ref())
+    {
         let log_exporter = opentelemetry_otlp::LogExporter::builder()
             .with_http()
             .with_endpoint(format!("{endpoint}/ingest/otlp/v1/logs"))
