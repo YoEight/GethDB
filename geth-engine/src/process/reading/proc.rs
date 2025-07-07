@@ -2,6 +2,7 @@ use std::cmp::min;
 use std::mem;
 
 use crate::get_chunk_container;
+use crate::metrics::get_metrics;
 use crate::process::messages::{ReadRequests, ReadResponses};
 use crate::process::{Item, ProcessEnv, Raw};
 use geth_common::ReadCompleted;
@@ -11,6 +12,7 @@ use geth_mikoshi::wal::LogReader;
 pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
     let reader = LogReader::new(get_chunk_container());
     let index_client = env.new_index_client()?;
+    let metrics = get_metrics();
 
     while let Some(item) = env.recv() {
         match item {
@@ -48,6 +50,9 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                         let mut no_entries = true;
                         while let Some(entry) = env.block_on(index_stream.next())? {
                             let entry = reader.read_at(entry.position)?;
+
+                            metrics.observe_read_log_entry(&entry);
+
                             batch.push(entry);
                             no_entries = false;
 
@@ -87,6 +92,7 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                         );
 
                         let _ = stream.sender.send(ReadResponses::Error.into());
+                        metrics.observe_read_error();
                     }
 
                     continue;
@@ -101,6 +107,9 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
             Item::Mail(mail) => {
                 if let Ok(ReadRequests::ReadAt { position }) = mail.payload.try_into() {
                     let entry = reader.read_at(position)?;
+
+                    metrics.observe_read_log_entry(&entry);
+
                     env.client.reply(
                         mail.context,
                         mail.origin,

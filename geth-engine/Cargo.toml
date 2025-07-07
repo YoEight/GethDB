@@ -45,12 +45,13 @@ features = ["trace", "logs", "grpc-tonic"]
 
 [dependencies]
 tonic = "0.13"
+tower = "0.5"
 tracing = "0.1"
 tracing-opentelemetry = "0.31"
 opentelemetry = "0.30"
 opentelemetry_sdk = "0.30"
 opentelemetry-appender-tracing = "0.30"
-
+http = "1"
 bytes = "1"
 eyre = "0.6"
 chrono = "0.4"
@@ -59,6 +60,7 @@ moka = "0.11"
 async-trait = "0.1.71"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
+sysinfo = "0.35"
 
 [build-dependencies]
 built = { version = "0.8", features = ["git2"] }

@@ -8,9 +8,10 @@ use geth_mikoshi::{
     wal::{LogEntries, LogEntry},
 };
 
-use crate::names::types::STREAM_DELETED;
+use crate::{metrics::Metrics, names::types::STREAM_DELETED};
 
-pub struct ProposeEntries {
+pub(crate) struct ProposeEntries {
+    pub metrics: Metrics,
     pub indexes: Vec<BlockEntry>,
     pub committed: Vec<Record>,
     events: vec::IntoIter<Propose>,
@@ -18,20 +19,6 @@ pub struct ProposeEntries {
     ident: String,
     key: u64,
     pub revision: u64,
-}
-
-impl Default for ProposeEntries {
-    fn default() -> Self {
-        Self {
-            indexes: vec![],
-            committed: Vec::with_capacity(32),
-            events: vec![].into_iter(),
-            ident: String::default(),
-            current: None,
-            key: 0,
-            revision: 0,
-        }
-    }
 }
 
 impl LogEntries for ProposeEntries {
@@ -70,6 +57,7 @@ impl LogEntries for ProposeEntries {
         buffer.put_u16_le(self.ident.len() as u16);
         buffer.extend_from_slice(self.ident.as_bytes());
         propose_serialize(event, buffer);
+        self.metrics.observe_written_propose_event(self);
     }
 
     fn expected_count(&self) -> usize {
@@ -93,10 +81,11 @@ impl LogEntries for ProposeEntries {
 }
 
 impl ProposeEntries {
-    pub fn new(ident: String, start_revision: u64, events: Vec<Propose>) -> Self {
+    pub fn new(metrics: Metrics, ident: String, start_revision: u64, events: Vec<Propose>) -> Self {
         let key = mikoshi_hash(&ident);
 
         Self {
+            metrics,
             indexes: vec![],
             committed: vec![],
             events: events.into_iter(),

@@ -1,5 +1,6 @@
 use crate::domain::index::CurrentRevision;
 use crate::get_chunk_container;
+use crate::metrics::get_metrics;
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{WriteRequests, WriteResponses};
 use crate::process::{Item, ProcessEnv, Raw};
@@ -15,6 +16,7 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
     let mut log_writer = LogWriter::load(get_chunk_container(), BytesMut::with_capacity(4_096))?;
     let index_client = env.new_index_client()?;
     let sub_client = env.new_subscription_client()?;
+    let metrics = get_metrics();
 
     while let Some(item) = env.recv() {
         match item {
@@ -81,12 +83,14 @@ pub fn run(mut env: ProcessEnv<Raw>) -> eyre::Result<()> {
                     }
 
                     let revision = current_revision.next_revision();
-                    let mut entries = ProposeEntries::new(ident, revision, events);
+                    let mut entries = ProposeEntries::new(metrics.clone(), ident, revision, events);
                     let span = tracing::info_span!("append_entries_to_log", correlation = %mail.context.correlation);
 
                     match span.in_scope(|| log_writer.append(&mut entries)) {
                         Err(e) => {
                             tracing::error!("error when appending to stream: {}", e);
+                            metrics.observe_write_error();
+
                             env.client.reply(
                                 mail.context,
                                 mail.origin,
