@@ -60,6 +60,7 @@ moka = "0.11"
 async-trait = "0.1.71"
 serde = { version = "1", features = ["derive"] }
 base64 = "0.22"
+sysinfo = "0.35"
 
 [build-dependencies]
 built = { version = "0.8", features = ["git2"] }
