@@ -41,7 +41,7 @@ features = ["env-filter"]
 
 [dependencies.opentelemetry-otlp]
 version = "0.30"
-features = ["trace", "logs", "grpc-tonic"]
+features = ["trace", "logs", "grpc-tonic", "metrics"]
 
 [dependencies]
 tonic = "0.13"

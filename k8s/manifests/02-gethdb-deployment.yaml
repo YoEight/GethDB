@@ -26,6 +26,9 @@ spec:
 
             - name: GETH_TELEMETRY_METRICS_ENDPOINT
               value: "http://otel-collector-service:4318"
+
+            - name: GETH_TELEMETRY_METRICS_COLLECTION_INTERVAL_IN_SECS
+              value: "3"
 ---
 apiVersion: v1
 kind: Service

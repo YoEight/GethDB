@@ -2,6 +2,7 @@ use clap::Parser;
 
 #[derive(Parser, Debug, Clone, Default)]
 pub struct Telemetry {
+    /// Disable telemetry collection all together.
     #[arg(long = "telemetry-disabled", env = "GETH_TELEMETRY_DISABLED")]
     pub disabled: bool,
 
@@ -26,6 +27,14 @@ pub struct Telemetry {
         env = "GETH_TELEMETRY_METRICS_ENDPOINT"
     )]
     pub metrics_endpoint: Option<String>,
+
+    /// How often telemetry metrics are collected, in seconds
+    #[arg(
+        long = "telemetry-metrics-collection-interval-in-secs",
+        default_value = "60",
+        env = "GETH_TELEMETRY_METRICS_COLLECTION_INTERVAL_IN_SECS"
+    )]
+    pub metrics_collection_interval_in_secs: u64,
 
     #[arg(long = "telemetry-event-filters")]
     pub event_filters: Vec<String>,
