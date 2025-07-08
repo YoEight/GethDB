@@ -1,12 +1,8 @@
-use clap::{Args, Parser};
+use clap::Parser;
 
-#[derive(Args, Debug, Clone, Default)]
+#[derive(Parser, Debug, Clone, Default)]
 pub struct Telemetry {
-    #[arg(
-        long = "telemetry-disabled",
-        default_value = "false",
-        env = "GETH_TELEMETRY_DISABLED"
-    )]
+    #[arg(long = "telemetry-disabled", env = "GETH_TELEMETRY_DISABLED")]
     pub disabled: bool,
 
     /// OpenTelemetry compatible endpoint where telemetry data is sent
@@ -55,6 +51,7 @@ pub struct Options {
     #[command(flatten)]
     pub telemetry: Telemetry,
 
+    #[arg(skip)]
     pub disable_grpc: bool,
 }
 
