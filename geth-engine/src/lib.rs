@@ -113,13 +113,8 @@ impl TelemetryHandles {
 }
 
 pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
+    let handles = init_telemetry(options)?;
     configure_metrics();
-
-    let handles = if options.telemetry.disabled {
-        TelemetryHandles::default()
-    } else {
-        init_telemetry(options)?
-    };
 
     let storage = configure_storage(options)?;
     let container = ChunkContainer::load(storage)?;
@@ -142,6 +137,9 @@ pub async fn run_embedded(options: &Options) -> eyre::Result<EmbeddedClient> {
 
 fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
     let mut handles = TelemetryHandles::default();
+    let mut tracer_layer = None;
+    let mut log_layer = None;
+
     let resource = Resource::builder()
         .with_service_name("geth-engine")
         .with_attribute(KeyValue::new("service.version", env!("CARGO_PKG_VERSION")))
@@ -155,84 +153,92 @@ fn init_telemetry(options: &Options) -> eyre::Result<TelemetryHandles> {
         ))
         .build();
 
-    let tracer_layer = if let Some(endpoint) = options
-        .telemetry
-        .traces_endpoint
-        .as_ref()
-        .or(options.telemetry.endpoint.as_ref())
-    {
-        // TLS must be configured to use gRPC
-        let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
-            // .with_tonic()
-            // .with_endpoint(options.telemetry_endpoint.clone())
-            .with_http()
-            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/traces"))
-            .build()?;
+    if !options.telemetry.disabled {
+        tracer_layer = if let Some(endpoint) = options
+            .telemetry
+            .traces_endpoint
+            .as_ref()
+            .or(options.telemetry.endpoint.as_ref())
+        {
+            // TLS must be configured to use gRPC
+            let otlp_exporter = opentelemetry_otlp::SpanExporter::builder()
+                // .with_tonic()
+                // .with_endpoint(options.telemetry_endpoint.clone())
+                .with_http()
+                .with_endpoint(format!("{endpoint}/ingest/otlp/v1/traces"))
+                .build()?;
 
-        let tracer_provider = SdkTracerProvider::builder()
-            .with_batch_exporter(otlp_exporter)
-            .with_resource(resource.clone())
-            .build();
+            let tracer_provider = SdkTracerProvider::builder()
+                .with_batch_exporter(otlp_exporter)
+                .with_resource(resource.clone())
+                .build();
 
-        let tracer = tracer_provider.tracer("geth-engine");
-        opentelemetry::global::set_tracer_provider(tracer_provider.clone());
+            let tracer = tracer_provider.tracer("geth-engine");
+            opentelemetry::global::set_tracer_provider(tracer_provider.clone());
 
-        handles.traces = Some(tracer_provider);
+            handles.traces = Some(tracer_provider);
 
-        Some(OpenTelemetryLayer::new(tracer).with_filter(filter_fn(|metadata| metadata.is_span())))
-    } else {
-        None
-    };
+            Some(
+                OpenTelemetryLayer::new(tracer)
+                    .with_filter(filter_fn(|metadata| metadata.is_span())),
+            )
+        } else {
+            None
+        };
 
-    let log_layer = if let Some(endpoint) = options
-        .telemetry
-        .logs_endpoint
-        .as_ref()
-        .or(options.telemetry.endpoint.as_ref())
-    {
-        let log_exporter = opentelemetry_otlp::LogExporter::builder()
-            .with_http()
-            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/logs"))
-            .build()?;
+        log_layer = if let Some(endpoint) = options
+            .telemetry
+            .logs_endpoint
+            .as_ref()
+            .or(options.telemetry.endpoint.as_ref())
+        {
+            let log_exporter = opentelemetry_otlp::LogExporter::builder()
+                .with_http()
+                .with_endpoint(format!("{endpoint}/ingest/otlp/v1/logs"))
+                .build()?;
 
-        let log_provider = SdkLoggerProvider::builder()
-            .with_batch_exporter(log_exporter)
-            .with_resource(resource.clone())
-            .build();
+            let log_provider = SdkLoggerProvider::builder()
+                .with_batch_exporter(log_exporter)
+                .with_resource(resource.clone())
+                .build();
 
-        handles.logs = Some(log_provider.clone());
+            handles.logs = Some(log_provider.clone());
 
-        Some(OpenTelemetryTracingBridge::new(&log_provider))
-    } else {
-        None
-    };
+            Some(OpenTelemetryTracingBridge::new(&log_provider))
+        } else {
+            None
+        };
 
-    if let Some(endpoint) = options
-        .telemetry
-        .metrics_endpoint
-        .as_ref()
-        .or(options.telemetry.endpoint.as_ref())
-    {
-        let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
-            .with_http()
-            .with_endpoint(format!("{endpoint}/ingest/otlp/v1/metrics"))
-            .build()?;
+        if let Some(endpoint) = options
+            .telemetry
+            .metrics_endpoint
+            .as_ref()
+            .or(options.telemetry.endpoint.as_ref())
+            .cloned()
+        {
+            let metric_exporter = opentelemetry_otlp::MetricExporter::builder()
+                .with_http()
+                .with_endpoint(format!("{endpoint}/v1/metrics"))
+                .build()?;
 
-        let reader = PeriodicReader::builder(metric_exporter)
-            .with_interval(std::time::Duration::from_secs(10))
-            .build();
+            let reader = PeriodicReader::builder(metric_exporter)
+                .with_interval(std::time::Duration::from_secs(
+                    options.telemetry.metrics_collection_interval_in_secs,
+                ))
+                .build();
 
-        let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
-            .with_reader(reader)
-            .with_resource(resource)
-            .build();
+            let meter_provider = opentelemetry_sdk::metrics::SdkMeterProvider::builder()
+                .with_reader(reader)
+                .with_resource(resource)
+                .build();
 
-        handles.metrics = Some(meter_provider.clone());
+            handles.metrics = Some(meter_provider.clone());
 
-        opentelemetry::global::set_meter_provider(meter_provider);
+            opentelemetry::global::set_meter_provider(meter_provider);
+        }
     }
 
-    let fmt_layer = if options.telemetry.endpoint.is_none() {
+    let fmt_layer = if options.telemetry.disabled || options.telemetry.endpoint.is_none() {
         let layer = tracing_subscriber::fmt::layer()
             .with_file(true)
             .with_line_number(true)
