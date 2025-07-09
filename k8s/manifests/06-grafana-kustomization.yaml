@@ -1,0 +1,15 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+namespace: geth-app
+
+resources:
+  - 06-grafana-deployment.yaml
+
+configMapGenerator:
+  - name: geth-engine-dashboard
+    files:
+      - geth-engine-dashboard.json=dashboards/geth-engine.json
+    options:
+      labels:
+        grafana_dashboard: "1"

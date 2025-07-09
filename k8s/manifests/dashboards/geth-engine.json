@@ -1,0 +1,468 @@
+{
+    "dashboard": {
+        "id": null,
+        "title": "Geth Engine Metrics",
+        "tags": [
+            "geth",
+            "database"
+        ],
+        "timezone": "browser",
+        "refresh": "5s",
+        "time": {
+            "from": "now-1h",
+            "to": "now"
+        },
+        "panels": [
+            {
+                "id": 1,
+                "title": "System Overview",
+                "type": "row",
+                "collapsed": false,
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 0
+                }
+            },
+            {
+                "id": 2,
+                "title": "CPU Usage",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "geth_sys_cpu_usage_percent",
+                        "legendFormat": "CPU Usage %",
+                        "refId": "A"
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "percent",
+                        "min": 0,
+                        "max": 100,
+                        "thresholds": {
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 90
+                                }
+                            ]
+                        }
+                    }
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 0,
+                    "y": 1
+                }
+            },
+            {
+                "id": 3,
+                "title": "Memory Usage",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "geth_sys_memory_used_bytes / geth_sys_memory_total_bytes * 100",
+                        "legendFormat": "Memory Usage %",
+                        "refId": "A"
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "percent",
+                        "min": 0,
+                        "max": 100,
+                        "thresholds": {
+                            "steps": [
+                                {
+                                    "color": "green",
+                                    "value": null
+                                },
+                                {
+                                    "color": "yellow",
+                                    "value": 70
+                                },
+                                {
+                                    "color": "red",
+                                    "value": 90
+                                }
+                            ]
+                        }
+                    }
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 6,
+                    "y": 1
+                }
+            },
+            {
+                "id": 4,
+                "title": "Memory Details",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "geth_sys_memory_used_bytes",
+                        "legendFormat": "Used",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "geth_sys_memory_total_bytes",
+                        "legendFormat": "Total",
+                        "refId": "B"
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "bytes",
+                        "displayName": "${__field.labels.legendFormat}"
+                    }
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 12,
+                    "y": 1
+                }
+            },
+            {
+                "id": 5,
+                "title": "Swap Usage",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "geth_sys_swap_used_bytes",
+                        "legendFormat": "Used",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "geth_sys_swap_total_bytes",
+                        "legendFormat": "Total",
+                        "refId": "B"
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "bytes",
+                        "displayName": "${__field.labels.legendFormat}"
+                    }
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 6,
+                    "x": 18,
+                    "y": 1
+                }
+            },
+            {
+                "id": 6,
+                "title": "I/O Operations",
+                "type": "row",
+                "collapsed": false,
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 9
+                }
+            },
+            {
+                "id": 7,
+                "title": "Read Operations Rate",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "rate(geth_read_entry_entries_total[5m])",
+                        "legendFormat": "Read Entries/sec",
+                        "refId": "A"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "ops",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 8,
+                    "x": 0,
+                    "y": 10
+                }
+            },
+            {
+                "id": 8,
+                "title": "Write Operations Rate",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "rate(geth_write_propose_event_events_total[5m])",
+                        "legendFormat": "Write Events/sec",
+                        "refId": "A"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "ops",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 8,
+                    "x": 8,
+                    "y": 10
+                }
+            },
+            {
+                "id": 9,
+                "title": "Cache Miss Rate",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "rate(geth_index_cache_miss_misses_total[5m])",
+                        "legendFormat": "Cache Misses/sec",
+                        "refId": "A"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "ops",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 8,
+                    "x": 16,
+                    "y": 10
+                }
+            },
+            {
+                "id": 10,
+                "title": "I/O Size Analysis",
+                "type": "row",
+                "collapsed": false,
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 18
+                }
+            },
+            {
+                "id": 11,
+                "title": "Read Size Distribution",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.50, rate(geth_read_size_bytes_bucket[5m]))",
+                        "legendFormat": "50th percentile",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.90, rate(geth_read_size_bytes_bucket[5m]))",
+                        "legendFormat": "90th percentile",
+                        "refId": "B"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.99, rate(geth_read_size_bytes_bucket[5m]))",
+                        "legendFormat": "99th percentile",
+                        "refId": "C"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "bytes",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 19
+                }
+            },
+            {
+                "id": 12,
+                "title": "Write Size Distribution",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "histogram_quantile(0.50, rate(geth_write_size_bytes_bucket[5m]))",
+                        "legendFormat": "50th percentile",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.90, rate(geth_write_size_bytes_bucket[5m]))",
+                        "legendFormat": "90th percentile",
+                        "refId": "B"
+                    },
+                    {
+                        "expr": "histogram_quantile(0.99, rate(geth_write_size_bytes_bucket[5m]))",
+                        "legendFormat": "99th percentile",
+                        "refId": "C"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "bytes",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 19
+                }
+            },
+            {
+                "id": 13,
+                "title": "Average I/O Sizes",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "rate(geth_read_size_bytes_sum[5m]) / rate(geth_read_size_bytes_count[5m])",
+                        "legendFormat": "Average Read Size",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "rate(geth_write_size_bytes_sum[5m]) / rate(geth_write_size_bytes_count[5m])",
+                        "legendFormat": "Average Write Size",
+                        "refId": "B"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "bytes",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 0,
+                    "y": 27
+                }
+            },
+            {
+                "id": 14,
+                "title": "I/O Throughput",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "rate(geth_read_size_bytes_sum[5m])",
+                        "legendFormat": "Read Throughput",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "rate(geth_write_size_bytes_sum[5m])",
+                        "legendFormat": "Write Throughput",
+                        "refId": "B"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "Bps",
+                        "min": 0
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 12,
+                    "x": 12,
+                    "y": 27
+                }
+            },
+            {
+                "id": 15,
+                "title": "Summary Stats",
+                "type": "row",
+                "collapsed": false,
+                "gridPos": {
+                    "h": 1,
+                    "w": 24,
+                    "x": 0,
+                    "y": 35
+                }
+            },
+            {
+                "id": 16,
+                "title": "Total Operations",
+                "type": "stat",
+                "targets": [
+                    {
+                        "expr": "geth_read_entry_entries_total",
+                        "legendFormat": "Total Reads",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "geth_write_propose_event_events_total",
+                        "legendFormat": "Total Writes",
+                        "refId": "B"
+                    },
+                    {
+                        "expr": "geth_index_cache_miss_misses_total",
+                        "legendFormat": "Cache Misses",
+                        "refId": "C"
+                    }
+                ],
+                "fieldConfig": {
+                    "defaults": {
+                        "unit": "short",
+                        "displayName": "${__field.labels.legendFormat}"
+                    }
+                },
+                "gridPos": {
+                    "h": 8,
+                    "w": 8,
+                    "x": 0,
+                    "y": 36
+                }
+            },
+            {
+                "id": 17,
+                "title": "System Resource Timeline",
+                "type": "graph",
+                "targets": [
+                    {
+                        "expr": "geth_sys_cpu_usage_percent",
+                        "legendFormat": "CPU Usage %",
+                        "refId": "A"
+                    },
+                    {
+                        "expr": "geth_sys_memory_used_bytes / geth_sys_memory_total_bytes * 100",
+                        "legendFormat": "Memory Usage %",
+                        "refId": "B"
+                    }
+                ],
+                "yAxes": [
+                    {
+                        "unit": "percent",
+                        "min": 0,
+                        "max": 100
+                    }
+                ],
+                "gridPos": {
+                    "h": 8,
+                    "w": 16,
+                    "x": 8,
+                    "y": 36
+                }
+            }
+        ]
+    }
+}
