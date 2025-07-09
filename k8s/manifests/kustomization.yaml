@@ -4,6 +4,11 @@ kind: Kustomization
 namespace: geth-app
 
 resources:
+  - 01-namespace.yaml
+  - 02-gethdb-deployment.yaml
+  - 03-seq-deployment.yaml
+  - 04-otel-collector-deployment.yaml
+  - 05-prometheus-deployment.yaml
   - 06-grafana-deployment.yaml
 
 configMapGenerator:
