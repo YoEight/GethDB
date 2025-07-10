@@ -69,6 +69,16 @@ kubectl port-forward -n geth-app service/seq-service 5341:80
 ```
 The Seq UI will be available at http://localhost:5341
 
+The configuration also includes an OpenTelemetry collector for metrics ingestion, a Prometheus aggregator for data storage and querying, and a Grafana instance pre-configured with a dashboard dedicated to GethDB metrics visualization.
+
+## Metrics and Monitoring
+
+GethDB exposes comprehensive Prometheus-format metrics that provide detailed insights into system performance, I/O operations, resource utilization, and cache efficiency. These metrics include system-level measurements such as CPU and memory usage, detailed I/O operation tracking with histogram distributions for read/write sizes, and performance indicators like cache miss rates. The metrics are designed to give operators full visibility into GethDB's operational health and performance characteristics.
+
+For complete metric definitions, usage examples, and alerting recommendations, see [METRICS.md](./METRICS.md).
+
+A pre-configured Grafana dashboard is available at [`./k8s/manifests/dashboards/geth-engine.json`](./k8s/manifests/dashboards/geth-engine.json) that visualizes all key metrics with organized panels for system overview, I/O operations analysis, and performance monitoring.
+
 ## Examples
 To quickly see how to interact with GethDB, use the `geth-quickstart` project, which is configured to work with any GethDB node running on `localhost:2113`. Currently, only a Rust client is available, but more clients will be added later.
 
