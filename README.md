@@ -55,7 +55,7 @@ The project includes an example configuration for deploying a GethDB node in Kub
 
 To deploy the application (assuming you have Kubernetes properly configured on your machine):
 ```
-kubectl apply -f k8s/manifests/
+kubectl apply -k k8s/manifests/
 ```
 
 To test the application locally, forward the port to your machine:
