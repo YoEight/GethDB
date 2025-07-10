@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use geth_client::{
     Client, ContentType, Direction, EndPoint, ExpectedRevision, GrpcClient, Propose, Revision,
 };
@@ -17,29 +19,36 @@ async fn main() -> eyre::Result<()> {
     })
     .await?;
 
-    let mut proposes = Vec::new();
+    let count = 1_000;
 
-    for i in 0..10 {
-        proposes.push(Propose {
-            id: Uuid::new_v4(),
-            content_type: ContentType::Json,
-            class: "foobar".to_string(),
-            data: serde_json::to_vec(&Foobar { value: 10 * i })?.into(),
-        });
-    }
+    for i in 0..count {
+        let mut proposes = Vec::new();
 
-    client
-        .append_stream("baz", ExpectedRevision::Any, proposes)
-        .await?
-        .success()?;
+        for i in 0..10 {
+            proposes.push(Propose {
+                id: Uuid::new_v4(),
+                content_type: ContentType::Json,
+                class: "foobar".to_string(),
+                data: serde_json::to_vec(&Foobar { value: 10 * i })?.into(),
+            });
+        }
 
-    let mut stream = client
-        .read_stream("baz", Direction::Forward, Revision::Start, u64::MAX)
-        .await?
-        .success()?;
+        client
+            .append_stream("baz", ExpectedRevision::Any, proposes)
+            .await?
+            .success()?;
 
-    while let Some(event) = stream.next().await? {
-        println!("{event:?}");
+        let mut stream = client
+            .read_stream("baz", Direction::Forward, Revision::Start, u64::MAX)
+            .await?
+            .success()?;
+
+        while let Some(event) = stream.next().await? {
+            println!("{event:?}");
+        }
+
+        println!("loop {i}/{count} done");
+        tokio::time::sleep(Duration::from_secs(1)).await;
     }
 
     Ok(())
