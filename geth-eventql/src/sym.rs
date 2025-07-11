@@ -87,7 +87,26 @@ impl Display for Comparison {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone)]
+pub enum Literal {
+    String(String),
+    Natural(i64),
+    Float(f64),
+    Bool(bool),
+}
+
+impl Display for Literal {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Literal::String(s) => write!(f, "\"{s}\""),
+            Literal::Natural(n) => write!(f, "{n}"),
+            Literal::Float(float) => write!(f, "{float}"),
+            Literal::Bool(b) => write!(f, "{b}"),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub enum Sym {
     EOF,
     Id(String),
@@ -95,6 +114,7 @@ pub enum Sym {
     Keyword(Keyword),
     Logical(Logical),
     Comparison(Comparison),
+    Literal(Literal),
     Whitespace,
     Dot,
     LParens,
@@ -118,6 +138,7 @@ impl Display for Sym {
             Sym::Keyword(keyword) => write!(f, "{keyword}"),
             Sym::Logical(logical) => write!(f, "{logical}"),
             Sym::Comparison(comparison) => write!(f, "{comparison}"),
+            Sym::Literal(literal) => write!(f, "{literal}"),
             Sym::Whitespace => write!(f, " "),
             Sym::Dot => write!(f, "."),
             Sym::LParens => write!(f, "("),
