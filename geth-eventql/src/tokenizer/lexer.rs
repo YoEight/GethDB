@@ -133,6 +133,66 @@ impl<'a> Lexer<'a> {
                     }
                 }
 
+                _ if c.is_ascii_digit() => {
+                    let mut num = String::new();
+
+                    num.push(c);
+                    self.text.shift();
+
+                    let mut is_float = false;
+                    while let Some(ch) = self.text.look_ahead() {
+                        if ch == '.' {
+                            if is_float {
+                                eyre::bail!("{}: malformed floating number", self.text.pos());
+                            }
+
+                            is_float = true;
+                        } else if !ch.is_ascii_digit() {
+                            break;
+                        }
+
+                        num.push(ch);
+                        self.text.shift();
+                    }
+
+                    if is_float {
+                        match num.parse::<f64>() {
+                            Ok(num) => return Ok(Some(Sym::Literal(Literal::Float(num)))),
+                            Err(e) => {
+                                eyre::bail!("{}: malformed floating number: {e}", self.text.pos())
+                            }
+                        }
+                    }
+
+                    match num.parse::<i64>() {
+                        Ok(num) => Ok(Some(Sym::Literal(Literal::Integral(num)))),
+                        Err(e) => {
+                            eyre::bail!("{}: malformed integral number: {e}", self.text.pos())
+                        }
+                    }
+                }
+
+                '"' | '\'' => {
+                    let mut string = String::new();
+
+                    self.text.shift();
+
+                    while let Some(ch) = self.text.look_ahead() {
+                        if ch == c {
+                            return self.consume_and_return(Sym::Literal(Literal::String(string)));
+                        }
+
+                        if ch == '\n' {
+                            eyre::bail!("{}: string literal is malformed", self.text.pos());
+                        }
+
+                        string.push(ch);
+                        self.text.shift();
+                    }
+
+                    eyre::bail!("incomplete string literal");
+                }
+
                 _ => eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos()),
             },
         }
