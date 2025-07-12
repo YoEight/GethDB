@@ -110,7 +110,6 @@ impl Display for Literal {
 pub enum Sym {
     EOF,
     Id(String),
-    Type(String),
     Keyword(Keyword),
     Logical(Logical),
     Comparison(Comparison),
@@ -134,7 +133,6 @@ impl Display for Sym {
         match self {
             Sym::EOF => write!(f, "<eof>"),
             Sym::Id(id) => write!(f, "{id}"),
-            Sym::Type(typ) => write!(f, "{typ}"),
             Sym::Keyword(keyword) => write!(f, "{keyword}"),
             Sym::Logical(logical) => write!(f, "{logical}"),
             Sym::Comparison(comparison) => write!(f, "{comparison}"),
