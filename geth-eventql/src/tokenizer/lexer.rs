@@ -1,6 +1,6 @@
 use crate::{
     sym::{Comparison, Keyword, Literal, Sym},
-    tokenizer::text::Text,
+    tokenizer::{Pos, text::Text},
 };
 
 pub struct Lexer<'a> {
@@ -11,6 +11,10 @@ impl<'a> Lexer<'a> {
     fn consume_and_return(&mut self, sym: Sym) -> eyre::Result<Option<Sym>> {
         self.text.shift();
         Ok(Some(sym))
+    }
+
+    pub fn pos(&self) -> Pos {
+        self.text.pos()
     }
 
     pub fn next_sym(&mut self) -> eyre::Result<Option<Sym>> {
@@ -133,68 +137,82 @@ impl<'a> Lexer<'a> {
                     }
                 }
 
-                _ if c.is_ascii_digit() => {
-                    let mut num = String::new();
+                _ if c.is_ascii_digit() || c == '-' => self.parse_integer_or_float(),
 
-                    num.push(c);
-                    self.text.shift();
-
-                    let mut is_float = false;
-                    while let Some(ch) = self.text.look_ahead() {
-                        if ch == '.' {
-                            if is_float {
-                                eyre::bail!("{}: malformed floating number", self.text.pos());
-                            }
-
-                            is_float = true;
-                        } else if !ch.is_ascii_digit() {
-                            break;
-                        }
-
-                        num.push(ch);
-                        self.text.shift();
-                    }
-
-                    if is_float {
-                        match num.parse::<f64>() {
-                            Ok(num) => return Ok(Some(Sym::Literal(Literal::Float(num)))),
-                            Err(e) => {
-                                eyre::bail!("{}: malformed floating number: {e}", self.text.pos())
-                            }
-                        }
-                    }
-
-                    match num.parse::<i64>() {
-                        Ok(num) => Ok(Some(Sym::Literal(Literal::Integral(num)))),
-                        Err(e) => {
-                            eyre::bail!("{}: malformed integral number: {e}", self.text.pos())
-                        }
-                    }
-                }
-
-                '"' | '\'' => {
-                    let mut string = String::new();
-
-                    self.text.shift();
-
-                    while let Some(ch) = self.text.look_ahead() {
-                        if ch == c {
-                            return self.consume_and_return(Sym::Literal(Literal::String(string)));
-                        }
-
-                        if ch == '\n' {
-                            eyre::bail!("{}: string literal is malformed", self.text.pos());
-                        }
-
-                        string.push(ch);
-                        self.text.shift();
-                    }
-
-                    eyre::bail!("incomplete string literal");
-                }
+                '"' | '\'' => self.parse_string_literal(),
 
                 _ => eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos()),
             },
         }
+    }
+
+    fn shift_or_bail(&mut self) -> eyre::Result<char> {
+        if let Some(c) = self.text.shift() {
+            return Ok(c);
+        }
+
+        eyre::bail!("unexpected end of query")
+    }
+
+    fn parse_integer_or_float(&mut self) -> eyre::Result<Option<Sym>> {
+        let c = self.shift_or_bail()?;
+        let mut num = String::new();
+
+        num.push(c);
+        self.text.shift();
+
+        let mut is_float = false;
+        while let Some(ch) = self.text.look_ahead() {
+            if ch == '.' {
+                if is_float {
+                    eyre::bail!("{}: malformed floating number", self.text.pos());
+                }
+
+                is_float = true;
+            } else if !ch.is_ascii_digit() {
+                break;
+            }
+
+            num.push(ch);
+            self.text.shift();
+        }
+
+        if is_float {
+            match num.parse::<f64>() {
+                Ok(num) => return Ok(Some(Sym::Literal(Literal::Float(num)))),
+                Err(e) => {
+                    eyre::bail!("{}: malformed floating number: {e}", self.text.pos())
+                }
+            }
+        }
+
+        match num.parse::<i64>() {
+            Ok(num) => Ok(Some(Sym::Literal(Literal::Integral(num)))),
+            Err(e) => {
+                eyre::bail!("{}: malformed integral number: {e}", self.text.pos())
+            }
+        }
+    }
+
+    fn parse_string_literal(&mut self) -> eyre::Result<Option<Sym>> {
+        let opening = self.shift_or_bail()?;
+        let mut string = String::new();
+
+        self.text.shift();
+
+        while let Some(ch) = self.text.look_ahead() {
+            if ch == opening {
+                return self.consume_and_return(Sym::Literal(Literal::String(string)));
+            }
+
+            if ch == '\n' {
+                eyre::bail!("{}: string literal is malformed", self.text.pos());
+            }
+
+            string.push(ch);
+            self.text.shift();
+        }
+
+        eyre::bail!("incomplete string literal");
     }
 }
