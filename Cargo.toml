@@ -12,4 +12,5 @@ members = [
     "geth-node",
     "geth-grpc",
     "geth-quickstart",
+    "geth-eventql",
 ]
