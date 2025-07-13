@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
-mod text;
 mod lexer;
+mod text;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pos {

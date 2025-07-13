@@ -17,7 +17,6 @@ pub enum Keyword {
     Distinct,
     Having,
     As,
-    Contains,
     If,
 }
 
@@ -39,33 +38,18 @@ impl Display for Keyword {
             Keyword::Distinct => write!(f, "DISTINCT"),
             Keyword::Having => write!(f, "HAVING"),
             Keyword::As => write!(f, "AS"),
-            Keyword::Contains => write!(f, "CONTAINS"),
             Keyword::If => write!(f, "IF"),
         }
     }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Logical {
+pub enum Operation {
     And,
     Or,
     Xor,
     Not,
-}
-
-impl Display for Logical {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Logical::And => write!(f, "AND"),
-            Logical::Or => write!(f, "OR"),
-            Logical::Xor => write!(f, "XOR"),
-            Logical::Not => write!(f, "NOT"),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Comparison {
+    Contains,
     Equal,
     NotEqual,
     LessThan,
@@ -74,15 +58,20 @@ pub enum Comparison {
     GreaterThanOrEqual,
 }
 
-impl Display for Comparison {
+impl Display for Operation {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Comparison::Equal => write!(f, "=="),
-            Comparison::NotEqual => write!(f, "!="),
-            Comparison::LessThan => write!(f, "<"),
-            Comparison::GreaterThan => write!(f, ">"),
-            Comparison::LessThanOrEqual => write!(f, "<="),
-            Comparison::GreaterThanOrEqual => write!(f, ">="),
+            Self::And => write!(f, "AND"),
+            Self::Or => write!(f, "OR"),
+            Self::Xor => write!(f, "XOR"),
+            Self::Not => write!(f, "NOT"),
+            Self::Contains => write!(f, "CONTAINS"),
+            Self::Equal => write!(f, "=="),
+            Self::NotEqual => write!(f, "!="),
+            Self::LessThan => write!(f, "<"),
+            Self::GreaterThan => write!(f, ">"),
+            Self::LessThanOrEqual => write!(f, "<="),
+            Self::GreaterThanOrEqual => write!(f, ">="),
         }
     }
 }
@@ -111,8 +100,7 @@ pub enum Sym {
     EOF,
     Id(String),
     Keyword(Keyword),
-    Logical(Logical),
-    Comparison(Comparison),
+    Operation(Operation),
     Literal(Literal),
     Whitespace,
     Dot,
@@ -134,8 +122,7 @@ impl Display for Sym {
             Sym::EOF => write!(f, "<eof>"),
             Sym::Id(id) => write!(f, "{id}"),
             Sym::Keyword(keyword) => write!(f, "{keyword}"),
-            Sym::Logical(logical) => write!(f, "{logical}"),
-            Sym::Comparison(comparison) => write!(f, "{comparison}"),
+            Sym::Operation(op) => write!(f, "{op}"),
             Sym::Literal(literal) => write!(f, "{literal}"),
             Sym::Whitespace => write!(f, " "),
             Sym::Dot => write!(f, "."),

@@ -1,5 +1,5 @@
 use crate::{
-    sym::{Comparison, Keyword, Literal, Sym},
+    sym::{Keyword, Literal, Operation, Sym},
     tokenizer::{Pos, text::Text},
 };
 
@@ -48,11 +48,10 @@ impl<'a> Lexer<'a> {
                     self.text.shift();
 
                     if let Some('=') = self.text.look_ahead() {
-                        return self
-                            .consume_and_return(Sym::Comparison(Comparison::LessThanOrEqual));
+                        return self.consume_and_return(Sym::Operation(Operation::LessThanOrEqual));
                     }
 
-                    self.consume_and_return(Sym::Comparison(Comparison::LessThan))
+                    self.consume_and_return(Sym::Operation(Operation::LessThan))
                 }
 
                 '>' => {
@@ -60,10 +59,10 @@ impl<'a> Lexer<'a> {
 
                     if let Some('=') = self.text.look_ahead() {
                         return self
-                            .consume_and_return(Sym::Comparison(Comparison::GreaterThanOrEqual));
+                            .consume_and_return(Sym::Operation(Operation::GreaterThanOrEqual));
                     }
 
-                    self.consume_and_return(Sym::Comparison(Comparison::GreaterThan))
+                    self.consume_and_return(Sym::Operation(Operation::GreaterThan))
                 }
 
                 '!' => {
@@ -76,7 +75,7 @@ impl<'a> Lexer<'a> {
                     };
 
                     if c == '=' {
-                        return self.consume_and_return(Sym::Comparison(Comparison::NotEqual));
+                        return self.consume_and_return(Sym::Operation(Operation::NotEqual));
                     }
 
                     eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos())
@@ -92,7 +91,7 @@ impl<'a> Lexer<'a> {
                     };
 
                     if c == '=' {
-                        return self.consume_and_return(Sym::Comparison(Comparison::Equal));
+                        return self.consume_and_return(Sym::Operation(Operation::Equal));
                     }
 
                     eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos())
@@ -131,8 +130,12 @@ impl<'a> Lexer<'a> {
                         "distinct" => Ok(Some(Sym::Keyword(Keyword::Distinct))),
                         "having" => Ok(Some(Sym::Keyword(Keyword::Having))),
                         "as" => Ok(Some(Sym::Keyword(Keyword::As))),
-                        "contains" => Ok(Some(Sym::Keyword(Keyword::Contains))),
                         "if" => Ok(Some(Sym::Keyword(Keyword::If))),
+                        "contains" => Ok(Some(Sym::Operation(Operation::Contains))),
+                        "and" => Ok(Some(Sym::Operation(Operation::And))),
+                        "or" => Ok(Some(Sym::Operation(Operation::Or))),
+                        "xor" => Ok(Some(Sym::Operation(Operation::Xor))),
+                        "not" => Ok(Some(Sym::Operation(Operation::Not))),
                         _ => Ok(Some(Sym::Id(ident))),
                     }
                 }
