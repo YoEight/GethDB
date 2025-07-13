@@ -3,6 +3,8 @@ use std::fmt::Display;
 mod lexer;
 mod text;
 
+pub use lexer::Lexer;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Pos {
     line: u64,

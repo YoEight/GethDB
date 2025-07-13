@@ -9,6 +9,14 @@ pub struct Text<'a> {
 }
 
 impl<'a> Text<'a> {
+    pub fn new(query: &'a str) -> Self {
+        Self {
+            inner: query.chars().peekable(),
+            line: 0,
+            col: 0,
+        }
+    }
+
     pub fn shift(&mut self) -> Option<char> {
         let c = self.inner.next()?;
 

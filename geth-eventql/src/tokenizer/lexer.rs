@@ -7,7 +7,17 @@ pub struct Lexer<'a> {
     text: Text<'a>,
 }
 
+impl<'a> From<Text<'a>> for Lexer<'a> {
+    fn from(text: Text<'a>) -> Lexer<'a> {
+        Lexer { text }
+    }
+}
+
 impl<'a> Lexer<'a> {
+    pub fn new(query: &'a str) -> Self {
+        Text::new(query).into()
+    }
+
     fn consume_and_return(&mut self, sym: Sym) -> eyre::Result<Option<Sym>> {
         self.text.shift();
         Ok(Some(sym))

@@ -84,6 +84,19 @@ pub enum Literal {
     Bool(bool),
 }
 
+impl PartialEq for Literal {
+    fn eq(&self, other: &Self) -> bool {
+        match (self, other) {
+            (Self::String(x), Self::String(y)) => x == y,
+            (Self::Integral(x), Self::Integral(y)) => x == y,
+            (Self::Bool(x), Self::Bool(y)) => x == y,
+            _ => false,
+        }
+    }
+}
+
+impl Eq for Literal {}
+
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
@@ -95,9 +108,8 @@ impl Display for Literal {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Sym {
-    EOF,
     Id(String),
     Keyword(Keyword),
     Operation(Operation),
@@ -119,7 +131,6 @@ pub enum Sym {
 impl Display for Sym {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Sym::EOF => write!(f, "<eof>"),
             Sym::Id(id) => write!(f, "{id}"),
             Sym::Keyword(keyword) => write!(f, "{keyword}"),
             Sym::Operation(op) => write!(f, "{op}"),

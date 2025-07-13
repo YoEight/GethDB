@@ -4,7 +4,7 @@ use crate::sym::{Literal, Operation};
 
 pub struct Ast<A> {
     tag: A,
-    from: Vec<From<A>>,
+    sources: Vec<From<A>>,
     predicate: Option<Where<A>>,
     limit: Option<u64>,
     projection: Expr<A>,
