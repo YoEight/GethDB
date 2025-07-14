@@ -191,6 +191,19 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
             })
         }
 
+        Sym::Operation(op) => {
+            state.skip_whitespace()?;
+            let expr = parse_expr(state)?;
+
+            Ok(Expr {
+                tag: pos,
+                value: Value::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+            })
+        }
+
         x => eyre::bail!(
             "{}: expected an expression but got {x} instead",
             state.pos()
