@@ -28,8 +28,8 @@ pub struct From<A> {
 }
 
 pub struct Where<A> {
-    tag: A,
-    expr: Expr<A>,
+    pub tag: A,
+    pub expr: Expr<A>,
 }
 
 pub struct Expr<A> {
