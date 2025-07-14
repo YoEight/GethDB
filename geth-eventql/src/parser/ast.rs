@@ -57,5 +57,5 @@ pub enum Value<A> {
 }
 
 pub struct Record<A> {
-    fields: HashMap<String, Expr<A>>,
+    pub fields: HashMap<String, Expr<A>>,
 }

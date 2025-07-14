@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
@@ -101,6 +103,8 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Where<Pos>> {
     Ok(Where { tag: pos, expr })
 }
 
+// TODO - move the parsing to from the stack to the heap so we could never have stack overflow
+// errors.
 fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
     let pos = state.pos();
 
@@ -124,9 +128,45 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
             })
         }
 
+        Sym::LBrace => {
+            state.skip_whitespace()?;
+
+            let mut fields = HashMap::new();
+
+            while let Some(Sym::Id(id)) = state.look_ahead()? {
+                let id = id.clone();
+                state.shift()?;
+                state.skip_whitespace()?;
+                state.expect(Sym::Colon)?;
+                state.skip_whitespace()?;
+                fields.insert(id, parse_expr(state)?);
+                state.skip_whitespace()?;
+
+                if let Some(Sym::Comma) = state.look_ahead()? {
+                    state.shift()?;
+                    state.skip_whitespace()?;
+                } else {
+                    break;
+                }
+            }
+
+            state.skip_whitespace()?;
+            state.expect(Sym::RBrace)?;
+
+            Ok(Expr {
+                tag: pos,
+                value: Value::Record(Record { fields }),
+            })
+        }
+
         x => eyre::bail!(
             "{}: expected an expression but got {x} instead",
             state.pos()
         ),
     }
+}
+
+fn parse_record(state: &mut ParserState<'_>) -> eyre::Result<Record<Pos>> {
+    state.skip_whitespace()?;
+    todo!()
 }
