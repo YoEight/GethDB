@@ -2,29 +2,29 @@ use std::collections::HashMap;
 
 use crate::sym::{Literal, Operation};
 
-pub struct Ast<A> {
-    tag: A,
-    sources: Vec<From<A>>,
-    predicate: Option<Where<A>>,
-    limit: Option<u64>,
-    projection: Expr<A>,
+pub struct Query<A> {
+    pub tag: A,
+    pub sources: Vec<From<A>>,
+    pub predicate: Option<Where<A>>,
+    pub limit: Option<u64>,
+    pub projection: Expr<A>,
 }
 
 pub enum SourceType<A> {
     Events,
     Subject(String),
-    Subquery(Box<Ast<A>>),
+    Subquery(Box<Query<A>>),
 }
 
 pub struct Source<A> {
-    tag: A,
-    inner: SourceType<A>,
+    pub tag: A,
+    pub inner: SourceType<A>,
 }
 
 pub struct From<A> {
-    tag: A,
-    ident: String,
-    source: Source<A>,
+    pub tag: A,
+    pub ident: String,
+    pub source: Source<A>,
 }
 
 pub struct Where<A> {
@@ -33,8 +33,8 @@ pub struct Where<A> {
 }
 
 pub struct Expr<A> {
-    tag: A,
-    value: Value<A>,
+    pub tag: A,
+    pub value: Value<A>,
 }
 
 pub enum Value<A> {
