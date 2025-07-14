@@ -103,9 +103,13 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Where<Pos>> {
     Ok(Where { tag: pos, expr })
 }
 
-// TODO - move the parsing to from the stack to the heap so we could never have stack overflow
+// TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
 fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
+    // because parse_expr can be call recursively, it's possible in some situations that we could
+    // have dangling whitespaces. To prevent the parser from rejecting the query in that case, it's
+    // better to skip the whitespace before doing anything.
+    state.skip_whitespace()?;
     let pos = state.pos();
 
     match state.shift_or_bail()? {
@@ -115,8 +119,36 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
         }),
 
         Sym::Id(id) => {
-            let mut path = vec![id];
+            if let Some(Sym::LParens) = state.look_ahead()? {
+                state.shift()?;
+                state.skip_whitespace()?;
 
+                let mut params = Vec::new();
+
+                if let Some(sym) = state.look_ahead()? {
+                    if sym != &Sym::RParens {
+                        params.push(parse_expr(state)?);
+                        state.skip_whitespace()?;
+
+                        while let Some(Sym::Comma) = state.look_ahead()? {
+                            state.shift()?;
+                            state.skip_whitespace()?;
+                            params.push(parse_expr(state)?);
+                            state.skip_whitespace()?;
+                        }
+                    }
+                }
+
+                state.skip_whitespace()?;
+                state.expect(Sym::RParens)?;
+
+                return Ok(Expr {
+                    tag: pos,
+                    value: Value::App { fun: id, params },
+                });
+            }
+
+            let mut path = vec![id];
             while let Some(Sym::Dot) = state.look_ahead()? {
                 state.shift()?;
                 path.push(parse_ident(state)?);

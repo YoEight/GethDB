@@ -42,7 +42,7 @@ pub enum Value<A> {
     Path(Vec<String>),
     Record(Record<A>),
     App {
-        fun: Box<Expr<A>>,
+        fun: String,
         params: Vec<Expr<A>>,
     },
     BinaryOp {
