@@ -4,9 +4,9 @@ use crate::sym::{Literal, Operation};
 
 pub struct Query<A> {
     pub tag: A,
-    pub sources: Vec<From<A>>,
+    pub from_stmts: Vec<From<A>>,
     pub predicate: Option<Where<A>>,
-    pub limit: Option<u64>,
+    pub sgl: SGL,
     pub projection: Expr<A>,
 }
 
@@ -45,7 +45,7 @@ pub enum Value<A> {
         fun: String,
         params: Vec<Expr<A>>,
     },
-    BinaryOp {
+    Binary {
         lhs: Box<Expr<A>>,
         op: Operation,
         rhs: Box<Expr<A>>,
@@ -58,4 +58,11 @@ pub enum Value<A> {
 
 pub struct Record<A> {
     pub fields: HashMap<String, Expr<A>>,
+}
+
+pub enum SGL {
+    None,
+    Sort,
+    Group,
+    Limit(u64),
 }

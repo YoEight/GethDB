@@ -18,6 +18,7 @@ pub fn parse(lexer: Lexer<'_>) -> eyre::Result<Query<Pos>> {
 }
 
 fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
+    let pos = state.pos();
     let mut from_stmts = Vec::new();
 
     from_stmts.push(parse_from_statement(state)?);
@@ -28,17 +29,44 @@ fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
         state.skip_whitespace()?;
     }
 
+    state.skip_whitespace()?;
     let predicate = parse_where_clause(state)?;
+    state.skip_whitespace()?;
+    let sgl = parse_sgl(state)?;
+    state.skip_whitespace()?;
 
-    todo!()
+    state.expect(Sym::Keyword(Keyword::Project))?;
+    state.skip_whitespace()?;
+    state.expect(Sym::Keyword(Keyword::Into))?;
+    state.skip_whitespace()?;
+
+    let projection = parse_expr_single(state)?;
+
+    check_projection(&projection)?;
+
+    Ok(Query {
+        tag: pos,
+        from_stmts,
+        predicate,
+        sgl,
+        projection,
+    })
+}
+
+fn check_projection(proj: &Expr<Pos>) -> eyre::Result<()> {
+    match &proj.value {
+        Value::Binary { .. } | Value::Unary { .. } => eyre::bail!(
+            "{}: binary or unary operations are not allowed when projecting a result",
+            proj.tag
+        ),
+        _ => Ok(()),
+    }
 }
 
 fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> {
     state.skip_whitespace()?;
 
     let pos = state.pos();
-    let sym = state.shift_or_bail()?;
-
     state.expect(Sym::Keyword(Keyword::From))?;
     state.skip_whitespace()?;
     let ident = parse_ident(state)?;
@@ -55,9 +83,59 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> 
     })
 }
 
-fn parse_ident(state: &mut ParserState<'_>) -> eyre::Result<String> {
-    let sym = state.shift_or_bail()?;
+fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<SGL> {
+    let pos = state.pos();
+    if let Some(sym) = state.look_ahead()? {
+        return match sym {
+            Sym::Keyword(Keyword::Order) => {
+                state.shift()?;
+                state.skip_whitespace()?;
+                state.expect(Sym::Keyword(Keyword::By))?;
 
+                eyre::bail!("{pos}: 'ORDER BY' is not supported right now")
+            }
+
+            Sym::Keyword(Keyword::Group) => {
+                state.shift()?;
+                state.skip_whitespace()?;
+                state.expect(Sym::Keyword(Keyword::By))?;
+
+                eyre::bail!("{pos}: 'GROUP BY' is not supported right now")
+            }
+
+            Sym::Keyword(Keyword::Skip) => {
+                eyre::bail!("{pos}: 'SKIP' is not supported right now")
+            }
+
+            Sym::Keyword(Keyword::Top) => {
+                state.shift()?;
+                state.skip_whitespace()?;
+
+                let sym = state.shift_or_bail()?;
+                if let Sym::Literal(Literal::Integral(n)) = sym {
+                    if n.is_negative() {
+                        eyre::bail!(
+                            "{}: 'TOP' expects a number that is greater or equal to 0",
+                            state.pos()
+                        );
+                    }
+
+                    return Ok(SGL::Limit(n as u64));
+                }
+
+                eyre::bail!(
+                    "{pos}: expected a number that is greater or equal to 0 but got {sym} instead"
+                )
+            }
+
+            _ => Ok(SGL::None),
+        };
+    }
+
+    Ok(SGL::None)
+}
+
+fn parse_ident(state: &mut ParserState<'_>) -> eyre::Result<String> {
     match state.shift_or_bail()? {
         Sym::Id(id) => Ok(id),
         x => eyre::bail!("{}: expected an ident but got '{x}' instead", state.pos()),
@@ -93,19 +171,73 @@ fn parse_source(state: &mut ParserState<'_>) -> eyre::Result<Source<Pos>> {
     }
 }
 
-fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Where<Pos>> {
+fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Option<Where<Pos>>> {
     state.skip_whitespace()?;
+
+    if let Some(sym) = state.look_ahead()? {
+        if sym != &Sym::Keyword(Keyword::Where) {
+            return Ok(None);
+        }
+    }
+
     let pos = state.pos();
-    state.expect(Sym::Keyword(Keyword::Where))?;
+    state.shift()?;
     state.skip_whitespace()?;
     let expr = parse_expr(state)?;
 
-    Ok(Where { tag: pos, expr })
+    Ok(Some(Where { tag: pos, expr }))
 }
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
 fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
+    state.skip_whitespace()?;
+    let pos = state.pos();
+
+    let lhs = parse_expr_single(state)?;
+    state.skip_whitespace()?;
+
+    if let Some(Sym::Operation(op)) = state.look_ahead()? {
+        let op = *op;
+        state.shift()?;
+        state.skip_whitespace()?;
+        let mut rhs = parse_expr_single(state)?;
+        state.skip_whitespace()?;
+
+        while let Some(Sym::Operation(op)) = state.look_ahead()? {
+            let op = *op;
+            state.shift()?;
+            state.skip_whitespace()?;
+            let tmp_pos = rhs.tag;
+            let tmp = parse_expr_single(state)?;
+            state.skip_whitespace()?;
+
+            rhs = Expr {
+                tag: tmp_pos,
+                value: Value::Binary {
+                    lhs: Box::new(rhs),
+                    op,
+                    rhs: Box::new(tmp),
+                },
+            };
+        }
+
+        return Ok(Expr {
+            tag: pos,
+            value: Value::Binary {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            },
+        });
+    }
+
+    Ok(lhs)
+}
+
+// TODO - move the parsing from the stack to the heap so we could never have stack overflow
+// errors.
+fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
     // because parse_expr can be call recursively, it's possible in some situations that we could
     // have dangling whitespaces. To prevent the parser from rejecting the query in that case, it's
     // better to skip the whitespace before doing anything.
@@ -113,6 +245,16 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
     let pos = state.pos();
 
     match state.shift_or_bail()? {
+        Sym::LParens => {
+            state.skip_whitespace()?;
+            let mut expr = parse_expr(state)?;
+            expr.tag = pos;
+            state.skip_whitespace()?;
+            state.expect(Sym::RParens)?;
+
+            Ok(expr)
+        }
+
         Sym::Literal(l) => Ok(Expr {
             tag: pos,
             value: Value::Literal(l),
@@ -127,13 +269,13 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
 
                 if let Some(sym) = state.look_ahead()? {
                     if sym != &Sym::RParens {
-                        params.push(parse_expr(state)?);
+                        params.push(parse_expr_single(state)?);
                         state.skip_whitespace()?;
 
                         while let Some(Sym::Comma) = state.look_ahead()? {
                             state.shift()?;
                             state.skip_whitespace()?;
-                            params.push(parse_expr(state)?);
+                            params.push(parse_expr_single(state)?);
                             state.skip_whitespace()?;
                         }
                     }
@@ -171,7 +313,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
                 state.skip_whitespace()?;
                 state.expect(Sym::Colon)?;
                 state.skip_whitespace()?;
-                fields.insert(id, parse_expr(state)?);
+                fields.insert(id, parse_expr_single(state)?);
                 state.skip_whitespace()?;
 
                 if let Some(Sym::Comma) = state.look_ahead()? {
@@ -193,7 +335,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
 
         Sym::Operation(op) => {
             state.skip_whitespace()?;
-            let expr = parse_expr(state)?;
+            let expr = parse_expr_single(state)?;
 
             Ok(Expr {
                 tag: pos,
