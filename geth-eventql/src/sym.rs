@@ -124,8 +124,6 @@ pub enum Sym {
     RBracket,
     Comma,
     Colon,
-    DoubleQuote,
-    SingleQuote,
 }
 
 impl Display for Sym {
@@ -145,8 +143,6 @@ impl Display for Sym {
             Sym::RBracket => write!(f, "]"),
             Sym::Comma => write!(f, ","),
             Sym::Colon => write!(f, ":"),
-            Sym::DoubleQuote => write!(f, "\""),
-            Sym::SingleQuote => write!(f, "'"),
         }
     }
 }

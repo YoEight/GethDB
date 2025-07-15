@@ -6,7 +6,7 @@ pub struct Query<A> {
     pub tag: A,
     pub from_stmts: Vec<From<A>>,
     pub predicate: Option<Where<A>>,
-    pub sgl: SGL,
+    pub sgl: Sgl,
     pub projection: Expr<A>,
 }
 
@@ -41,6 +41,7 @@ pub enum Value<A> {
     Literal(Literal),
     Path(Vec<String>),
     Record(Record<A>),
+    Array(Vec<Expr<A>>),
     App {
         fun: String,
         params: Vec<Expr<A>>,
@@ -60,7 +61,7 @@ pub struct Record<A> {
     pub fields: HashMap<String, Expr<A>>,
 }
 
-pub enum SGL {
+pub enum Sgl {
     None,
     Sort,
     Group,

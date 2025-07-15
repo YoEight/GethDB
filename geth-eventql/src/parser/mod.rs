@@ -83,7 +83,7 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> 
     })
 }
 
-fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<SGL> {
+fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<Sgl> {
     let pos = state.pos();
     if let Some(sym) = state.look_ahead()? {
         return match sym {
@@ -120,7 +120,7 @@ fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<SGL> {
                         );
                     }
 
-                    return Ok(SGL::Limit(n as u64));
+                    return Ok(Sgl::Limit(n as u64));
                 }
 
                 eyre::bail!(
@@ -128,11 +128,11 @@ fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<SGL> {
                 )
             }
 
-            _ => Ok(SGL::None),
+            _ => Ok(Sgl::None),
         };
     }
 
-    Ok(SGL::None)
+    Ok(Sgl::None)
 }
 
 fn parse_ident(state: &mut ParserState<'_>) -> eyre::Result<String> {
@@ -302,6 +302,39 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
             })
         }
 
+        Sym::LBracket => {
+            let mut values = Vec::new();
+            state.skip_whitespace()?;
+
+            if let Some(sym) = state.look_ahead()?
+                && sym == &Sym::RBracket
+            {
+                state.shift()?;
+
+                return Ok(Expr {
+                    tag: pos,
+                    value: Value::Array(values),
+                });
+            }
+
+            values.push(parse_expr_single(state)?);
+            state.skip_whitespace()?;
+
+            while let Some(Sym::Comma) = state.look_ahead()? {
+                state.shift()?;
+                state.skip_whitespace()?;
+                values.push(parse_expr_single(state)?);
+                state.skip_whitespace()?;
+            }
+
+            state.expect(Sym::RBracket)?;
+
+            Ok(Expr {
+                tag: pos,
+                value: Value::Array(values),
+            })
+        }
+
         Sym::LBrace => {
             state.skip_whitespace()?;
 
@@ -351,9 +384,4 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
             state.pos()
         ),
     }
-}
-
-fn parse_record(state: &mut ParserState<'_>) -> eyre::Result<Record<Pos>> {
-    state.skip_whitespace()?;
-    todo!()
 }

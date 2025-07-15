@@ -51,8 +51,10 @@ impl<'a> Lexer<'a> {
                 ':' => self.consume_and_return(Sym::Colon),
                 '[' => self.consume_and_return(Sym::LBracket),
                 ']' => self.consume_and_return(Sym::RBracket),
-                '(' => self.consume_and_return(Sym::LBrace),
-                ')' => self.consume_and_return(Sym::RBrace),
+                '{' => self.consume_and_return(Sym::LBrace),
+                '}' => self.consume_and_return(Sym::RBrace),
+                ')' => self.consume_and_return(Sym::RParens),
+                '(' => self.consume_and_return(Sym::LParens),
 
                 '<' => {
                     self.text.shift();
