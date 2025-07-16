@@ -49,7 +49,7 @@ impl<A> Source<A> {
 
         None
     }
-} 
+}
 
 pub struct From<A> {
     pub tag: A,
