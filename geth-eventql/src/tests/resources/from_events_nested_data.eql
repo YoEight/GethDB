@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE e.data.price > 20
+PROJECT INTO { id: e.id, price: e.data.price }

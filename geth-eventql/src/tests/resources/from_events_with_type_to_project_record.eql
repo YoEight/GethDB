@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE e.type == "io.eventsourcingdb.library.book-acquired"
+PROJECT INTO { id: e.id, book: e.data.title }

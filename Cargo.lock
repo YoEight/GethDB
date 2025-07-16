@@ -817,6 +817,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "geth-eventql"
+version = "0.1.0"
+dependencies = [
+ "eyre",
+]
+
+[[package]]
 name = "geth-grpc"
 version = "0.1.0"
 dependencies = [

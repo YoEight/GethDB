@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE e.subject == "/books/42"
+PROJECT INTO { total: COUNT() }

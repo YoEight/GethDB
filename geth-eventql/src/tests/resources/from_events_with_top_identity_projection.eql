@@ -1,0 +1,4 @@
+FROM e IN events
+ORDER BY e.time DESC
+TOP 100
+PROJECT INTO e
