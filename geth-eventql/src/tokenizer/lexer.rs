@@ -211,8 +211,6 @@ impl<'a> Lexer<'a> {
         let opening = self.shift_or_bail()?;
         let mut string = String::new();
 
-        self.text.shift();
-
         while let Some(ch) = self.text.look_ahead() {
             if ch == opening {
                 return self.consume_and_return(Sym::Literal(Literal::String(string)));

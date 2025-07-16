@@ -65,6 +65,40 @@ impl<A> Expr<A> {
 
         None
     }
+
+    pub fn as_binary_op(&self) -> Option<BinaryOp<'_, A>> {
+        if let Value::Binary { lhs, op, rhs } = &self.value {
+            return Some(BinaryOp {
+                lhs: lhs.as_ref(),
+                op: *op,
+                rhs: rhs.as_ref(),
+            });
+        }
+
+        None
+    }
+
+    pub fn as_string_literal(&self) -> Option<&String> {
+        if let Value::Literal(Literal::String(s)) = &self.value {
+            return Some(s);
+        }
+
+        None
+    }
+
+    pub fn as_record(&self) -> Option<&Record<A>> {
+        if let Value::Record(r) = &self.value {
+            return Some(r);
+        }
+
+        None
+    }
+}
+
+pub struct BinaryOp<'a, A> {
+    pub lhs: &'a Expr<A>,
+    pub op: Operation,
+    pub rhs: &'a Expr<A>,
 }
 
 pub enum Value<A> {
@@ -89,6 +123,12 @@ pub enum Value<A> {
 
 pub struct Record<A> {
     pub fields: HashMap<String, Expr<A>>,
+}
+
+impl<A> Record<A> {
+    pub fn get(&self, id: &str) -> Option<&Expr<A>> {
+        self.fields.get(id)
+    }
 }
 
 pub struct Sort<A> {
