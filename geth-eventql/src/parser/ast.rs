@@ -41,6 +41,16 @@ pub struct Source<A> {
     pub inner: SourceType<A>,
 }
 
+impl<A> Source<A> {
+    pub fn as_subquery(&self) -> Option<&Query<A>> {
+        if let SourceType::Subquery(q) = &self.inner {
+            return Some(q);
+        }
+
+        None
+    }
+} 
+
 pub struct From<A> {
     pub tag: A,
     pub ident: String,

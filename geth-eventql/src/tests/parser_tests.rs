@@ -161,3 +161,69 @@ fn test_from_events_nested_data() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_events_using_subquery() -> eyre::Result<()> {
+    let query = include_str!("./resources/from_events_using_subquery.eql");
+
+    let mut query = crate::parse(query)?;
+
+    assert_eq!(1, query.from_stmts.len());
+
+    let from = query.from_stmts.pop().unwrap();
+
+    assert_eq!("e", from.ident);
+
+    let sub_query = from.source.as_subquery().unwrap();
+    let sub_query_pred = sub_query.predicate.as_ref().unwrap();
+    let sub_bin_op = sub_query_pred.expr.as_binary_op().unwrap();
+
+    assert_eq!(
+        &vec!["e".to_string(), "type".to_string()],
+        sub_bin_op.lhs.as_path().unwrap()
+    );
+
+    assert_eq!(Operation::Equal, sub_bin_op.op);
+
+    assert_eq!(
+        "io.eventsourcingdb.library.book-acquired",
+        sub_bin_op.rhs.as_string_literal().unwrap()
+    );
+
+    let sub_query_projection = sub_query.projection.as_record().unwrap();
+
+    let order_id_value = sub_query_projection
+        .get("orderId")
+        .unwrap()
+        .as_path()
+        .unwrap();
+
+    let value = sub_query_projection
+        .get("value")
+        .unwrap()
+        .as_path()
+        .unwrap();
+
+    assert_eq!(&vec!["e".to_string(), "id".to_string()], order_id_value);
+    assert_eq!(
+        &vec!["e".to_string(), "data".to_string(), "total".to_string()],
+        value
+    );
+
+    let pred = query.predicate.as_ref().unwrap();
+    let bin_op = pred.expr.as_binary_op().unwrap();
+
+    assert_eq!(
+        &vec!["e".to_string(), "value".to_string()],
+        bin_op.lhs.as_path().unwrap()
+    );
+
+    assert_eq!(Operation::GreaterThan, bin_op.op);
+
+    assert_eq!(100, bin_op.rhs.as_i64_literal().unwrap());
+    let projection = query.projection.as_path().unwrap();
+
+    assert_eq!(&vec!["e".to_string()], projection);
+
+    Ok(())
+}
