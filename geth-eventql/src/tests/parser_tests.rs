@@ -119,3 +119,45 @@ fn test_from_events_where_subject_project_record_with_count() -> eyre::Result<()
 
     Ok(())
 }
+
+#[test]
+fn test_from_events_nested_data() -> eyre::Result<()> {
+    let query = include_str!("./resources/from_events_nested_data.eql");
+
+    let mut query = crate::parse(query)?;
+
+    assert_eq!(1, query.from_stmts.len());
+
+    let from = query.from_stmts.pop().unwrap();
+
+    assert_eq!("e", from.ident);
+    assert!(from.source.inner.targets_events());
+
+    assert!(query.group_by.is_none());
+    assert!(query.order_by.is_none());
+
+    assert!(query.predicate.is_some());
+    let pred = query.predicate.as_ref().unwrap();
+    let bin_op = pred.expr.as_binary_op().unwrap();
+
+    assert_eq!(
+        &vec!["e".to_string(), "data".to_string(), "price".to_string()],
+        bin_op.lhs.as_path().unwrap()
+    );
+
+    assert_eq!(Operation::GreaterThan, bin_op.op);
+
+    assert_eq!(20, bin_op.rhs.as_i64_literal().unwrap());
+
+    let projection = query.projection.as_record().unwrap();
+    let id_value = projection.get("id").unwrap().as_path().unwrap();
+    let price_value = projection.get("price").unwrap().as_path().unwrap();
+
+    assert_eq!(&vec!["e".to_string(), "id".to_string()], id_value);
+    assert_eq!(
+        &vec!["e".to_string(), "data".to_string(), "price".to_string()],
+        price_value
+    );
+
+    Ok(())
+}

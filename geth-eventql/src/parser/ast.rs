@@ -86,6 +86,14 @@ impl<A> Expr<A> {
         None
     }
 
+    pub fn as_i64_literal(&self) -> Option<i64> {
+        if let Value::Literal(Literal::Integral(i)) = &self.value {
+            return Some(*i);
+        }
+
+        None
+    }
+
     pub fn as_record(&self) -> Option<&Record<A>> {
         if let Value::Record(r) = &self.value {
             return Some(r);
