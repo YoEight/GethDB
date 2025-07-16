@@ -172,9 +172,7 @@ impl<'a> Lexer<'a> {
     fn parse_integer_or_float(&mut self) -> eyre::Result<Option<Sym>> {
         let c = self.shift_or_bail()?;
         let mut num = String::new();
-
         num.push(c);
-        self.text.shift();
 
         let mut is_float = false;
         while let Some(ch) = self.text.look_ahead() {

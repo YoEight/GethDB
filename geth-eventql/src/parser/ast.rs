@@ -18,6 +18,24 @@ pub enum SourceType<A> {
     Subquery(Box<Query<A>>),
 }
 
+impl<A> SourceType<A> {
+    pub fn as_subject(&self) -> Option<&String> {
+        if let Self::Subject(sub) = self {
+            return Some(sub);
+        }
+
+        None
+    }
+
+    pub fn targets_events(&self) -> bool {
+        if let Self::Events = self {
+            return true;
+        }
+
+        false
+    }
+}
+
 pub struct Source<A> {
     pub tag: A,
     pub inner: SourceType<A>,
@@ -37,6 +55,16 @@ pub struct Where<A> {
 pub struct Expr<A> {
     pub tag: A,
     pub value: Value<A>,
+}
+
+impl<A> Expr<A> {
+    pub fn as_path(&self) -> Option<&Vec<String>> {
+        if let Value::Path(p) = &self.value {
+            return Some(p);
+        }
+
+        None
+    }
 }
 
 pub enum Value<A> {
@@ -68,16 +96,19 @@ pub struct Sort<A> {
     pub order: Order,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum LimitKind {
     Skip,
     Top,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limit {
     pub kind: LimitKind,
     pub value: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Order {
     Asc,
     Desc,
