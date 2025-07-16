@@ -12,8 +12,8 @@ impl<'a> Text<'a> {
     pub fn new(query: &'a str) -> Self {
         Self {
             inner: query.chars().peekable(),
-            line: 0,
-            col: 0,
+            line: 1,
+            col: 1,
         }
     }
 

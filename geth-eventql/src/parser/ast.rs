@@ -6,7 +6,9 @@ pub struct Query<A> {
     pub tag: A,
     pub from_stmts: Vec<From<A>>,
     pub predicate: Option<Where<A>>,
-    pub sgl: Sgl,
+    pub group_by: Option<Expr<A>>,
+    pub order_by: Option<Sort<A>>,
+    pub limit: Option<Limit>,
     pub projection: Expr<A>,
 }
 
@@ -61,9 +63,22 @@ pub struct Record<A> {
     pub fields: HashMap<String, Expr<A>>,
 }
 
-pub enum Sgl {
-    None,
-    Sort,
-    Group,
-    Limit(u64),
+pub struct Sort<A> {
+    pub expr: Expr<A>,
+    pub order: Order,
+}
+
+pub enum LimitKind {
+    Skip,
+    Top,
+}
+
+pub struct Limit {
+    pub kind: LimitKind,
+    pub value: u64,
+}
+
+pub enum Order {
+    Asc,
+    Desc,
 }

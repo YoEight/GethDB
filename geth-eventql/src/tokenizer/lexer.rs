@@ -184,7 +184,7 @@ impl<'a> Lexer<'a> {
                 }
 
                 is_float = true;
-            } else if !ch.is_ascii_digit() {
+            } else if !ch.is_ascii_digit() && ch != '-' {
                 break;
             }
 

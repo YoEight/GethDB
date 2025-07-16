@@ -32,7 +32,11 @@ fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
     state.skip_whitespace()?;
     let predicate = parse_where_clause(state)?;
     state.skip_whitespace()?;
-    let sgl = parse_sgl(state)?;
+    let group_by = parse_group_by(state)?;
+    state.skip_whitespace()?;
+    let order_by = parse_order_by(state)?;
+    state.skip_whitespace()?;
+    let limit = parse_limit(state)?;
     state.skip_whitespace()?;
 
     state.expect(Sym::Keyword(Keyword::Project))?;
@@ -48,8 +52,10 @@ fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
         tag: pos,
         from_stmts,
         predicate,
-        sgl,
+        group_by,
         projection,
+        order_by,
+        limit,
     })
 }
 
@@ -83,56 +89,73 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> 
     })
 }
 
-fn parse_sgl(state: &mut ParserState<'_>) -> eyre::Result<Sgl> {
-    let pos = state.pos();
-    if let Some(sym) = state.look_ahead()? {
-        return match sym {
-            Sym::Keyword(Keyword::Order) => {
-                state.shift()?;
-                state.skip_whitespace()?;
-                state.expect(Sym::Keyword(Keyword::By))?;
-
-                eyre::bail!("{pos}: 'ORDER BY' is not supported right now")
-            }
-
-            Sym::Keyword(Keyword::Group) => {
-                state.shift()?;
-                state.skip_whitespace()?;
-                state.expect(Sym::Keyword(Keyword::By))?;
-
-                eyre::bail!("{pos}: 'GROUP BY' is not supported right now")
-            }
-
-            Sym::Keyword(Keyword::Skip) => {
-                eyre::bail!("{pos}: 'SKIP' is not supported right now")
-            }
-
-            Sym::Keyword(Keyword::Top) => {
-                state.shift()?;
-                state.skip_whitespace()?;
-
-                let sym = state.shift_or_bail()?;
-                if let Sym::Literal(Literal::Integral(n)) = sym {
-                    if n.is_negative() {
-                        eyre::bail!(
-                            "{}: 'TOP' expects a number that is greater or equal to 0",
-                            state.pos()
-                        );
-                    }
-
-                    return Ok(Sgl::Limit(n as u64));
-                }
-
-                eyre::bail!(
-                    "{pos}: expected a number that is greater or equal to 0 but got {sym} instead"
-                )
-            }
-
-            _ => Ok(Sgl::None),
-        };
+fn parse_group_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Expr<Pos>>> {
+    state.skip_whitespace()?;
+    if let Some(sym) = state.look_ahead()?
+        && sym != &Sym::Keyword(Keyword::Group)
+    {
+        return Ok(None);
     }
 
-    Ok(Sgl::None)
+    state.shift()?;
+    state.skip_whitespace()?;
+    state.expect(Sym::Keyword(Keyword::By))?;
+    state.skip_whitespace()?;
+
+    Ok(Some(parse_expr_single(state)?))
+}
+
+fn parse_order_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Sort<Pos>>> {
+    state.skip_whitespace()?;
+    if let Some(sym) = state.look_ahead()?
+        && sym != &Sym::Keyword(Keyword::Order)
+    {
+        return Ok(None);
+    }
+
+    state.shift()?;
+    state.skip_whitespace()?;
+    state.expect(Sym::Keyword(Keyword::By))?;
+    state.skip_whitespace()?;
+    let expr = parse_expr_single(state)?;
+    state.skip_whitespace()?;
+    let pos = state.pos();
+    let sym = state.shift_or_bail()?;
+    let order = match sym {
+        Sym::Keyword(Keyword::Desc) => Order::Desc,
+        Sym::Keyword(Keyword::Asc) => Order::Asc,
+        x => eyre::bail!("{pos}: expected either 'ASC' or 'DESC' but found '{x}' instead"),
+    };
+
+    Ok(Some(Sort { expr, order }))
+}
+
+fn parse_limit(state: &mut ParserState<'_>) -> eyre::Result<Option<Limit>> {
+    state.skip_whitespace()?;
+
+    if let Some(sym) = state.look_ahead()?
+        && sym != &Sym::Keyword(Keyword::Skip)
+        && sym != &Sym::Keyword(Keyword::Top)
+    {
+        return Ok(None);
+    }
+
+    let pos = state.pos();
+    let sym = state.shift_or_bail()?;
+    let kind = match sym {
+        Sym::Keyword(Keyword::Skip) => LimitKind::Skip,
+        Sym::Keyword(Keyword::Top) => LimitKind::Top,
+        x => eyre::bail!("{pos}: expected either 'SKIP' or 'TOP' but found '{x}' instead"),
+    };
+
+    state.skip_whitespace()?;
+    let pos = state.pos();
+    let value = match state.shift_or_bail()? {
+        Sym::Literal(Literal::Integral(n)) if n >= 0 => n as u64,
+        x => eyre::bail!("{pos}: expected a greater or equal to 0 integer but found '{x}' instead"),
+    };
+
+    Ok(Some(Limit { kind, value }))
 }
 
 fn parse_ident(state: &mut ParserState<'_>) -> eyre::Result<String> {
