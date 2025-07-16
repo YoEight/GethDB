@@ -93,12 +93,25 @@ impl<A> Expr<A> {
 
         None
     }
+
+    pub fn as_apply_fun(&self) -> Option<ApplyFun<'_, A>> {
+        if let Value::App { fun, params } = &self.value {
+            return Some(ApplyFun { name: fun, params });
+        }
+
+        None
+    }
 }
 
 pub struct BinaryOp<'a, A> {
     pub lhs: &'a Expr<A>,
     pub op: Operation,
     pub rhs: &'a Expr<A>,
+}
+
+pub struct ApplyFun<'a, A> {
+    pub name: &'a String,
+    pub params: &'a Vec<Expr<A>>,
 }
 
 pub enum Value<A> {

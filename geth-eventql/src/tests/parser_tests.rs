@@ -81,3 +81,41 @@ fn test_from_events_with_type_to_project_record() -> eyre::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_from_events_where_subject_project_record_with_count() -> eyre::Result<()> {
+    let query = include_str!("./resources/from_events_where_subject_project_record_with_count.eql");
+
+    let mut query = crate::parse(query)?;
+
+    assert_eq!(1, query.from_stmts.len());
+
+    let from = query.from_stmts.pop().unwrap();
+
+    assert_eq!("e", from.ident);
+    assert!(from.source.inner.targets_events());
+
+    assert!(query.group_by.is_none());
+    assert!(query.order_by.is_none());
+
+    assert!(query.predicate.is_some());
+    let pred = query.predicate.as_ref().unwrap();
+    let bin_op = pred.expr.as_binary_op().unwrap();
+
+    assert_eq!(
+        &vec!["e".to_string(), "subject".to_string()],
+        bin_op.lhs.as_path().unwrap()
+    );
+
+    assert_eq!(Operation::Equal, bin_op.op);
+
+    assert_eq!("/books/42", bin_op.rhs.as_string_literal().unwrap());
+
+    let projection = query.projection.as_record().unwrap();
+    let total_value = projection.get("total").unwrap().as_apply_fun().unwrap();
+
+    assert_eq!("COUNT", total_value.name);
+    assert_eq!(0, total_value.params.len());
+
+    Ok(())
+}
