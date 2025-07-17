@@ -1,11 +1,11 @@
 GethDB
 ======
 
-The Database For The People.
+A database system functioning as a synthetic servant for your data needs.
 
 ## Introduction
 
-This project is not a political statement. It is inspired by the Khelish word "Geth," meaning "Servant of the People."
+This project name is inspired by the Khelish word "Geth," meaning "Servant of the People."
 
 The project is purely experimental and is where I explore various aspects of database design. I aim to test specific
 data structures and observe their behavior in real-life scenarios.
