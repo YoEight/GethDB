@@ -162,13 +162,11 @@ async fn stop_program_subscription() -> eyre::Result<()> {
     let proc_id = stream.wait_until_confirmed().await?.try_into_process_id()?;
     client.stop_program(proc_id).await?;
 
-    assert!(stream.next().await?.is_some_and(|x| {
-        if let geth_common::SubscriptionEvent::Unsubscribed(_) = x {
-            true
-        } else {
-            false
-        }
-    }));
+    // FIXME - it's possible that there are some events prior to the unsubscribed event.
+    assert!(stream
+        .next()
+        .await?
+        .is_some_and(|x| { matches!(x, geth_common::SubscriptionEvent::Unsubscribed(_)) }));
 
     assert!(stream.next().await?.is_none());
 
@@ -186,7 +184,7 @@ async fn list_program_subscription() -> eyre::Result<()> {
     let client = GrpcClient::connect(client_endpoint(&options)).await?;
 
     for i in 0..expected_count {
-        let name = format!("echo-{}", i);
+        let name = format!("echo-{i}");
         let mut stream = client
             .subscribe_to_process(
                 name.as_str(),

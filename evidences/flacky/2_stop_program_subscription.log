@@ -1,0 +1,67 @@
+2025-07-16T22:44:36.469580Z DEBUG wait_for{proc=Indexing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+2025-07-16T22:44:36.469941Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:34: rebuilding index...
+2025-07-16T22:44:36.471365Z  INFO run{origin=Indexing}: geth_engine::process::indexing::proc: geth-engine/src/process/indexing/proc.rs:36: index rebuilt successfully
+2025-07-16T22:44:36.471554Z  INFO wait_for{proc=Indexing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+2025-07-16T22:44:36.471670Z DEBUG wait_for{proc=PubSub origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+2025-07-16T22:44:36.471937Z  INFO wait_for{proc=PubSub origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+2025-07-16T22:44:36.472044Z DEBUG wait_for{proc=Reading origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Reading
+2025-07-16T22:44:36.472404Z DEBUG wait_for{proc=Indexing origin=Reading}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+2025-07-16T22:44:36.472539Z  INFO wait_for{proc=Indexing origin=Reading}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+2025-07-16T22:44:36.472726Z  INFO wait_for{proc=Reading origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Reading id=3
+2025-07-16T22:44:36.472808Z DEBUG wait_for{proc=Writing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Writing
+2025-07-16T22:44:36.473168Z DEBUG wait_for{proc=Indexing origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+2025-07-16T22:44:36.473286Z  INFO wait_for{proc=Indexing origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+2025-07-16T22:44:36.473372Z DEBUG wait_for{proc=PubSub origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+2025-07-16T22:44:36.473444Z  INFO wait_for{proc=PubSub origin=Writing}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+2025-07-16T22:44:36.473594Z  INFO wait_for{proc=Writing origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Writing id=4
+2025-07-16T22:44:36.473671Z DEBUG wait_for{proc=Grpc origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Grpc
+2025-07-16T22:44:36.473957Z DEBUG wait_for{proc=Writing origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Writing
+2025-07-16T22:44:36.474059Z  INFO wait_for{proc=Writing origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Writing id=4
+2025-07-16T22:44:36.474173Z DEBUG wait_for{proc=Reading origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Reading
+2025-07-16T22:44:36.474274Z  INFO wait_for{proc=Reading origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Reading id=3
+2025-07-16T22:44:36.474385Z DEBUG wait_for{proc=PubSub origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+2025-07-16T22:44:36.474489Z  INFO wait_for{proc=PubSub origin=Grpc}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+2025-07-16T22:44:36.474583Z  INFO geth_engine::process::grpc: geth-engine/src/process/grpc/mod.rs:28: GethDB is listening addr=127.0.0.1:1406 db="/tmp/t2cb2-0"
+2025-07-16T22:44:36.474873Z  INFO wait_for{proc=Grpc origin=Root}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Grpc id=5
+2025-07-16T22:44:36.474950Z DEBUG geth_client::grpc: geth-client/src/grpc.rs:47: connecting to node endpoint=127.0.0.1:1406 attempt=1 max_attempts=10
+2025-07-16T22:44:36.475332Z DEBUG geth_client::grpc: geth-client/src/grpc.rs:64: connected to node attempt=1 max_attempts=10 endpoint=127.0.0.1:1406
+2025-07-16T22:44:36.477252Z DEBUG wait_for{proc=PyroWorker origin=PubSub}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PyroWorker
+2025-07-16T22:44:36.477412Z DEBUG run{proc_id=6 proc=PyroWorker}: geth_engine::process::subscription::program::pyro::worker: geth-engine/src/process/subscription/program/pyro/worker.rs:33: computation unit allocated, waiting for program instructions
+2025-07-16T22:44:36.477513Z  INFO wait_for{proc=PyroWorker origin=PubSub}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PyroWorker id=6
+2025-07-16T22:44:36.477588Z DEBUG geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:83: program is starting id=6 name="echo" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.479627Z  INFO run{proc_id=6 proc=PyroWorker}: geth_engine::process::subscription::program::pyro::worker: geth-engine/src/process/subscription/program/pyro/worker.rs:107: ready to do work name="echo" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.479891Z DEBUG geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:100: program has started successfully id=6 name="echo" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.479991Z DEBUG run{proc_id=2 proc=PubSub}: geth_engine::process::subscription::proc: geth-engine/src/process/subscription/proc.rs:275: program was registered successfully name="echo" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.480058Z DEBUG geth_engine::process::subscription::program::pyro: geth-engine/src/process/subscription/program/pyro/mod.rs:306: program emitted a subscription request name="echo" proc_id=6 stream_name="foobar"
+2025-07-16T22:44:36.480178Z DEBUG geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:74: subscription confirmed proc_id=6 correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.480253Z DEBUG wait_for{proc=Indexing origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Indexing
+2025-07-16T22:44:36.480479Z  INFO wait_for{proc=Indexing origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Indexing id=1
+2025-07-16T22:44:36.480567Z DEBUG wait_for{proc=Reading origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=Reading
+2025-07-16T22:44:36.480632Z  INFO wait_for{proc=Reading origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=Reading id=3
+2025-07-16T22:44:36.480740Z DEBUG wait_for{proc=PubSub origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:204: waiting for process to be available... proc=PubSub
+2025-07-16T22:44:36.480808Z  INFO wait_for{proc=PubSub origin=PyroWorker}: geth_engine::process::manager::client: geth-engine/src/process/manager/client.rs:209: process resolved proc=PubSub id=2
+2025-07-16T22:44:36.481728Z DEBUG geth_client::grpc: geth-client/src/grpc.rs:171: waiting for subscription to process confirmation name="echo"
+2025-07-16T22:44:36.483066Z DEBUG next{correation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76 stream_name="foobar" state=init}: geth_engine::process::subscription::client: geth-engine/src/process/subscription/client.rs:78: subscription confirmed stream_name="foobar" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.483134Z DEBUG geth_engine::process::subscription::program::pyro: geth-engine/src/process/subscription/program/pyro/mod.rs:364: subscription is confirmed name="echo" proc_id=6 target="subscription" kind="pyro" stream_name="foobar"
+2025-07-16T22:44:36.483259Z  INFO run{proc_id=6 proc=PyroWorker}: geth_engine::process::subscription::program::pyro::worker: geth-engine/src/process/subscription/program/pyro/worker.rs:130: program stopped name="echo" correlation=8e67d4e1-22aa-48b5-8ca2-68b107eacc76
+2025-07-16T22:44:36.483380Z DEBUG geth_engine::process::grpc::protocol: geth-engine/src/process/grpc/protocol.rs:252: server ended program subscription name="echo"
+2025-07-16T22:44:36.483433Z  INFO geth_engine::process::manager: geth-engine/src/process/manager/mod.rs:255: process terminated id=6 proc=PyroWorker closing=false
+test program_tests::stop_program_subscription ... FAILED
+
+failures:
+
+failures:
+    program_tests::stop_program_subscription
+
+test result: FAILED. 0 passed; 1 failed; 0 ignored; 0 measured; 10 filtered out; finished in 0.03s
+
+  stderr ───
+
+    thread 'program_tests::stop_program_subscription' panicked at geth-client-tests/src/program_tests.rs:165:5:
+    assertion failed: stream.next().await?.is_some_and(|x|
+            {
+                if let geth_common::SubscriptionEvent::Unsubscribed(_) = x {
+                    true
+                } else { false }
+            })
+    note: run with `RUST_BACKTRACE=1` environment variable to display a backtrace
