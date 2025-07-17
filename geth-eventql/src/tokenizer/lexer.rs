@@ -35,11 +35,9 @@ impl<'a> Lexer<'a> {
                 _ if c.is_ascii_whitespace() => {
                     self.text.shift();
 
-                    while let Some(c) = self.text.look_ahead() {
-                        if !c.is_ascii_whitespace() {
-                            break;
-                        }
-
+                    while let Some(c) = self.text.look_ahead()
+                        && c.is_ascii_whitespace()
+                    {
                         self.text.shift();
                     }
 
@@ -115,11 +113,9 @@ impl<'a> Lexer<'a> {
                     ident.push(c);
                     self.text.shift();
 
-                    while let Some(c) = self.text.look_ahead() {
-                        if !c.is_ascii_alphanumeric() && c != '_' {
-                            break;
-                        }
-
+                    while let Some(c) = self.text.look_ahead()
+                        && (c.is_ascii_alphanumeric() || c == '_')
+                    {
                         ident.push(c);
                         self.text.shift();
                     }

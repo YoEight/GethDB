@@ -197,10 +197,10 @@ fn parse_source(state: &mut ParserState<'_>) -> eyre::Result<Source<Pos>> {
 fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Option<Where<Pos>>> {
     state.skip_whitespace()?;
 
-    if let Some(sym) = state.look_ahead()? {
-        if sym != &Sym::Keyword(Keyword::Where) {
-            return Ok(None);
-        }
+    if let Some(sym) = state.look_ahead()?
+        && sym != &Sym::Keyword(Keyword::Where)
+    {
+        return Ok(None);
     }
 
     let pos = state.pos();
@@ -290,17 +290,17 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
 
                 let mut params = Vec::new();
 
-                if let Some(sym) = state.look_ahead()? {
-                    if sym != &Sym::RParens {
+                if let Some(sym) = state.look_ahead()?
+                    && sym != &Sym::RParens
+                {
+                    params.push(parse_expr_single(state)?);
+                    state.skip_whitespace()?;
+
+                    while let Some(Sym::Comma) = state.look_ahead()? {
+                        state.shift()?;
+                        state.skip_whitespace()?;
                         params.push(parse_expr_single(state)?);
                         state.skip_whitespace()?;
-
-                        while let Some(Sym::Comma) = state.look_ahead()? {
-                            state.shift()?;
-                            state.skip_whitespace()?;
-                            params.push(parse_expr_single(state)?);
-                            state.skip_whitespace()?;
-                        }
                     }
                 }
 
