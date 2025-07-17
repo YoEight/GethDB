@@ -162,12 +162,15 @@ async fn stop_program_subscription() -> eyre::Result<()> {
     let proc_id = stream.wait_until_confirmed().await?.try_into_process_id()?;
     client.stop_program(proc_id).await?;
 
-    // FIXME - it's possible that there are some events prior to the unsubscribed event.
-    assert!(stream
-        .next()
-        .await?
-        .is_some_and(|x| { matches!(x, geth_common::SubscriptionEvent::Unsubscribed(_)) }));
+    let mut unsubscribed = false;
+    while let Some(event) = stream.next().await? {
+        if let geth_common::SubscriptionEvent::Unsubscribed(_) = event {
+            unsubscribed = true;
+            break;
+        }
+    }
 
+    assert!(unsubscribed);
     assert!(stream.next().await?.is_none());
 
     embedded.shutdown().await
