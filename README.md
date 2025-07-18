@@ -32,7 +32,7 @@ macOS, and Windows. Please note that Linux will remain the primary target
 
 ## Build from source
 
-You need to have the latest Rust toolchain installed and also `protoc` in your $PATH. Then run this command:
+You need to have the latest Rust toolchain installed, `protoc` in your $PATH and all Google protobuf wellknown types available. Then just run this command:
 
 ```
 cargo build
