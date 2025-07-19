@@ -19,6 +19,7 @@ pub mod manager;
 mod messages;
 #[cfg(test)]
 mod panic;
+pub mod query;
 pub mod reading;
 #[cfg(test)]
 mod sink;

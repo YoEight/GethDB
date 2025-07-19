@@ -17,6 +17,9 @@ path = "../geth-grpc"
 [dependencies.geth-domain]
 path = "../geth-domain"
 
+[dependencies.geth-eventql]
+path = "../geth-eventql"
+
 [dependencies.tokio]
 version = "1.20"
 features = ["full"]
