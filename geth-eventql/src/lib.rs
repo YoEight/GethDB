@@ -1,5 +1,6 @@
 use crate::tokenizer::Lexer;
 
+mod infer;
 mod parser;
 mod rename;
 mod sym;
@@ -18,3 +19,4 @@ pub fn parse(query: &str) -> eyre::Result<Query<Pos>> {
 }
 
 pub use rename::rename;
+pub use rename::{Lexical, Properties, Renamed, Scope, Scopes};
