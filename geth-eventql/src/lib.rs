@@ -16,3 +16,5 @@ pub fn parse(query: &str) -> eyre::Result<Query<Pos>> {
     let lexer = Lexer::new(query);
     parser::parse(lexer)
 }
+
+pub use rename::rename;

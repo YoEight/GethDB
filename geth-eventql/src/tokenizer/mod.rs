@@ -5,7 +5,7 @@ mod text;
 
 pub use lexer::Lexer;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Ord, PartialOrd)]
 pub struct Pos {
     line: u64,
     column: u64,

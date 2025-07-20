@@ -1,13 +1,14 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
-    Expr, From, Pos, Query, Value, Where,
-    parser::{Source, SourceType},
+    Expr, From, Pos, Query, Sort, Value, Where,
+    parser::{Record, Source, SourceType},
 };
 
+#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
 pub struct Lexical {
-    pos: Pos,
-    scope: u64,
+    pub pos: Pos,
+    pub scope: u64,
 }
 
 #[derive(Default)]
@@ -104,6 +105,12 @@ fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> eyre::Result<Quer
         None
     };
 
+    let order_by = if let Some(sort) = query.order_by {
+        Some(rename_sort(scope, sort)?)
+    } else {
+        None
+    };
+
     Ok(Query {
         tag: Lexical {
             pos: query.tag,
@@ -113,9 +120,9 @@ fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> eyre::Result<Quer
         from_stmts,
         predicate,
         group_by,
-        order_by: todo!(),
-        limit: todo!(),
-        projection: todo!(),
+        order_by,
+        limit: query.limit,
+        projection: rename_expr(scope, query.projection)?,
     })
 }
 
@@ -184,6 +191,13 @@ fn rename_where(scope: &mut Scope, predicate: Where<Pos>) -> eyre::Result<Where<
     })
 }
 
+fn rename_sort(scope: &mut Scope, sort: Sort<Pos>) -> eyre::Result<Sort<Lexical>> {
+    Ok(Sort {
+        expr: rename_expr(scope, sort.expr)?,
+        order: sort.order,
+    })
+}
+
 fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>> {
     let lexical = Lexical {
         pos: expr.tag,
@@ -200,7 +214,7 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
             for (depth, ident) in path.iter().enumerate() {
                 match depth {
                     0 => {
-                        if !scope.contains_variable(&ident) {
+                        if !scope.contains_variable(ident) {
                             eyre::bail!("{}: variable '{ident}' doesn't exist", expr.tag);
                         }
 
@@ -210,7 +224,7 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
                     2 => {
                         if prev != "data" {
                             eyre::bail!(
-                                "{}: only the 'data' field can have dynamically access fields",
+                                "{}: only the 'data' field can have dynamically accessed fields",
                                 expr.tag
                             );
                         }
@@ -227,11 +241,49 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
             Value::Path(path)
         }
 
-        Value::Record(record) => todo!(),
-        Value::Array(exprs) => todo!(),
-        Value::App { fun, params } => todo!(),
-        Value::Binary { lhs, op, rhs } => todo!(),
-        Value::Unary { op, expr } => todo!(),
+        Value::Record(record) => {
+            let mut fields = HashMap::new();
+
+            for (field, expr) in record.fields {
+                fields.insert(field, rename_expr(scope, expr)?);
+            }
+
+            Value::Record(Record { fields })
+        }
+
+        Value::Array(exprs) => {
+            let mut values = Vec::new();
+
+            for expr in exprs {
+                values.push(rename_expr(scope, expr)?);
+            }
+
+            Value::Array(values)
+        }
+
+        Value::App { fun, params } => {
+            let mut new_params = Vec::new();
+
+            for param in params {
+                new_params.push(rename_expr(scope, param)?);
+            }
+
+            Value::App {
+                fun,
+                params: new_params,
+            }
+        }
+
+        Value::Binary { lhs, op, rhs } => Value::Binary {
+            lhs: Box::new(rename_expr(scope, *lhs)?),
+            op,
+            rhs: Box::new(rename_expr(scope, *rhs)?),
+        },
+
+        Value::Unary { op, expr } => Value::Unary {
+            op,
+            expr: Box::new(rename_expr(scope, *expr)?),
+        },
     };
 
     Ok(Expr {
