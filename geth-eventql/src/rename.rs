@@ -51,6 +51,14 @@ impl Properties {
     fn add(&mut self, prop: String) {
         self.inner.insert(prop);
     }
+
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &String> {
+        self.inner.iter()
+    }
 }
 
 pub struct Scope {
@@ -74,12 +82,50 @@ impl Scope {
 
         eyre::bail!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
     }
+
+    pub fn var_properties(&self, name: &str) -> eyre::Result<&Properties> {
+        if let Some(prop) = self.properties.get(name) {
+            return Ok(prop);
+        }
+
+        eyre::bail!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
+    }
 }
 
-pub fn rename(query: Query<Pos>) -> eyre::Result<Query<Lexical>> {
+pub struct Scopes {
+    inner: BTreeMap<u64, Scope>,
+}
+
+impl Scopes {
+    pub fn len(&self) -> usize {
+        self.inner.len()
+    }
+
+    pub fn scope(&self, id: u64) -> eyre::Result<&Scope> {
+        if let Some(scope) = self.inner.get(&id) {
+            return Ok(scope);
+        }
+
+        eyre::bail!("UNREACHABLE CODE PATH: scope '{id}' doesn't exist")
+    }
+}
+
+pub struct Renamed {
+    pub scopes: Scopes,
+    pub query: Query<Lexical>,
+}
+
+pub fn rename(query: Query<Pos>) -> eyre::Result<Renamed> {
     let mut analysis = Analysis::default();
 
-    rename_query(&mut analysis, query)
+    let query = rename_query(&mut analysis, query)?;
+
+    Ok(Renamed {
+        scopes: Scopes {
+            inner: analysis.scopes,
+        },
+        query,
+    })
 }
 
 fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> eyre::Result<Query<Lexical>> {
