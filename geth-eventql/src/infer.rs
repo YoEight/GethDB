@@ -160,11 +160,12 @@ fn infer_expr(
         Value::Path(items) => todo!(),
 
         Value::Record(record) => {
-            if assumption != Type::Unspecified {
+            if assumption != Type::Unspecified && assumption != Type::Record {
                 eyre::bail!(
-                    "{}: expected a '{}' but got a record instead",
+                    "{}: expected a '{}' but got '{}' instead",
                     expr.tag.pos,
-                    assumption
+                    assumption,
+                    Type::Record,
                 );
             }
 
@@ -283,7 +284,7 @@ fn infer_expr(
                 );
             };
 
-            if assumption != Type::Unspecified && assumption != Type::Bool {
+            if assumption != Type::Unspecified && assumption != result_type {
                 eyre::bail!(
                     "{}: expected '{assumption}' but got '{result_type}' instead",
                     expr.tag.pos
