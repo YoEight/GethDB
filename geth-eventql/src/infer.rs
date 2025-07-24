@@ -291,7 +291,21 @@ fn infer_expr(
                 );
             }
 
-            todo!()
+            let new_assumption = if op == Operation::Not {
+                Type::Bool
+            } else {
+                assumption
+            };
+
+            let expr = infer_expr_simple(type_check, new_assumption, *expr)?;
+
+            (
+                result_type,
+                Value::Unary {
+                    op,
+                    expr: Box::new(expr),
+                },
+            )
         }
     };
 
