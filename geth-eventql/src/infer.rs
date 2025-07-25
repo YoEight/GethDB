@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Value, Var, Where,
+    Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Sort, Value, Var, Where,
     parser::{Record, Source, SourceType},
 };
 
@@ -11,10 +11,24 @@ pub struct Infered {
     query: Query<Infer>,
 }
 
+impl Infered {
+    pub fn assumptions(&self) -> &Assumptions {
+        &self.assumptions
+    }
+
+    pub fn scopes(&self) -> &Scopes {
+        &self.scopes
+    }
+
+    pub fn query(&self) -> &Query<Infer> {
+        &self.query
+    }
+}
+
 pub struct Infer {}
 
 #[derive(Copy, Clone, PartialEq, Eq)]
-enum Type {
+pub enum Type {
     Unspecified,
     Integer,
     Float,
@@ -39,17 +53,6 @@ impl Display for Type {
 }
 
 impl Type {
-    fn matches(&self, lit: &Literal) -> bool {
-        matches!(
-            (self, lit),
-            (Type::Unspecified, _)
-                | (Type::Integer, Literal::Integral(_))
-                | (Type::Float, Literal::Float(_))
-                | (Type::String, Literal::String(_))
-                | (Type::Bool, Literal::Bool(_))
-        )
-    }
-
     fn project(lit: &Literal) -> Self {
         match lit {
             Literal::String(_) => Type::String,
@@ -169,21 +172,36 @@ fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> eyre::Resul
         None
     };
 
+    let group_by = if let Some(expr) = query.group_by {
+        Some(infer_expr_simple(type_check, Type::Unspecified, expr)?)
+    } else {
+        None
+    };
+
+    let order_by = if let Some(sort) = query.order_by {
+        Some(Sort {
+            expr: infer_expr_simple(type_check, Type::Unspecified, sort.expr)?,
+            order: sort.order,
+        })
+    } else {
+        None
+    };
+
     Ok(Query {
         tag: Infer {},
         from_stmts,
         predicate,
-        group_by: todo!(),
-        order_by: todo!(),
-        limit: todo!(),
-        projection: todo!(),
+        group_by,
+        order_by,
+        limit: query.limit,
+        projection: infer_expr_simple(type_check, Type::Unspecified, query.projection)?,
     })
 }
 
 fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> eyre::Result<From<Infer>> {
     let inner = match stmt.source.inner {
         SourceType::Events => SourceType::Events,
-        SourceType::Subject(_) => todo!(),
+        SourceType::Subject(s) => SourceType::Subject(s),
         SourceType::Subquery(query) => {
             SourceType::Subquery(Box::new(infer_query(type_check, *query)?))
         }
@@ -256,9 +274,8 @@ fn infer_expr(
                 (register_assumption, Value::Var(var))
             } else if assumption != register_assumption {
                 eyre::bail!(
-                    "{}: expected {} but got an array instead",
+                    "{}: expected {assumption} but got {register_assumption} instead",
                     expr.tag.pos,
-                    assumption
                 );
             } else {
                 (assumption, Value::Var(var))
@@ -268,9 +285,8 @@ fn infer_expr(
         Value::Record(record) => {
             if assumption != Type::Unspecified && assumption != Type::Record {
                 eyre::bail!(
-                    "{}: expected a '{}' but got '{}' instead",
+                    "{}: expected a '{assumption}' but got '{}' instead",
                     expr.tag.pos,
-                    assumption,
                     Type::Record,
                 );
             }

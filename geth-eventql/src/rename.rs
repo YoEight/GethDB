@@ -109,6 +109,10 @@ impl Scopes {
         self.inner.len()
     }
 
+    pub fn is_empty(&self) -> bool {
+        self.inner.is_empty()
+    }
+
     pub fn scope(&self, id: u64) -> eyre::Result<&Scope> {
         if let Some(scope) = self.inner.get(&id) {
             return Ok(scope);

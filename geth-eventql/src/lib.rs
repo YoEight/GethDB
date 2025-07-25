@@ -18,5 +18,7 @@ pub fn parse(query: &str) -> eyre::Result<Query<Pos>> {
     parser::parse(lexer)
 }
 
+pub use infer::infer;
+pub use infer::{Infer, Infered, Type};
 pub use rename::rename;
 pub use rename::{Lexical, Properties, Renamed, Scope, Scopes};
