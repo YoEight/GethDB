@@ -1,9 +1,8 @@
-use std::collections::HashMap;
-
 use crate::{
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
 };
+use std::collections::HashMap;
 
 mod ast;
 mod state;
@@ -215,47 +214,56 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Option<Where<
 // errors.
 fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
     state.skip_whitespace()?;
-    let pos = state.pos();
 
-    let lhs = parse_expr_single(state)?;
+    let expr = parse_expr_single(state)?;
     state.skip_whitespace()?;
 
+    // binary operation
     if let Some(Sym::Operation(op)) = state.look_ahead()? {
         let op = *op;
+        let mut expr_stack = Vec::new();
+        let mut op_stack = Vec::new();
+
         state.shift()?;
         state.skip_whitespace()?;
-        let mut rhs = parse_expr_single(state)?;
+
+        expr_stack.push(Expr {
+            tag: expr.tag,
+            value: Value::Binary {
+                lhs: Box::new(expr),
+                op,
+                rhs: Box::new(parse_expr_single(state)?),
+            },
+        });
+
         state.skip_whitespace()?;
 
         while let Some(Sym::Operation(op)) = state.look_ahead()? {
-            let op = *op;
+            op_stack.push(*op);
             state.shift()?;
             state.skip_whitespace()?;
-            let tmp_pos = rhs.tag;
-            let tmp = parse_expr_single(state)?;
+            expr_stack.push(parse_expr_single(state)?);
             state.skip_whitespace()?;
-
-            rhs = Expr {
-                tag: tmp_pos,
-                value: Value::Binary {
-                    lhs: Box::new(rhs),
-                    op,
-                    rhs: Box::new(tmp),
-                },
-            };
         }
 
-        return Ok(Expr {
-            tag: pos,
-            value: Value::Binary {
-                lhs: Box::new(lhs),
-                op,
-                rhs: Box::new(rhs),
-            },
-        });
+        while let Some(op) = op_stack.pop() {
+            let rhs = expr_stack.pop().expect("to be always defined");
+            let lhs = expr_stack.pop().expect("to be always defined");
+
+            expr_stack.push(Expr {
+                tag: lhs.tag,
+                value: Value::Binary {
+                    lhs: Box::new(lhs),
+                    op,
+                    rhs: Box::new(rhs),
+                },
+            });
+        }
+
+        return Ok(expr_stack.pop().expect("to be always defined"));
     }
 
-    Ok(lhs)
+    Ok(expr)
 }
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
@@ -313,7 +321,11 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
                 });
             }
 
-            let mut var = Var { name: id, path: vec![] };
+            let mut var = Var {
+                name: id,
+                path: vec![],
+            };
+
             while let Some(Sym::Dot) = state.look_ahead()? {
                 state.shift()?;
                 var.path.push(parse_ident(state)?);

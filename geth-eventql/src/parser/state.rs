@@ -3,9 +3,14 @@ use crate::{
     tokenizer::{Lexer, Pos},
 };
 
+struct LookAhead {
+    sym: Sym,
+    pos: Pos,
+}
+
 pub struct ParserState<'a> {
     lexer: Lexer<'a>,
-    buf: Option<Sym>,
+    buf: Option<LookAhead>,
 }
 
 impl<'a> From<Lexer<'a>> for ParserState<'a> {
@@ -21,10 +26,11 @@ impl<'a> ParserState<'a> {
 
     pub fn look_ahead(&mut self) -> eyre::Result<Option<&Sym>> {
         if self.buf.is_none() {
-            self.buf = self.lexer.next_sym()?;
+            let pos = self.lexer.pos();
+            self.buf = self.lexer.next_sym()?.map(|sym| LookAhead { sym, pos });
         }
 
-        Ok(self.buf.as_ref())
+        Ok(self.buf.as_ref().map(|x| &x.sym))
     }
 
     pub fn shift(&mut self) -> eyre::Result<Option<Sym>> {
@@ -32,7 +38,7 @@ impl<'a> ParserState<'a> {
             return self.lexer.next_sym();
         }
 
-        Ok(self.buf.take())
+        Ok(self.buf.take().map(|x| x.sym))
     }
 
     pub fn shift_or_bail(&mut self) -> eyre::Result<Sym> {
@@ -69,6 +75,10 @@ impl<'a> ParserState<'a> {
     }
 
     pub fn pos(&self) -> Pos {
+        if let Some(x) = &self.buf {
+            return x.pos;
+        }
+
         self.lexer.pos()
     }
 }

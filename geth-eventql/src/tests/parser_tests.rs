@@ -199,7 +199,11 @@ fn test_events_using_subquery() -> eyre::Result<()> {
         .as_var()
         .expect("a var");
 
-    let value_var = sub_query_projection.get("value").unwrap().as_var().expect("a var");
+    let value_var = sub_query_projection
+        .get("value")
+        .unwrap()
+        .as_var()
+        .expect("a var");
 
     assert_eq!("e", order_id_var.name);
     assert_eq!(&["id"], order_id_var.path.as_slice());
