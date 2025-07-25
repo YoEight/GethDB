@@ -84,7 +84,7 @@ pub fn infer(renamed: Renamed) -> eyre::Result<Infered> {
 
     for scope in renamed.scopes.iter() {
         for (name, props) in scope.vars() {
-            inner.insert(name.clone(), Type::Record);
+            inner.insert(format!("{}:{name}", scope.id()), Type::Record);
             inner.insert(format!("{}:{name}:specversion", scope.id()), Type::String);
             inner.insert(format!("{}:{name}:id", scope.id()), Type::String);
             inner.insert(format!("{}:{name}:time", scope.id()), Type::String);
@@ -246,20 +246,16 @@ fn infer_expr(
             let type_proj = Type::project(&lit);
             let new_lit = Value::Literal(lit);
 
-            if assumption == Type::Unspecified {
-                (assumption, new_lit)
-            } else {
-                if assumption != type_proj {
-                    eyre::bail!(
-                        "{}: expected type '{}' but got '{}'",
-                        expr.tag.pos,
-                        assumption,
-                        type_proj,
-                    );
-                }
-
-                (type_proj, new_lit)
+            if assumption != Type::Unspecified && assumption != type_proj {
+                eyre::bail!(
+                    "{}: expected type '{}' but got '{}'",
+                    expr.tag.pos,
+                    assumption,
+                    type_proj,
+                );
             }
+
+            (type_proj, new_lit)
         }
 
         Value::Var(var) => {
@@ -274,8 +270,9 @@ fn infer_expr(
                 (register_assumption, Value::Var(var))
             } else if assumption != register_assumption {
                 eyre::bail!(
-                    "{}: expected {assumption} but got {register_assumption} instead",
+                    "{}: '{}' type was expected to {assumption} but got {register_assumption} instead",
                     expr.tag.pos,
+                    var,
                 );
             } else {
                 (assumption, Value::Var(var))
@@ -344,6 +341,7 @@ fn infer_expr(
         }
 
         Value::Binary { lhs, op, rhs } => {
+            let scope = expr.tag.scope;
             let result_type = match op {
                 Operation::And
                 | Operation::Or
@@ -371,19 +369,50 @@ fn infer_expr(
                 );
             }
 
-            let lhs_assumption = match op {
-                Operation::And | Operation::Or | Operation::Xor => Type::Bool,
-                _ => Type::Unspecified,
-            };
-
-            let (lhs_type, lhs) = infer_expr(type_check, lhs_assumption, *lhs)?;
+            let (mut lhs_type, lhs) = infer_expr(type_check, Type::Unspecified, *lhs)?;
 
             let rhs_assumption = match op {
                 Operation::Contains => Type::Array,
-                _ => lhs_type,
+                x if operation_requires_same_type(x) => lhs_type,
+                _ => Type::Unspecified,
             };
 
-            let rhs = infer_expr_simple(type_check, rhs_assumption, *rhs)?;
+            let (mut rhs_type, rhs) = infer_expr(type_check, rhs_assumption, *rhs)?;
+
+            if lhs_type == Type::Unspecified
+                && rhs_type != Type::Unspecified
+                && operation_requires_same_type(op)
+            {
+                lhs_type = rhs_type;
+
+                if let Some(var) = lhs.as_var() {
+                    type_check.set_type_info(scope, var, rhs_type);
+                }
+            } else if rhs_type == Type::Unspecified
+                && lhs_type != Type::Unspecified
+                && operation_requires_same_type(op)
+            {
+                rhs_type = lhs_type;
+
+                if let Some(var) = rhs.as_var() {
+                    type_check.set_type_info(scope, var, lhs_type);
+                }
+            }
+
+            if operation_requires_same_type(op) && lhs_type != rhs_type {
+                eyre::bail!(
+                    "{}: expected '{lhs_type}' but got '{rhs_type}' instead",
+                    expr.tag.pos
+                );
+            }
+
+            if op == Operation::Contains && rhs_type != Type::Array {
+                eyre::bail!(
+                    "{}: expected '{}' but got '{rhs_type}' instead",
+                    expr.tag.pos,
+                    Type::Array
+                );
+            }
 
             (
                 result_type,
@@ -438,4 +467,8 @@ fn infer_expr(
             value,
         },
     ))
+}
+
+fn operation_requires_same_type(op: Operation) -> bool {
+    !matches!(op, Operation::Contains)
 }

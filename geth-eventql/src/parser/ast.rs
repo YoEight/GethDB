@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::sym::{Literal, Operation};
 
@@ -136,6 +136,18 @@ pub struct ApplyFun<'a, A> {
 pub struct Var {
     pub name: String,
     pub path: Vec<String>,
+}
+
+impl Display for Var {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+
+        for p in &self.path {
+            write!(f, ".{p}")?;
+        }
+
+        Ok(())
+    }
 }
 
 pub enum Value<A> {
