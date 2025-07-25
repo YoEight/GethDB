@@ -313,15 +313,15 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
                 });
             }
 
-            let mut path = vec![id];
+            let mut var = Var { name: id, path: vec![] };
             while let Some(Sym::Dot) = state.look_ahead()? {
                 state.shift()?;
-                path.push(parse_ident(state)?);
+                var.path.push(parse_ident(state)?);
             }
 
             Ok(Expr {
                 tag: pos,
-                value: Value::Path(path),
+                value: Value::Var(var),
             })
         }
 

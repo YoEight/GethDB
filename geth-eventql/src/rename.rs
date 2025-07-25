@@ -67,6 +67,10 @@ pub struct Scope {
 }
 
 impl Scope {
+    pub fn id(&self) -> u64 {
+        self.id
+    }
+
     fn contains_variable(&self, name: &str) -> bool {
         self.properties.contains_key(name)
     }
@@ -90,6 +94,10 @@ impl Scope {
 
         eyre::bail!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
     }
+
+    pub fn vars(&self) -> impl Iterator<Item = (&String, &Properties)> {
+        self.properties.iter()
+    }
 }
 
 pub struct Scopes {
@@ -107,6 +115,10 @@ impl Scopes {
         }
 
         eyre::bail!("UNREACHABLE CODE PATH: scope '{id}' doesn't exist")
+    }
+
+    pub fn iter(&self) -> impl Iterator<Item = &Scope> {
+        self.inner.values()
     }
 }
 
@@ -253,38 +265,29 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
     let value = match expr.value {
         Value::Literal(l) => Value::Literal(l),
 
-        Value::Path(path) => {
+        Value::Var(var) => {
             let mut prev = "";
-            let mut var_name = "";
 
-            for (depth, ident) in path.iter().enumerate() {
-                match depth {
-                    0 => {
-                        if !scope.contains_variable(ident) {
-                            eyre::bail!("{}: variable '{ident}' doesn't exist", expr.tag);
-                        }
+            if !scope.contains_variable(&var.name) {
+                eyre::bail!("{}: variable '{}' doesn't exist", expr.tag, var.name);
+            }
 
-                        var_name = ident.as_str();
+            for (depth, ident) in var.path.iter().enumerate() {
+                if depth == 1 {
+                    if prev != "data" {
+                        eyre::bail!(
+                            "{}: only the 'data' field can have dynamically accessed fields",
+                            expr.tag
+                        );
                     }
 
-                    2 => {
-                        if prev != "data" {
-                            eyre::bail!(
-                                "{}: only the 'data' field can have dynamically accessed fields",
-                                expr.tag
-                            );
-                        }
-
-                        scope.var_properties_mut(var_name)?.add(ident.clone());
-                    }
-
-                    _ => {}
+                    scope.var_properties_mut(&var.name)?.add(ident.clone());
                 }
 
                 prev = ident.as_str();
             }
 
-            Value::Path(path)
+            Value::Var(var)
         }
 
         Value::Record(record) => {

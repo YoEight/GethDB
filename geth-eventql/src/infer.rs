@@ -1,11 +1,15 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Value, Where,
+    Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Value, Var, Where,
     parser::{Record, Source, SourceType},
 };
 
-pub struct Infered {}
+pub struct Infered {
+    assumptions: Assumptions,
+    scopes: Scopes,
+    query: Query<Infer>,
+}
 
 pub struct Infer {}
 
@@ -58,21 +62,101 @@ impl Type {
 
 #[derive(Default)]
 pub struct Assumptions {
-    type_id_gen: u64,
-    inner: HashMap<u64, Type>,
+    inner: HashMap<String, Type>,
+}
+
+impl Assumptions {
+    pub fn lookup_type_info(&self, scope: u64, var: &Var) -> Type {
+        let key = urn(scope, &var.name, &var.path);
+        if let Some(tpe) = self.inner.get(&key) {
+            return *tpe;
+        }
+
+        Type::Unspecified
+    }
 }
 
 pub fn infer(renamed: Renamed) -> eyre::Result<Infered> {
-    todo!()
+    let mut inner = HashMap::new();
+
+    for scope in renamed.scopes.iter() {
+        for (name, props) in scope.vars() {
+            inner.insert(name.clone(), Type::Record);
+            inner.insert(format!("{}:{name}:specversion", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:id", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:time", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:source", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:subject", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:type", scope.id()), Type::String);
+            inner.insert(
+                format!("{}:{name}:datacontenttype", scope.id()),
+                Type::String,
+            );
+            inner.insert(format!("{}:{name}:data", scope.id()), Type::Record);
+            inner.insert(
+                format!("{}:{name}:predecessorhash", scope.id()),
+                Type::Integer,
+            );
+            inner.insert(format!("{}:{name}:hash", scope.id()), Type::Integer);
+
+            for prop in props.iter() {
+                inner.insert(
+                    format!("{}:{name}:data:{prop}", scope.id()),
+                    Type::Unspecified,
+                );
+            }
+        }
+    }
+
+    let mut type_check = Typecheck {
+        assumptions: inner,
+        scopes: renamed.scopes,
+    };
+
+    let query = infer_query(&mut type_check, renamed.query)?;
+
+    Ok(Infered {
+        assumptions: Assumptions {
+            inner: type_check.assumptions,
+        },
+        scopes: type_check.scopes,
+        query,
+    })
 }
 
-#[derive(Clone, Copy)]
-struct Typecheck<'a> {
-    assumptions: &'a Assumptions,
-    scopes: &'a Scopes,
+struct Typecheck {
+    assumptions: HashMap<String, Type>,
+    scopes: Scopes,
 }
 
-fn infer_query(type_check: Typecheck<'_>, query: Query<Lexical>) -> eyre::Result<Query<Infer>> {
+fn urn(scope: u64, name: &String, path: &Vec<String>) -> String {
+    let mut agg = format!("{scope}:{name}");
+
+    for prop in path {
+        agg.push(':');
+        agg.push_str(prop);
+    }
+
+    agg
+}
+
+impl Typecheck {
+    fn lookup_type_info(&self, scope: u64, var: &Var) -> Type {
+        let key = urn(scope, &var.name, &var.path);
+        if let Some(tpe) = self.assumptions.get(&key) {
+            return *tpe;
+        }
+
+        Type::Unspecified
+    }
+
+    fn set_type_info(&mut self, scope: u64, var: &Var, assumption: Type) {
+        let key = urn(scope, &var.name, &var.path);
+        self.assumptions.insert(key, assumption);
+    }
+}
+
+fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> eyre::Result<Query<Infer>> {
     let mut from_stmts = Vec::new();
 
     for stmt in query.from_stmts {
@@ -96,7 +180,7 @@ fn infer_query(type_check: Typecheck<'_>, query: Query<Lexical>) -> eyre::Result
     })
 }
 
-fn infer_from(type_check: Typecheck<'_>, stmt: From<Lexical>) -> eyre::Result<From<Infer>> {
+fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> eyre::Result<From<Infer>> {
     let inner = match stmt.source.inner {
         SourceType::Events => SourceType::Events,
         SourceType::Subject(_) => todo!(),
@@ -115,7 +199,10 @@ fn infer_from(type_check: Typecheck<'_>, stmt: From<Lexical>) -> eyre::Result<Fr
     })
 }
 
-fn infer_where(type_check: Typecheck<'_>, predicate: Where<Lexical>) -> eyre::Result<Where<Infer>> {
+fn infer_where(
+    type_check: &mut Typecheck,
+    predicate: Where<Lexical>,
+) -> eyre::Result<Where<Infer>> {
     Ok(Where {
         tag: Infer {},
         expr: infer_expr_simple(type_check, Type::Bool, predicate.expr)?,
@@ -123,7 +210,7 @@ fn infer_where(type_check: Typecheck<'_>, predicate: Where<Lexical>) -> eyre::Re
 }
 
 fn infer_expr_simple(
-    type_check: Typecheck<'_>,
+    type_check: &mut Typecheck,
     assumption: Type,
     expr: Expr<Lexical>,
 ) -> eyre::Result<Expr<Infer>> {
@@ -132,7 +219,7 @@ fn infer_expr_simple(
 }
 
 fn infer_expr(
-    type_check: Typecheck<'_>,
+    type_check: &mut Typecheck,
     assumption: Type,
     expr: Expr<Lexical>,
 ) -> eyre::Result<(Type, Expr<Infer>)> {
@@ -157,7 +244,26 @@ fn infer_expr(
             }
         }
 
-        Value::Path(items) => todo!(),
+        Value::Var(var) => {
+            let register_assumption = type_check.lookup_type_info(expr.tag.scope, &var);
+
+            if assumption == Type::Unspecified && register_assumption == assumption {
+                (Type::Unspecified, Value::Var(var))
+            } else if register_assumption == Type::Unspecified {
+                type_check.set_type_info(expr.tag.scope, &var, assumption);
+                (assumption, Value::Var(var))
+            } else if assumption == Type::Unspecified {
+                (register_assumption, Value::Var(var))
+            } else if assumption != register_assumption {
+                eyre::bail!(
+                    "{}: expected {} but got an array instead",
+                    expr.tag.pos,
+                    assumption
+                );
+            } else {
+                (assumption, Value::Var(var))
+            }
+        }
 
         Value::Record(record) => {
             if assumption != Type::Unspecified && assumption != Type::Record {

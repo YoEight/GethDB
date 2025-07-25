@@ -9,7 +9,7 @@ mod tokenizer;
 #[cfg(test)]
 mod tests;
 
-pub use parser::{Expr, From, Limit, LimitKind, Order, Query, Sort, Value, Where};
+pub use parser::{Expr, From, Limit, LimitKind, Order, Query, Sort, Value, Var, Where};
 pub use sym::{Literal, Operation};
 pub use tokenizer::Pos;
 

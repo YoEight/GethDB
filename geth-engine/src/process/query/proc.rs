@@ -1,4 +1,4 @@
-use geth_eventql::{Expr, Literal, Operation, Pos, Query};
+use geth_eventql::{Expr, Literal, Operation, Pos, Query, Var};
 
 use crate::process::{
     messages::{QueryRequests, QueryResponses},
@@ -35,7 +35,7 @@ enum Stack<'a> {
 
 enum Eval<'a> {
     Literal(&'a Literal),
-    Path(&'a Vec<String>),
+    Var(&'a Var),
 }
 
 fn collect_requirements(query: &Query<Pos>) -> Requirements {
@@ -50,8 +50,8 @@ fn collect_requirements(query: &Query<Pos>) -> Requirements {
                         params.push(Eval::Literal(l));
                     }
 
-                    geth_eventql::Value::Path(p) => {
-                        params.push(Eval::Path(p));
+                    geth_eventql::Value::Var(p) => {
+                        params.push(Eval::Var(p));
                     }
 
                     // this one is more about looking type cues about the expected payload of an

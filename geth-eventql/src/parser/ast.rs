@@ -68,8 +68,8 @@ pub struct Expr<A> {
 }
 
 impl<A> Expr<A> {
-    pub fn as_path(&self) -> Option<&Vec<String>> {
-        if let Value::Path(p) = &self.value {
+    pub fn as_var(&self) -> Option<&Var> {
+        if let Value::Var(p) = &self.value {
             return Some(p);
         }
 
@@ -132,9 +132,15 @@ pub struct ApplyFun<'a, A> {
     pub params: &'a Vec<Expr<A>>,
 }
 
+#[derive(Debug)]
+pub struct Var {
+    pub name: String,
+    pub path: Vec<String>,
+}
+
 pub enum Value<A> {
     Literal(Literal),
-    Path(Vec<String>),
+    Var(Var),
     Record(Record<A>),
     Array(Vec<Expr<A>>),
     App {
