@@ -1,3 +1,5 @@
+use crate::error::RenameError;
+
 #[test]
 fn test_rename_on_subquery() -> crate::Result<()> {
     let query = include_str!("./resources/rename_subquery.eql");
@@ -28,7 +30,9 @@ fn test_rename_non_existing_variable() -> crate::Result<()> {
     let query = include_str!("./resources/rename_non_existing_variable.eql");
     let query = crate::parse(query)?;
 
-    assert!(crate::rename(query).is_err());
+    let e = crate::rename(query).err().expect("to return an error");
+
+    assert_eq!(e.kind, RenameError::VariableDoesNotExist("f".to_string()));
 
     Ok(())
 }
@@ -38,7 +42,9 @@ fn test_rename_duplicate_variable_names() -> crate::Result<()> {
     let query = include_str!("./resources/rename_duplicate_variable_names.eql");
     let query = crate::parse(query)?;
 
-    assert!(crate::rename(query).is_err());
+    let e = crate::rename(query).err().expect("to return an error");
+
+    assert_eq!(e.kind, RenameError::VariableAlreadyExists("e".to_string()));
 
     Ok(())
 }

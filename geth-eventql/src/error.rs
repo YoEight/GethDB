@@ -19,12 +19,52 @@ impl Display for Error {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ErrorKind {
     Lexer(LexerError),
     Parser(ParserError),
     Rename(RenameError),
     Infer(InferError),
+}
+
+impl PartialEq<LexerError> for ErrorKind {
+    fn eq(&self, other: &LexerError) -> bool {
+        if let Self::Lexer(x) = self {
+            return x == other;
+        }
+
+        false
+    }
+}
+
+impl PartialEq<ParserError> for ErrorKind {
+    fn eq(&self, other: &ParserError) -> bool {
+        if let Self::Parser(x) = self {
+            return x == other;
+        }
+
+        false
+    }
+}
+
+impl PartialEq<RenameError> for ErrorKind {
+    fn eq(&self, other: &RenameError) -> bool {
+        if let Self::Rename(x) = self {
+            return x == other;
+        }
+
+        false
+    }
+}
+
+impl PartialEq<InferError> for ErrorKind {
+    fn eq(&self, other: &InferError) -> bool {
+        if let Self::Infer(x) = self {
+            return x == other;
+        }
+
+        false
+    }
 }
 
 impl From<LexerError> for ErrorKind {
@@ -62,7 +102,7 @@ impl Display for ErrorKind {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum LexerError {
     UnexpectedEndOfQuery,
     UnexpectedSymbol(char),
@@ -71,7 +111,7 @@ pub enum LexerError {
     StringLiteralNotClosed,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum ParserError {
     BinaryUnaryOperationUnallowedInProjection,
     UnexpectedSymbolWithAlternatives(Sym, &'static [Sym]),
@@ -82,14 +122,14 @@ pub enum ParserError {
     ExpectedExpr(Sym),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum RenameError {
     VariableAlreadyExists(String),
     VariableDoesNotExist(String),
     OnlyDataFieldDynAccessField,
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq)]
 pub enum InferError {
     TypeMismatch(Type, Type),
     VarTypeMismatch(Var, Type, Type),

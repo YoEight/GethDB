@@ -145,7 +145,7 @@ pub struct ApplyFun<'a, A> {
     pub params: &'a Vec<Expr<A>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Var {
     pub name: String,
     pub path: Vec<String>,
