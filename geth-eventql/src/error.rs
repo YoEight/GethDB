@@ -7,9 +7,11 @@ use crate::{Operation, Pos, Type, Var, sym::Sym};
 
 #[derive(Debug)]
 pub struct Error {
-    pos: Pos,
-    kind: ErrorKind,
+    pub pos: Pos,
+    pub kind: ErrorKind,
 }
+
+impl std::error::Error for Error {}
 
 impl Display for Error {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -23,6 +25,30 @@ pub enum ErrorKind {
     Parser(ParserError),
     Rename(RenameError),
     Infer(InferError),
+}
+
+impl From<LexerError> for ErrorKind {
+    fn from(value: LexerError) -> Self {
+        Self::Lexer(value)
+    }
+}
+
+impl From<ParserError> for ErrorKind {
+    fn from(value: ParserError) -> Self {
+        Self::Parser(value)
+    }
+}
+
+impl From<RenameError> for ErrorKind {
+    fn from(value: RenameError) -> Self {
+        Self::Rename(value)
+    }
+}
+
+impl From<InferError> for ErrorKind {
+    fn from(value: InferError) -> Self {
+        Self::Infer(value)
+    }
 }
 
 impl Display for ErrorKind {
@@ -40,7 +66,7 @@ impl Display for ErrorKind {
 pub enum LexerError {
     UnexpectedEndOfQuery,
     UnexpectedSymbol(char),
-    MalformedFloatingNumber(ParseFloatError),
+    MalformedFloatingNumber(Option<ParseFloatError>),
     MalformedIntegralNumber(ParseIntError),
     StringLiteralNotClosed,
 }
@@ -48,8 +74,9 @@ pub enum LexerError {
 #[derive(Debug)]
 pub enum ParserError {
     BinaryUnaryOperationUnallowedInProjection,
-    UnexpectedSymbol(Sym, Vec<Sym>),
-    ExpectedGreaterOrEqualToZero(i64),
+    UnexpectedSymbolWithAlternatives(Sym, &'static [Sym]),
+    UnexpectedSymbol(Sym, Sym),
+    ExpectedGreaterOrEqualToZero(Sym),
     ExpectedIdent(Sym),
     ExpectedSource(Sym),
     ExpectedExpr(Sym),
@@ -57,7 +84,7 @@ pub enum ParserError {
 
 #[derive(Debug)]
 pub enum RenameError {
-    VariableAlreadyExist(String),
+    VariableAlreadyExists(String),
     VariableDoesNotExist(String),
     OnlyDataFieldDynAccessField,
 }
@@ -74,7 +101,7 @@ impl Display for LexerError {
         match self {
             LexerError::UnexpectedEndOfQuery => write!(f, "unexpected end of the query"),
             LexerError::UnexpectedSymbol(sym) => write!(f, "unexpected symbol '{sym}'"),
-            LexerError::MalformedFloatingNumber(e) => write!(f, "malformed floating number: {e}"),
+            LexerError::MalformedFloatingNumber(e) => write!(f, "malformed floating number: {e:?}"),
             LexerError::MalformedIntegralNumber(e) => write!(f, "malformed integral number: {e}"),
             LexerError::StringLiteralNotClosed => {
                 write!(f, "string literal is not closed properly")
@@ -91,12 +118,12 @@ impl Display for ParserError {
                 "binary or unary operations are not allowed when projecting a result"
             ),
 
-            ParserError::UnexpectedSymbol(got, expected) => {
-                if expected.is_empty() {
-                    write!(f, "unexpected symbol {got}")
-                } else {
-                    write!(f, "expected {expected:?} but found '{got}' instead")
-                }
+            ParserError::UnexpectedSymbolWithAlternatives(got, alternatives) => {
+                write!(f, "expected {alternatives:?} but got '{got}' instead")
+            }
+
+            ParserError::UnexpectedSymbol(expected, got) => {
+                write!(f, "expected {expected:?} but got '{got}' instead")
             }
 
             ParserError::ExpectedGreaterOrEqualToZero(x) => {
@@ -124,7 +151,7 @@ impl Display for ParserError {
 impl Display for RenameError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            RenameError::VariableAlreadyExist(x) => {
+            RenameError::VariableAlreadyExists(x) => {
                 write!(f, "variable '{x}' already exists in this scope")
             }
 

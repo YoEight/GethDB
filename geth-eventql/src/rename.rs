@@ -2,6 +2,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
     Expr, From, Pos, Query, Sort, Value, Where,
+    error::RenameError,
     parser::{Record, Source, SourceType},
 };
 
@@ -131,7 +132,7 @@ pub struct Renamed {
     pub query: Query<Lexical>,
 }
 
-pub fn rename(query: Query<Pos>) -> eyre::Result<Renamed> {
+pub fn rename(query: Query<Pos>) -> crate::Result<Renamed> {
     let mut analysis = Analysis::default();
 
     let query = rename_query(&mut analysis, query)?;
@@ -144,7 +145,7 @@ pub fn rename(query: Query<Pos>) -> eyre::Result<Renamed> {
     })
 }
 
-fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> eyre::Result<Query<Lexical>> {
+fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> crate::Result<Query<Lexical>> {
     let mut from_stmts = Vec::new();
     let scope = analysis.current_scope_id();
 
@@ -188,16 +189,12 @@ fn rename_query(analysis: &mut Analysis, query: Query<Pos>) -> eyre::Result<Quer
     })
 }
 
-fn rename_from(analysis: &mut Analysis, from: From<Pos>) -> eyre::Result<From<Lexical>> {
+fn rename_from(analysis: &mut Analysis, from: From<Pos>) -> crate::Result<From<Lexical>> {
     let scope = {
         let scope = analysis.scope_mut();
 
         if scope.contains_variable(&from.ident) {
-            eyre::bail!(
-                "{}: variable '{}' already exists in this scope",
-                from.tag,
-                from.ident
-            );
+            bail!(from.tag, RenameError::VariableAlreadyExists(from.ident));
         }
 
         scope.new_var(from.ident.clone());
@@ -214,7 +211,7 @@ fn rename_from(analysis: &mut Analysis, from: From<Pos>) -> eyre::Result<From<Le
     })
 }
 
-fn rename_source(analysis: &mut Analysis, source: Source<Pos>) -> eyre::Result<Source<Lexical>> {
+fn rename_source(analysis: &mut Analysis, source: Source<Pos>) -> crate::Result<Source<Lexical>> {
     Ok(Source {
         tag: Lexical {
             pos: source.tag,
@@ -228,7 +225,7 @@ fn rename_source(analysis: &mut Analysis, source: Source<Pos>) -> eyre::Result<S
 fn rename_source_type(
     analysis: &mut Analysis,
     source_type: SourceType<Pos>,
-) -> eyre::Result<SourceType<Lexical>> {
+) -> crate::Result<SourceType<Lexical>> {
     match source_type {
         SourceType::Events => Ok(SourceType::Events),
         SourceType::Subject(sub) => Ok(SourceType::Subject(sub)),
@@ -242,7 +239,7 @@ fn rename_source_type(
     }
 }
 
-fn rename_where(scope: &mut Scope, predicate: Where<Pos>) -> eyre::Result<Where<Lexical>> {
+fn rename_where(scope: &mut Scope, predicate: Where<Pos>) -> crate::Result<Where<Lexical>> {
     Ok(Where {
         tag: Lexical {
             pos: predicate.tag,
@@ -253,14 +250,14 @@ fn rename_where(scope: &mut Scope, predicate: Where<Pos>) -> eyre::Result<Where<
     })
 }
 
-fn rename_sort(scope: &mut Scope, sort: Sort<Pos>) -> eyre::Result<Sort<Lexical>> {
+fn rename_sort(scope: &mut Scope, sort: Sort<Pos>) -> crate::Result<Sort<Lexical>> {
     Ok(Sort {
         expr: rename_expr(scope, sort.expr)?,
         order: sort.order,
     })
 }
 
-fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>> {
+fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> crate::Result<Expr<Lexical>> {
     let lexical = Lexical {
         pos: expr.tag,
         scope: scope.id,
@@ -273,16 +270,13 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
             let mut prev = "";
 
             if !scope.contains_variable(&var.name) {
-                eyre::bail!("{}: variable '{}' doesn't exist", expr.tag, var.name);
+                bail!(expr.tag, RenameError::VariableDoesNotExist(var.name));
             }
 
             for (depth, ident) in var.path.iter().enumerate() {
                 if depth == 1 {
                     if prev != "data" {
-                        eyre::bail!(
-                            "{}: only the 'data' field can have dynamically accessed fields",
-                            expr.tag
-                        );
+                        bail!(expr.tag, RenameError::OnlyDataFieldDynAccessField);
                     }
 
                     scope.var_properties_mut(&var.name).add(ident.clone());

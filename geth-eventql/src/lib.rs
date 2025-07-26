@@ -1,3 +1,6 @@
+#[macro_use]
+mod macros;
+
 use crate::tokenizer::Lexer;
 
 mod error;
@@ -10,11 +13,17 @@ mod tokenizer;
 #[cfg(test)]
 mod tests;
 
+pub mod private {
+    pub use std::result::Result::Err;
+}
+
 pub use parser::{Expr, From, Limit, LimitKind, Order, Query, Sort, Value, Var, Where};
 pub use sym::{Literal, Operation};
 pub use tokenizer::Pos;
 
-pub fn parse(query: &str) -> eyre::Result<Query<Pos>> {
+pub type Result<A> = std::result::Result<A, crate::error::Error>;
+
+pub fn parse(query: &str) -> crate::Result<Query<Pos>> {
     let lexer = Lexer::new(query);
     parser::parse(lexer)
 }

@@ -13,7 +13,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                 let query = match geth_eventql::parse(&query) {
                     Ok(q) => q,
                     Err(e) => {
-                        let _ = stream.sender.send(QueryResponses::Error(e).into());
+                        let _ = stream.sender.send(QueryResponses::Error(e.into()).into());
                         continue;
                     }
                 };

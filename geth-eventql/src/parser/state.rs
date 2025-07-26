@@ -1,4 +1,5 @@
 use crate::{
+    error::{LexerError, ParserError},
     sym::Sym,
     tokenizer::{Lexer, Pos},
 };
@@ -24,7 +25,7 @@ impl<'a> ParserState<'a> {
         Self { lexer, buf: None }
     }
 
-    pub fn look_ahead(&mut self) -> eyre::Result<Option<&Sym>> {
+    pub fn look_ahead(&mut self) -> crate::Result<Option<&Sym>> {
         if self.buf.is_none() {
             let pos = self.lexer.pos();
             self.buf = self.lexer.next_sym()?.map(|sym| LookAhead { sym, pos });
@@ -33,7 +34,7 @@ impl<'a> ParserState<'a> {
         Ok(self.buf.as_ref().map(|x| &x.sym))
     }
 
-    pub fn shift(&mut self) -> eyre::Result<Option<Sym>> {
+    pub fn shift(&mut self) -> crate::Result<Option<Sym>> {
         if self.buf.is_none() {
             return self.lexer.next_sym();
         }
@@ -41,15 +42,15 @@ impl<'a> ParserState<'a> {
         Ok(self.buf.take().map(|x| x.sym))
     }
 
-    pub fn shift_or_bail(&mut self) -> eyre::Result<Sym> {
+    pub fn shift_or_bail(&mut self) -> crate::Result<Sym> {
         if let Some(sym) = self.shift()? {
             return Ok(sym);
         }
 
-        eyre::bail!("unexpected end of query")
+        bail!(self.pos(), LexerError::UnexpectedEndOfQuery)
     }
 
-    pub fn skip_whitespace(&mut self) -> eyre::Result<()> {
+    pub fn skip_whitespace(&mut self) -> crate::Result<()> {
         let sym_opt = self.look_ahead()?;
 
         if let Some(sym) = sym_opt {
@@ -63,12 +64,12 @@ impl<'a> ParserState<'a> {
         Ok(())
     }
 
-    pub fn expect(&mut self, exp: Sym) -> eyre::Result<()> {
+    pub fn expect(&mut self, exp: Sym) -> crate::Result<()> {
         let pos = self.pos();
         let sym = self.shift_or_bail()?;
 
         if sym != exp {
-            eyre::bail!("{pos}: expected {exp} but got {sym} instead");
+            bail!(pos, ParserError::UnexpectedSymbol(exp, sym));
         }
 
         Ok(())
@@ -88,7 +89,7 @@ mod tests {
     use crate::{parser::state::ParserState, sym::Sym, tokenizer::Lexer};
 
     #[test]
-    fn test_look_ahead() -> eyre::Result<()> {
+    fn test_look_ahead() -> crate::Result<()> {
         let mut state: ParserState<'_> = Lexer::new("foobar where").into();
 
         let sym = state.look_ahead()?.cloned();
@@ -100,7 +101,7 @@ mod tests {
     }
 
     #[test]
-    fn test_shift() -> eyre::Result<()> {
+    fn test_shift() -> crate::Result<()> {
         let mut state: ParserState<'_> = Lexer::new("foobar where").into();
 
         let sym = state.shift_or_bail()?;

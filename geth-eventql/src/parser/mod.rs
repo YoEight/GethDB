@@ -1,4 +1,5 @@
 use crate::{
+    error::ParserError,
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
 };
@@ -10,13 +11,13 @@ mod state;
 pub use ast::*;
 use state::ParserState;
 
-pub fn parse(lexer: Lexer<'_>) -> eyre::Result<Query<Pos>> {
+pub fn parse(lexer: Lexer<'_>) -> crate::Result<Query<Pos>> {
     let mut state = ParserState::new(lexer);
 
     parse_query(&mut state)
 }
 
-fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
+fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query<Pos>> {
     let pos = state.pos();
     let mut from_stmts = Vec::new();
 
@@ -58,17 +59,17 @@ fn parse_query(state: &mut ParserState<'_>) -> eyre::Result<Query<Pos>> {
     })
 }
 
-fn check_projection(proj: &Expr<Pos>) -> eyre::Result<()> {
+fn check_projection(proj: &Expr<Pos>) -> crate::Result<()> {
     match &proj.value {
-        Value::Binary { .. } | Value::Unary { .. } => eyre::bail!(
-            "{}: binary or unary operations are not allowed when projecting a result",
-            proj.tag
+        Value::Binary { .. } | Value::Unary { .. } => bail!(
+            proj.tag,
+            ParserError::BinaryUnaryOperationUnallowedInProjection
         ),
         _ => Ok(()),
     }
 }
 
-fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> {
+fn parse_from_statement(state: &mut ParserState<'_>) -> crate::Result<From<Pos>> {
     state.skip_whitespace()?;
 
     let pos = state.pos();
@@ -88,7 +89,7 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> eyre::Result<From<Pos>> 
     })
 }
 
-fn parse_group_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Expr<Pos>>> {
+fn parse_group_by(state: &mut ParserState<'_>) -> crate::Result<Option<Expr<Pos>>> {
     state.skip_whitespace()?;
     if let Some(sym) = state.look_ahead()?
         && sym != &Sym::Keyword(Keyword::Group)
@@ -104,7 +105,7 @@ fn parse_group_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Expr<Pos>>
     Ok(Some(parse_expr_single(state)?))
 }
 
-fn parse_order_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Sort<Pos>>> {
+fn parse_order_by(state: &mut ParserState<'_>) -> crate::Result<Option<Sort<Pos>>> {
     state.skip_whitespace()?;
     if let Some(sym) = state.look_ahead()?
         && sym != &Sym::Keyword(Keyword::Order)
@@ -123,13 +124,19 @@ fn parse_order_by(state: &mut ParserState<'_>) -> eyre::Result<Option<Sort<Pos>>
     let order = match sym {
         Sym::Keyword(Keyword::Desc) => Order::Desc,
         Sym::Keyword(Keyword::Asc) => Order::Asc,
-        x => eyre::bail!("{pos}: expected either 'ASC' or 'DESC' but found '{x}' instead"),
+        x => bail!(
+            pos,
+            ParserError::UnexpectedSymbolWithAlternatives(
+                x,
+                &[Sym::Keyword(Keyword::Asc), Sym::Keyword(Keyword::Desc)]
+            )
+        ),
     };
 
     Ok(Some(Sort { expr, order }))
 }
 
-fn parse_limit(state: &mut ParserState<'_>) -> eyre::Result<Option<Limit>> {
+fn parse_limit(state: &mut ParserState<'_>) -> crate::Result<Option<Limit>> {
     state.skip_whitespace()?;
 
     if let Some(sym) = state.look_ahead()?
@@ -144,27 +151,33 @@ fn parse_limit(state: &mut ParserState<'_>) -> eyre::Result<Option<Limit>> {
     let kind = match sym {
         Sym::Keyword(Keyword::Skip) => LimitKind::Skip,
         Sym::Keyword(Keyword::Top) => LimitKind::Top,
-        x => eyre::bail!("{pos}: expected either 'SKIP' or 'TOP' but found '{x}' instead"),
+        x => bail!(
+            pos,
+            ParserError::UnexpectedSymbolWithAlternatives(
+                x,
+                &[Sym::Keyword(Keyword::Skip), Sym::Keyword(Keyword::Top)]
+            )
+        ),
     };
 
     state.skip_whitespace()?;
     let pos = state.pos();
     let value = match state.shift_or_bail()? {
         Sym::Literal(Literal::Integral(n)) if n >= 0 => n as u64,
-        x => eyre::bail!("{pos}: expected a greater or equal to 0 integer but found '{x}' instead"),
+        x => bail!(pos, ParserError::ExpectedGreaterOrEqualToZero(x)),
     };
 
     Ok(Some(Limit { kind, value }))
 }
 
-fn parse_ident(state: &mut ParserState<'_>) -> eyre::Result<String> {
+fn parse_ident(state: &mut ParserState<'_>) -> crate::Result<String> {
     match state.shift_or_bail()? {
         Sym::Id(id) => Ok(id),
-        x => eyre::bail!("{}: expected an ident but got '{x}' instead", state.pos()),
+        x => bail!(state.pos(), ParserError::ExpectedIdent(x)),
     }
 }
 
-fn parse_source(state: &mut ParserState<'_>) -> eyre::Result<Source<Pos>> {
+fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
     let pos = state.pos();
     match state.shift_or_bail()? {
         Sym::Id(id) if id.to_lowercase() == "events" => Ok(Source {
@@ -189,11 +202,11 @@ fn parse_source(state: &mut ParserState<'_>) -> eyre::Result<Source<Pos>> {
             })
         }
 
-        x => eyre::bail!("{}: expected a source but got {x} instead", state.pos()),
+        x => bail!(state.pos(), ParserError::ExpectedSource(x)),
     }
 }
 
-fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Option<Where<Pos>>> {
+fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where<Pos>>> {
     state.skip_whitespace()?;
 
     if let Some(sym) = state.look_ahead()?
@@ -212,7 +225,7 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> eyre::Result<Option<Where<
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
-fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
+fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
     state.skip_whitespace()?;
 
     let expr = parse_expr_single(state)?;
@@ -268,7 +281,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
-fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
+fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
     // because parse_expr can be call recursively, it's possible in some situations that we could
     // have dangling whitespaces. To prevent the parser from rejecting the query in that case, it's
     // better to skip the whitespace before doing anything.
@@ -414,9 +427,6 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> eyre::Result<Expr<Pos>> {
             })
         }
 
-        x => eyre::bail!(
-            "{}: expected an expression but got {x} instead",
-            state.pos()
-        ),
+        x => bail!(state.pos(), ParserError::ExpectedExpr(x)),
     }
 }

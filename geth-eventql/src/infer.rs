@@ -2,6 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Sort, Value, Var, Where,
+    error::InferError,
     parser::{Record, Source, SourceType},
 };
 
@@ -79,7 +80,7 @@ impl Assumptions {
     }
 }
 
-pub fn infer(renamed: Renamed) -> eyre::Result<Infered> {
+pub fn infer(renamed: Renamed) -> crate::Result<Infered> {
     let mut inner = HashMap::new();
 
     for scope in renamed.scopes.iter() {
@@ -159,7 +160,7 @@ impl Typecheck {
     }
 }
 
-fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> eyre::Result<Query<Infer>> {
+fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> crate::Result<Query<Infer>> {
     let mut from_stmts = Vec::new();
 
     for stmt in query.from_stmts {
@@ -198,7 +199,7 @@ fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> eyre::Resul
     })
 }
 
-fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> eyre::Result<From<Infer>> {
+fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> crate::Result<From<Infer>> {
     let inner = match stmt.source.inner {
         SourceType::Events => SourceType::Events,
         SourceType::Subject(s) => SourceType::Subject(s),
@@ -220,7 +221,7 @@ fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> eyre::Result<F
 fn infer_where(
     type_check: &mut Typecheck,
     predicate: Where<Lexical>,
-) -> eyre::Result<Where<Infer>> {
+) -> crate::Result<Where<Infer>> {
     Ok(Where {
         tag: Infer {},
         expr: infer_expr_simple(type_check, Type::Bool, predicate.expr)?,
@@ -231,7 +232,7 @@ fn infer_expr_simple(
     type_check: &mut Typecheck,
     assumption: Type,
     expr: Expr<Lexical>,
-) -> eyre::Result<Expr<Infer>> {
+) -> crate::Result<Expr<Infer>> {
     let (_, expr) = infer_expr(type_check, assumption, expr)?;
     Ok(expr)
 }
@@ -240,18 +241,16 @@ fn infer_expr(
     type_check: &mut Typecheck,
     assumption: Type,
     expr: Expr<Lexical>,
-) -> eyre::Result<(Type, Expr<Infer>)> {
+) -> crate::Result<(Type, Expr<Infer>)> {
     let (typ, value) = match expr.value {
         Value::Literal(lit) => {
             let type_proj = Type::project(&lit);
             let new_lit = Value::Literal(lit);
 
             if assumption != Type::Unspecified && assumption != type_proj {
-                eyre::bail!(
-                    "{}: expected type '{}' but got '{}'",
+                bail!(
                     expr.tag.pos,
-                    assumption,
-                    type_proj,
+                    InferError::TypeMismatch(assumption, type_proj)
                 );
             }
 
@@ -269,10 +268,9 @@ fn infer_expr(
             } else if assumption == Type::Unspecified {
                 (register_assumption, Value::Var(var))
             } else if assumption != register_assumption {
-                eyre::bail!(
-                    "{}: '{}' type was expected to {assumption} but got {register_assumption} instead",
+                bail!(
                     expr.tag.pos,
-                    var,
+                    InferError::VarTypeMismatch(var, assumption, register_assumption)
                 );
             } else {
                 (assumption, Value::Var(var))
@@ -281,10 +279,9 @@ fn infer_expr(
 
         Value::Record(record) => {
             if assumption != Type::Unspecified && assumption != Type::Record {
-                eyre::bail!(
-                    "{}: expected a '{assumption}' but got '{}' instead",
+                bail!(
                     expr.tag.pos,
-                    Type::Record,
+                    InferError::TypeMismatch(assumption, Type::Record)
                 );
             }
 
@@ -302,10 +299,9 @@ fn infer_expr(
 
         Value::Array(exprs) => {
             if assumption != Type::Unspecified && assumption != Type::Array {
-                eyre::bail!(
-                    "{}: expected {} but got an array instead",
+                bail!(
                     expr.tag.pos,
-                    assumption
+                    InferError::TypeMismatch(assumption, Type::Array)
                 );
             }
 
@@ -355,17 +351,14 @@ fn infer_expr(
                 | Operation::GreaterThanOrEqual => Type::Bool,
 
                 Operation::Not => {
-                    eyre::bail!(
-                        "{}: 'NOT' is not supported for binary operations",
-                        expr.tag.pos
-                    );
+                    bail!(expr.tag.pos, InferError::UnsupportedBinaryOperation(op));
                 }
             };
 
             if assumption != Type::Unspecified && assumption != result_type {
-                eyre::bail!(
-                    "{}: expected '{assumption}' but got '{result_type}'",
-                    expr.tag.pos
+                bail!(
+                    expr.tag.pos,
+                    InferError::TypeMismatch(assumption, result_type)
                 );
             }
 
@@ -400,17 +393,13 @@ fn infer_expr(
             }
 
             if operation_requires_same_type(op) && lhs_type != rhs_type {
-                eyre::bail!(
-                    "{}: expected '{lhs_type}' but got '{rhs_type}' instead",
-                    expr.tag.pos
-                );
+                bail!(expr.tag.pos, InferError::TypeMismatch(lhs_type, rhs_type));
             }
 
             if op == Operation::Contains && rhs_type != Type::Array {
-                eyre::bail!(
-                    "{}: expected '{}' but got '{rhs_type}' instead",
+                bail!(
                     expr.tag.pos,
-                    Type::Array
+                    InferError::TypeMismatch(rhs_type, Type::Array)
                 );
             }
 
@@ -428,17 +417,16 @@ fn infer_expr(
             let result_type = if op == Operation::Not {
                 Type::Bool
             } else {
-                eyre::bail!(
-                    "{}: expected '{assumption}' but got '{}' instead",
+                bail!(
                     expr.tag.pos,
-                    Type::Bool
+                    InferError::TypeMismatch(assumption, Type::Bool)
                 );
             };
 
             if assumption != Type::Unspecified && assumption != result_type {
-                eyre::bail!(
-                    "{}: expected '{assumption}' but got '{result_type}' instead",
-                    expr.tag.pos
+                bail!(
+                    expr.tag.pos,
+                    InferError::TypeMismatch(assumption, result_type)
                 );
             }
 

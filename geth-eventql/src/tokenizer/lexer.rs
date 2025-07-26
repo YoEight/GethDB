@@ -1,4 +1,5 @@
 use crate::{
+    error::LexerError,
     sym::{Keyword, Literal, Operation, Sym},
     tokenizer::{Pos, text::Text},
 };
@@ -18,7 +19,7 @@ impl<'a> Lexer<'a> {
         Text::new(query).into()
     }
 
-    fn consume_and_return(&mut self, sym: Sym) -> eyre::Result<Option<Sym>> {
+    fn consume_and_return(&mut self, sym: Sym) -> crate::Result<Option<Sym>> {
         self.text.shift();
         Ok(Some(sym))
     }
@@ -27,7 +28,7 @@ impl<'a> Lexer<'a> {
         self.text.pos()
     }
 
-    pub fn next_sym(&mut self) -> eyre::Result<Option<Sym>> {
+    pub fn next_sym(&mut self) -> crate::Result<Option<Sym>> {
         match self.text.look_ahead() {
             None => Ok(None),
 
@@ -81,14 +82,14 @@ impl<'a> Lexer<'a> {
                     let c = if let Some(c) = self.text.look_ahead() {
                         c
                     } else {
-                        eyre::bail!("{}: unexpected end of the query", self.text.pos());
+                        bail!(self.text.pos(), LexerError::UnexpectedEndOfQuery);
                     };
 
                     if c == '=' {
                         return self.consume_and_return(Sym::Operation(Operation::NotEqual));
                     }
 
-                    eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos())
+                    bail!(self.text.pos(), LexerError::UnexpectedSymbol(c));
                 }
 
                 '=' => {
@@ -97,14 +98,14 @@ impl<'a> Lexer<'a> {
                     let c = if let Some(c) = self.text.look_ahead() {
                         c
                     } else {
-                        eyre::bail!("{}: unexpected end of the query", self.text.pos());
+                        bail!(self.text.pos(), LexerError::UnexpectedEndOfQuery);
                     };
 
                     if c == '=' {
                         return self.consume_and_return(Sym::Operation(Operation::Equal));
                     }
 
-                    eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos())
+                    bail!(self.text.pos(), LexerError::UnexpectedSymbol(c));
                 }
 
                 _ if c.is_ascii_lowercase() || c.is_ascii_uppercase() => {
@@ -152,20 +153,20 @@ impl<'a> Lexer<'a> {
 
                 '"' | '\'' => self.parse_string_literal(),
 
-                _ => eyre::bail!("{}: unexpected symbol '{c}'", self.text.pos()),
+                _ =>   bail!(self.text.pos(), LexerError::UnexpectedSymbol(c)),
             },
         }
     }
 
-    fn shift_or_bail(&mut self) -> eyre::Result<char> {
+    fn shift_or_bail(&mut self) -> crate::Result<char> {
         if let Some(c) = self.text.shift() {
             return Ok(c);
         }
 
-        eyre::bail!("unexpected end of query")
+        bail!(self.text.pos(), LexerError::UnexpectedEndOfQuery);
     }
 
-    fn parse_integer_or_float(&mut self) -> eyre::Result<Option<Sym>> {
+    fn parse_integer_or_float(&mut self) -> crate::Result<Option<Sym>> {
         let c = self.shift_or_bail()?;
         let mut num = String::new();
         num.push(c);
@@ -174,7 +175,7 @@ impl<'a> Lexer<'a> {
         while let Some(ch) = self.text.look_ahead() {
             if ch == '.' {
                 if is_float {
-                    eyre::bail!("{}: malformed floating number", self.text.pos());
+                    bail!(self.text.pos(), LexerError::MalformedFloatingNumber(None));
                 }
 
                 is_float = true;
@@ -190,7 +191,7 @@ impl<'a> Lexer<'a> {
             match num.parse::<f64>() {
                 Ok(num) => return Ok(Some(Sym::Literal(Literal::Float(num)))),
                 Err(e) => {
-                    eyre::bail!("{}: malformed floating number: {e}", self.text.pos())
+                    bail!(self.text.pos(), LexerError::MalformedFloatingNumber(Some(e)));
                 }
             }
         }
@@ -198,12 +199,12 @@ impl<'a> Lexer<'a> {
         match num.parse::<i64>() {
             Ok(num) => Ok(Some(Sym::Literal(Literal::Integral(num)))),
             Err(e) => {
-                eyre::bail!("{}: malformed integral number: {e}", self.text.pos())
+                bail!(self.text.pos(), LexerError::MalformedIntegralNumber(e))
             }
         }
     }
 
-    fn parse_string_literal(&mut self) -> eyre::Result<Option<Sym>> {
+    fn parse_string_literal(&mut self) -> crate::Result<Option<Sym>> {
         let opening = self.shift_or_bail()?;
         let mut string = String::new();
 
@@ -213,13 +214,13 @@ impl<'a> Lexer<'a> {
             }
 
             if ch == '\n' {
-                eyre::bail!("{}: string literal is malformed", self.text.pos());
+                bail!(self.text.pos(), LexerError::StringLiteralNotClosed);
             }
 
             string.push(ch);
             self.text.shift();
         }
 
-        eyre::bail!("incomplete string literal");
+        bail!(self.text.pos(), LexerError::UnexpectedEndOfQuery);
     }
 }

@@ -1,7 +1,7 @@
 use crate::{Limit, LimitKind, Order, sym::Operation};
 
 #[test]
-fn test_parsing_from_events_with_top_identity_projection() -> eyre::Result<()> {
+fn test_parsing_from_events_with_top_identity_projection() -> crate::Result<()> {
     let query = include_str!("./resources/from_events_with_top_identity_projection.eql");
 
     let mut query = crate::parse(query)?;
@@ -42,7 +42,7 @@ fn test_parsing_from_events_with_top_identity_projection() -> eyre::Result<()> {
 }
 
 #[test]
-fn test_from_events_with_type_to_project_record() -> eyre::Result<()> {
+fn test_from_events_with_type_to_project_record() -> crate::Result<()> {
     let query = include_str!("./resources/from_events_with_type_to_project_record.eql");
 
     let mut query = crate::parse(query)?;
@@ -89,7 +89,7 @@ fn test_from_events_with_type_to_project_record() -> eyre::Result<()> {
 }
 
 #[test]
-fn test_from_events_where_subject_project_record_with_count() -> eyre::Result<()> {
+fn test_from_events_where_subject_project_record_with_count() -> crate::Result<()> {
     let query = include_str!("./resources/from_events_where_subject_project_record_with_count.eql");
 
     let mut query = crate::parse(query)?;
@@ -125,7 +125,7 @@ fn test_from_events_where_subject_project_record_with_count() -> eyre::Result<()
 }
 
 #[test]
-fn test_from_events_nested_data() -> eyre::Result<()> {
+fn test_from_events_nested_data() -> crate::Result<()> {
     let query = include_str!("./resources/from_events_nested_data.eql");
 
     let mut query = crate::parse(query)?;
@@ -165,7 +165,7 @@ fn test_from_events_nested_data() -> eyre::Result<()> {
 }
 
 #[test]
-fn test_events_using_subquery() -> eyre::Result<()> {
+fn test_events_using_subquery() -> crate::Result<()> {
     let query = include_str!("./resources/from_events_using_subquery.eql");
 
     let mut query = crate::parse(query)?;
