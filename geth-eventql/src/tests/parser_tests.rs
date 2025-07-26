@@ -227,3 +227,42 @@ fn test_events_using_subquery() -> crate::Result<()> {
 
     Ok(())
 }
+
+#[test]
+fn test_parser_binary_op() -> crate::Result<()> {
+    let query = include_str!("./resources/parser_binary_op.eql");
+
+    let mut query = crate::parse(query)?;
+    let pred = query.predicate.as_ref().expect("a predicate");
+    let bin_op = pred.expr.as_binary_op().expect("a binary op");
+    let lhs_bin_op = bin_op.lhs.as_binary_op().expect("a binary op");
+    let rhs_bin_op = bin_op.rhs.as_binary_op().expect("a binary op");
+
+    assert_eq!(Operation::And, bin_op.op);
+
+    assert_eq!(
+        "e.data.foo",
+        lhs_bin_op.lhs.as_var().expect("a var").to_string()
+    );
+
+    assert_eq!(
+        "foobar",
+        lhs_bin_op.rhs.as_string_literal().expect("a string")
+    );
+
+    assert_eq!(Operation::Equal, lhs_bin_op.op);
+
+    assert_eq!(
+        "e.data.foo",
+        rhs_bin_op.lhs.as_var().expect("a var").to_string()
+    );
+
+    assert_eq!(
+        42,
+        rhs_bin_op.rhs.as_i64_literal().expect("a integer")
+    );
+
+    assert_eq!(Operation::Equal, rhs_bin_op.op);
+
+    Ok(())
+}
