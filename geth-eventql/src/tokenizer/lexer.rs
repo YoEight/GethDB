@@ -153,7 +153,7 @@ impl<'a> Lexer<'a> {
 
                 '"' | '\'' => self.parse_string_literal(),
 
-                _ =>   bail!(self.text.pos(), LexerError::UnexpectedSymbol(c)),
+                _ => bail!(self.text.pos(), LexerError::UnexpectedSymbol(c)),
             },
         }
     }
@@ -191,7 +191,10 @@ impl<'a> Lexer<'a> {
             match num.parse::<f64>() {
                 Ok(num) => return Ok(Some(Sym::Literal(Literal::Float(num)))),
                 Err(e) => {
-                    bail!(self.text.pos(), LexerError::MalformedFloatingNumber(Some(e)));
+                    bail!(
+                        self.text.pos(),
+                        LexerError::MalformedFloatingNumber(Some(e))
+                    );
                 }
             }
         }
