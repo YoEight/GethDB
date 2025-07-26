@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::sym::{Literal, Operation};
 
@@ -68,8 +68,8 @@ pub struct Expr<A> {
 }
 
 impl<A> Expr<A> {
-    pub fn as_path(&self) -> Option<&Vec<String>> {
-        if let Value::Path(p) = &self.value {
+    pub fn as_var(&self) -> Option<&Var> {
+        if let Value::Var(p) = &self.value {
             return Some(p);
         }
 
@@ -83,6 +83,14 @@ impl<A> Expr<A> {
                 op: *op,
                 rhs: rhs.as_ref(),
             });
+        }
+
+        None
+    }
+
+    pub fn as_unary_op(&self) -> Option<UnaryOp<'_, A>> {
+        if let Value::Unary { op, expr } = &self.value {
+            return Some(UnaryOp { op: *op, expr });
         }
 
         None
@@ -127,14 +135,37 @@ pub struct BinaryOp<'a, A> {
     pub rhs: &'a Expr<A>,
 }
 
+pub struct UnaryOp<'a, A> {
+    pub op: Operation,
+    pub expr: &'a Expr<A>,
+}
+
 pub struct ApplyFun<'a, A> {
     pub name: &'a String,
     pub params: &'a Vec<Expr<A>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Var {
+    pub name: String,
+    pub path: Vec<String>,
+}
+
+impl Display for Var {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+
+        for p in &self.path {
+            write!(f, ".{p}")?;
+        }
+
+        Ok(())
+    }
+}
+
 pub enum Value<A> {
     Literal(Literal),
-    Path(Vec<String>),
+    Var(Var),
     Record(Record<A>),
     Array(Vec<Expr<A>>),
     App {

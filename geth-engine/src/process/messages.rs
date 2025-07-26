@@ -53,6 +53,12 @@ impl From<SubscribeRequests> for Messages {
     }
 }
 
+impl From<QueryRequests> for Messages {
+    fn from(value: QueryRequests) -> Self {
+        Self::Requests(Requests::Query(value))
+    }
+}
+
 impl From<SubscribeResponses> for Messages {
     fn from(resp: SubscribeResponses) -> Self {
         Messages::Responses(Responses::Subscribe(resp))
@@ -80,6 +86,12 @@ impl From<ProgramRequests> for Messages {
 impl From<ProgramResponses> for Messages {
     fn from(resp: ProgramResponses) -> Self {
         Messages::Responses(Responses::Program(resp))
+    }
+}
+
+impl From<QueryResponses> for Messages {
+    fn from(value: QueryResponses) -> Self {
+        Self::Responses(Responses::Query(value))
     }
 }
 
@@ -206,6 +218,17 @@ impl TryFrom<Messages> for ProgramRequests {
     }
 }
 
+impl TryFrom<Messages> for QueryRequests {
+    type Error = ();
+
+    fn try_from(msg: Messages) -> Result<Self, ()> {
+        match msg {
+            Messages::Requests(Requests::Query(req)) => Ok(req),
+            _ => Err(()),
+        }
+    }
+}
+
 impl TryFrom<Messages> for TestSinkRequests {
     type Error = ();
 
@@ -246,6 +269,7 @@ pub enum Requests {
     Subscribe(SubscribeRequests),
     Write(WriteRequests),
     Program(ProgramRequests),
+    Query(QueryRequests),
     TestSink(TestSinkRequests),
 }
 
@@ -328,6 +352,11 @@ pub enum ProgramRequests {
 }
 
 #[derive(Debug)]
+pub enum QueryRequests {
+    Query { query: String },
+}
+
+#[derive(Debug)]
 pub enum TestSinkRequests {
     StreamFrom { low: u64, high: u64 },
 }
@@ -339,6 +368,7 @@ pub enum Responses {
     Subscribe(SubscribeResponses),
     Write(WriteResponses),
     Program(ProgramResponses),
+    Query(QueryResponses),
     TestSink(TestSinkResponses),
     Error(RequestError),
     FatalError,
@@ -430,4 +460,10 @@ pub enum ProgramResponses {
     Error(eyre::Report),
     Started,
     Stopped,
+}
+
+#[derive(Debug)]
+pub enum QueryResponses {
+    Record(Record),
+    Error(eyre::Report),
 }

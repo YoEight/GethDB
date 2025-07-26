@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE NOT NOT NOT e.enabled
+PROJECT INTO e
