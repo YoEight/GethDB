@@ -88,6 +88,14 @@ impl<A> Expr<A> {
         None
     }
 
+    pub fn as_unary_op(&self) -> Option<UnaryOp<'_, A>> {
+        if let Value::Unary { op, expr } = &self.value {
+            return Some(UnaryOp { op: *op, expr });
+        }
+
+        None
+    }
+
     pub fn as_string_literal(&self) -> Option<&String> {
         if let Value::Literal(Literal::String(s)) = &self.value {
             return Some(s);
@@ -125,6 +133,11 @@ pub struct BinaryOp<'a, A> {
     pub lhs: &'a Expr<A>,
     pub op: Operation,
     pub rhs: &'a Expr<A>,
+}
+
+pub struct UnaryOp<'a, A> {
+    pub op: Operation,
+    pub expr: &'a Expr<A>,
 }
 
 pub struct ApplyFun<'a, A> {

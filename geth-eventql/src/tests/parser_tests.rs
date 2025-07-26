@@ -232,7 +232,7 @@ fn test_events_using_subquery() -> crate::Result<()> {
 fn test_parser_binary_op() -> crate::Result<()> {
     let query = include_str!("./resources/parser_binary_op.eql");
 
-    let mut query = crate::parse(query)?;
+    let query = crate::parse(query)?;
     let pred = query.predicate.as_ref().expect("a predicate");
     let bin_op = pred.expr.as_binary_op().expect("a binary op");
     let lhs_bin_op = bin_op.lhs.as_binary_op().expect("a binary op");
@@ -257,12 +257,33 @@ fn test_parser_binary_op() -> crate::Result<()> {
         rhs_bin_op.lhs.as_var().expect("a var").to_string()
     );
 
-    assert_eq!(
-        42,
-        rhs_bin_op.rhs.as_i64_literal().expect("a integer")
-    );
+    assert_eq!(42, rhs_bin_op.rhs.as_i64_literal().expect("a integer"));
 
     assert_eq!(Operation::Equal, rhs_bin_op.op);
+
+    Ok(())
+}
+
+#[test]
+fn test_parser_inhinged_unary_op() -> crate::Result<()> {
+    let query = include_str!("./resources/parser_unhinged_unary_op.eql");
+
+    let query = crate::parse(query)?;
+    let pred = query.predicate.as_ref().expect("a predicate");
+    let unary_1 = pred.expr.as_unary_op().expect("a unary op");
+
+    assert_eq!(Operation::Not, unary_1.op);
+
+    let unary_2 = unary_1.expr.as_unary_op().expect("a unary op");
+
+    assert_eq!(Operation::Not, unary_2.op);
+
+    let unary_3 = unary_2.expr.as_unary_op().expect("a unary op");
+
+    assert_eq!(Operation::Not, unary_3.op);
+
+    let var = unary_3.expr.as_var().expect("a var");
+    assert_eq!("e.enabled", var.to_string());
 
     Ok(())
 }
