@@ -79,20 +79,20 @@ impl Scope {
         self.properties.insert(name, Properties::default());
     }
 
-    fn var_properties_mut(&mut self, name: &str) -> eyre::Result<&mut Properties> {
+    fn var_properties_mut(&mut self, name: &str) -> &mut Properties {
         if let Some(prop) = self.properties.get_mut(name) {
-            return Ok(prop);
+            return prop;
         }
 
-        eyre::bail!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
+        panic!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
     }
 
-    pub fn var_properties(&self, name: &str) -> eyre::Result<&Properties> {
+    pub fn var_properties(&self, name: &str) -> &Properties {
         if let Some(prop) = self.properties.get(name) {
-            return Ok(prop);
+            return prop;
         }
 
-        eyre::bail!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
+        panic!("UNREACHABLE CODE PATH ERROR: variable '{name}' doesn't exist")
     }
 
     pub fn vars(&self) -> impl Iterator<Item = (&String, &Properties)> {
@@ -113,12 +113,12 @@ impl Scopes {
         self.inner.is_empty()
     }
 
-    pub fn scope(&self, id: u64) -> eyre::Result<&Scope> {
+    pub fn scope(&self, id: u64) -> &Scope {
         if let Some(scope) = self.inner.get(&id) {
-            return Ok(scope);
+            return scope;
         }
 
-        eyre::bail!("UNREACHABLE CODE PATH: scope '{id}' doesn't exist")
+        panic!("UNREACHABLE CODE PATH: scope '{id}' doesn't exist")
     }
 
     pub fn iter(&self) -> impl Iterator<Item = &Scope> {
@@ -285,7 +285,7 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> eyre::Result<Expr<Lexical>
                         );
                     }
 
-                    scope.var_properties_mut(&var.name)?.add(ident.clone());
+                    scope.var_properties_mut(&var.name).add(ident.clone());
                 }
 
                 prev = ident.as_str();

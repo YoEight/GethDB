@@ -6,13 +6,13 @@ fn test_rename_on_subquery() -> eyre::Result<()> {
 
     assert_eq!(2, renamed.scopes.len());
 
-    let scope_1 = renamed.scopes.scope(0)?;
+    let scope_1 = renamed.scopes.scope(0);
 
-    assert!(scope_1.var_properties("e")?.is_empty());
+    assert!(scope_1.var_properties("e").is_empty());
 
-    let scope_2 = renamed.scopes.scope(1)?;
+    let scope_2 = renamed.scopes.scope(1);
     let props_2 = scope_2
-        .var_properties("e")?
+        .var_properties("e")
         .iter()
         .map(|x| x.as_str())
         .collect::<Vec<_>>();

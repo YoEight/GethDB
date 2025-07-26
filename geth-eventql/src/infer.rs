@@ -27,7 +27,7 @@ impl Infered {
 
 pub struct Infer {}
 
-#[derive(Copy, Clone, PartialEq, Eq)]
+#[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Type {
     Unspecified,
     Integer,

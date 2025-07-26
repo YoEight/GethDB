@@ -1,5 +1,6 @@
 use crate::tokenizer::Lexer;
 
+mod error;
 mod infer;
 mod parser;
 mod rename;
