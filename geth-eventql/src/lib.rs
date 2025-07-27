@@ -17,7 +17,9 @@ pub mod private {
     pub use std::result::Result::Err;
 }
 
-pub use parser::{Expr, From, Limit, LimitKind, Order, Query, Sort, Value, Var, Where};
+pub use parser::{
+    Expr, From, Limit, LimitKind, Order, Query, Sort, Source, SourceType, Value, Var, Where,
+};
 pub use sym::{Literal, Operation};
 pub use tokenizer::Pos;
 
@@ -28,7 +30,11 @@ pub fn parse(query: &str) -> crate::Result<Query<Pos>> {
     parser::parse(lexer)
 }
 
+pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferedQuery> {
+    infer(rename(parse(query)?)?)
+}
+
 pub use infer::infer;
-pub use infer::{Infer, Infered, Type};
+pub use infer::{Infer, InferedQuery, Type};
 pub use rename::rename;
 pub use rename::{Lexical, Properties, Renamed, Scope, Scopes};

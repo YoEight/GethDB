@@ -1,18 +1,18 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    Expr, From, Lexical, Literal, Operation, Query, Renamed, Scopes, Sort, Value, Var, Where,
+    Expr, From, Lexical, Literal, Operation, Pos, Query, Renamed, Scopes, Sort, Value, Var, Where,
     error::InferError,
     parser::{Record, Source, SourceType},
 };
 
-pub struct Infered {
+pub struct InferedQuery {
     assumptions: Assumptions,
     scopes: Scopes,
     query: Query<Infer>,
 }
 
-impl Infered {
+impl InferedQuery {
     pub fn assumptions(&self) -> &Assumptions {
         &self.assumptions
     }
@@ -26,7 +26,20 @@ impl Infered {
     }
 }
 
-pub struct Infer {}
+pub struct Infer {
+    pos: Pos,
+    scope: u64,
+}
+
+impl Infer {
+    pub fn pos(&self) -> Pos {
+        self.pos
+    }
+
+    pub fn scope(&self) -> u64 {
+        self.scope
+    }
+}
 
 #[derive(Copy, Clone, PartialEq, Eq, Debug)]
 pub enum Type {
@@ -80,7 +93,7 @@ impl Assumptions {
     }
 }
 
-pub fn infer(renamed: Renamed) -> crate::Result<Infered> {
+pub fn infer(renamed: Renamed) -> crate::Result<InferedQuery> {
     let mut inner = HashMap::new();
 
     for scope in renamed.scopes.iter() {
@@ -119,7 +132,7 @@ pub fn infer(renamed: Renamed) -> crate::Result<Infered> {
 
     let query = infer_query(&mut type_check, renamed.query)?;
 
-    Ok(Infered {
+    Ok(InferedQuery {
         assumptions: Assumptions {
             inner: type_check.assumptions,
         },
@@ -189,7 +202,11 @@ fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> crate::Resu
     };
 
     Ok(Query {
-        tag: Infer {},
+        tag: Infer {
+            pos: query.tag.pos,
+            scope: query.tag.scope,
+        },
+
         from_stmts,
         predicate,
         group_by,
@@ -209,10 +226,17 @@ fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> crate::Result<
     };
 
     Ok(From {
-        tag: Infer {},
+        tag: Infer {
+            pos: stmt.tag.pos,
+            scope: stmt.tag.scope,
+        },
+
         ident: stmt.ident,
         source: Source {
-            tag: Infer {},
+            tag: Infer {
+                pos: stmt.source.tag.pos,
+                scope: stmt.source.tag.scope,
+            },
             inner,
         },
     })
@@ -223,7 +247,10 @@ fn infer_where(
     predicate: Where<Lexical>,
 ) -> crate::Result<Where<Infer>> {
     Ok(Where {
-        tag: Infer {},
+        tag: Infer {
+            pos: predicate.tag.pos,
+            scope: predicate.tag.scope,
+        },
         expr: infer_expr_simple(type_check, Type::Bool, predicate.expr)?,
     })
 }
@@ -451,7 +478,10 @@ fn infer_expr(
     Ok((
         typ,
         Expr {
-            tag: Infer {},
+            tag: Infer {
+                pos: expr.tag.pos,
+                scope: expr.tag.scope,
+            },
             value,
         },
     ))
