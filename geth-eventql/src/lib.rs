@@ -18,7 +18,8 @@ pub mod private {
 }
 
 pub use parser::{
-    Expr, From, Limit, LimitKind, Order, Query, Sort, Source, SourceType, Value, Var, Where,
+    Expr, From, Limit, LimitKind, Order, Query, Sort, Source, SourceType, Subject, Value, Var,
+    Where,
 };
 pub use sym::{Literal, Operation};
 pub use tokenizer::Pos;

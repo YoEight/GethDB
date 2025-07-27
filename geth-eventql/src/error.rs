@@ -120,6 +120,8 @@ pub enum ParserError {
     ExpectedIdent(Sym),
     ExpectedSource(Sym),
     ExpectedExpr(Sym),
+    SubjectDoesNotStartWithSlash,
+    SubjectInvalidFormat,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -183,6 +185,14 @@ impl Display for ParserError {
 
             ParserError::ExpectedExpr(sym) => {
                 write!(f, "expected an expression but got '{sym}' instead")
+            }
+
+            ParserError::SubjectDoesNotStartWithSlash => {
+                write!(f, "subject does not start with '/'")
+            }
+
+            ParserError::SubjectInvalidFormat => {
+                write!(f, "invalid subject format")
             }
         }
     }

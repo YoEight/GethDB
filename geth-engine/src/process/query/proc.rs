@@ -1,7 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use geth_eventql::{
-    Expr, Infer, InferedQuery, Literal, Operation, Pos, Query, SourceType, Value, Var, Where,
+    Expr, Infer, InferedQuery, Literal, Operation, Pos, Query, SourceType, Subject, Value, Var,
+    Where,
 };
 
 use crate::process::{
@@ -36,9 +37,14 @@ struct Binding {
     ident: String,
 }
 
+enum Rel {
+    Equal,
+    Substring,
+}
+
 #[derive(Default)]
 struct Requirements {
-    subjects: HashMap<Binding, HashSet<String>>,
+    subjects: HashMap<Binding, HashSet<Subject>>,
 }
 
 enum Stack<'a> {

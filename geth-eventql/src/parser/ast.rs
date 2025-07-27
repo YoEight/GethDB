@@ -12,14 +12,41 @@ pub struct Query<A> {
     pub projection: Expr<A>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Subject {
+    pub(crate) inner: Vec<String>,
+}
+
+impl Display for Subject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "/")?;
+
+        for segment in &self.inner {
+            write!(f, "{segment}/")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Subject {
+    pub fn is_root(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn path(&self) -> &[String] {
+        self.inner.as_slice()
+    }
+}
+
 pub enum SourceType<A> {
     Events,
-    Subject(String),
+    Subject(Subject),
     Subquery(Box<Query<A>>),
 }
 
 impl<A> SourceType<A> {
-    pub fn as_subject(&self) -> Option<&String> {
+    pub fn as_subject(&self) -> Option<&Subject> {
         if let Self::Subject(sub) = self {
             return Some(sub);
         }

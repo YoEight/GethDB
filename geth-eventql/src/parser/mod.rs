@@ -187,7 +187,7 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
 
         Sym::Literal(Literal::String(sub)) => Ok(Source {
             tag: pos,
-            inner: SourceType::Subject(sub),
+            inner: SourceType::Subject(parse_subject(pos, &sub)?),
         }),
 
         Sym::LParens => {
@@ -204,6 +204,23 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
 
         x => bail!(state.pos(), ParserError::ExpectedSource(x)),
     }
+}
+
+fn parse_subject(pos: Pos, subject: &str) -> crate::Result<Subject> {
+    if !subject.starts_with('/') {
+        bail!(pos, ParserError::SubjectDoesNotStartWithSlash);
+    }
+
+    let mut inner = Vec::new();
+    for segment in subject.split_terminator('/').skip(1) {
+        if segment.trim_ascii().is_empty() {
+            bail!(pos, ParserError::SubjectInvalidFormat);
+        }
+
+        inner.push(segment.to_string());
+    }
+
+    Ok(Subject { inner })
 }
 
 fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where<Pos>>> {
