@@ -206,7 +206,7 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
     }
 }
 
-fn parse_subject(pos: Pos, subject: &str) -> crate::Result<Subject> {
+pub(crate) fn parse_subject(pos: Pos, subject: &str) -> crate::Result<Subject> {
     if !subject.starts_with('/') {
         bail!(pos, ParserError::SubjectDoesNotStartWithSlash);
     }

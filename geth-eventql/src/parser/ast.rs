@@ -94,6 +94,12 @@ pub struct Expr<A> {
     pub value: Value<A>,
 }
 
+impl<A> AsMut<Value<A>> for Expr<A> {
+    fn as_mut(&mut self) -> &mut Value<A> {
+        &mut self.value
+    }
+}
+
 impl<A> Expr<A> {
     pub fn as_var(&self) -> Option<&Var> {
         if let Value::Var(p) = &self.value {

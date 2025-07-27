@@ -50,6 +50,7 @@ pub enum Type {
     Bool,
     Array,
     Record,
+    Subject,
 }
 
 impl Display for Type {
@@ -62,6 +63,7 @@ impl Display for Type {
             Type::Bool => write!(f, "Bool"),
             Type::Array => write!(f, "Array"),
             Type::Record => write!(f, "Record"),
+            Type::Subject => write!(f, "Subject"),
         }
     }
 }
@@ -73,6 +75,7 @@ impl Type {
             Literal::Integral(_) => Type::Integer,
             Literal::Float(_) => Type::Float,
             Literal::Bool(_) => Type::Bool,
+            Literal::Subject(_) => Type::Subject,
         }
     }
 }
@@ -103,7 +106,7 @@ pub fn infer(renamed: Renamed) -> crate::Result<InferedQuery> {
             inner.insert(format!("{}:{name}:id", scope.id()), Type::String);
             inner.insert(format!("{}:{name}:time", scope.id()), Type::String);
             inner.insert(format!("{}:{name}:source", scope.id()), Type::String);
-            inner.insert(format!("{}:{name}:subject", scope.id()), Type::String);
+            inner.insert(format!("{}:{name}:subject", scope.id()), Type::Subject);
             inner.insert(format!("{}:{name}:type", scope.id()), Type::String);
             inner.insert(
                 format!("{}:{name}:datacontenttype", scope.id()),

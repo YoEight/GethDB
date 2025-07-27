@@ -83,6 +83,7 @@ pub enum Proc {
     PubSub,
     Grpc,
     PyroWorker,
+    Query,
     #[cfg(test)]
     Echo,
     #[cfg(test)]

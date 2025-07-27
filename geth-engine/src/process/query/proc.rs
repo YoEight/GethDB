@@ -1,8 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use geth_eventql::{
-    Expr, Infer, InferedQuery, Literal, Operation, Pos, Query, SourceType, Subject, Value, Var,
-    Where,
+    Expr, Infer, InferedQuery, Literal, Operation, Query, SourceType, Subject, Value, Where,
 };
 
 use crate::process::{
@@ -23,7 +22,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                     }
                 };
 
-                let requirements = collect_requirements(&query);
+                let _ = collect_requirements(&query);
             }
         }
     }
@@ -37,24 +36,9 @@ struct Binding {
     ident: String,
 }
 
-enum Rel {
-    Equal,
-    Substring,
-}
-
 #[derive(Default)]
 struct Requirements {
     subjects: HashMap<Binding, HashSet<Subject>>,
-}
-
-enum Stack<'a> {
-    Operation(Operation),
-    Expr(&'a Expr<Pos>),
-}
-
-enum Eval<'a> {
-    Literal(&'a Literal),
-    Var(&'a Var),
 }
 
 fn collect_requirements(query: &InferedQuery) -> Requirements {
@@ -96,26 +80,40 @@ fn collect_subjects_from_decl(reqs: &mut Requirements, from_stmt: &geth_eventql:
 }
 
 fn collect_subjects_from_where_clause(reqs: &mut Requirements, clause: &Where<Infer>) {
-    collect_subjects_from_expr(reqs, &clause.expr);
+    collect_subjects_from_where_expr(reqs, &clause.expr);
 }
 
-fn collect_subjects_from_expr(reqs: &mut Requirements, expr: &Expr<Infer>) {
-    match &expr.value {
-        Value::Binary { lhs, op, rhs } => match (&lhs.value, &rhs.value) {
-            (Value::Var(_), Value::Var(_)) => {}
+fn collect_subjects_from_where_expr(reqs: &mut Requirements, expr: &Expr<Infer>) {
+    if let Value::Binary { lhs, op, rhs } = &expr.value {
+        match (&lhs.value, &rhs.value) {
+            (Value::Var(_), Value::Var(_)) => {
+                // TODO - a possible optimization could be to check if two variables are looking at the same subject.
+                // if they do then we can merge the request into a singular read operation. Current thought of the matter: the way we deal
+                // with binding to subjects needs to be extended to either we have a direct binding
+                //  (a.k.a an explict x.subject = "/foo/bar" or FROM x IN "/foo/bar") and an indirect where
+                // we have something like x.subject ==  y.subject. By doing that we can simplify a convuloted requests like
+                // those to a much direct one.
+            }
 
-            (Value::Var(x), Value::Literal(Literal::String(s)))
-            | (Value::Literal(Literal::String(s)), Value::Var(x)) => {
-                // TODO - we check if the predicate is checking for a subject of a specific value
+            (Value::Var(x), Value::Literal(Literal::Subject(sub)))
+            | (Value::Literal(Literal::Subject(sub)), Value::Var(x)) => {
+                if x.path.as_slice() == ["subject"] && op == &Operation::Equal {
+                    let binding = Binding {
+                        scope: expr.tag.scope(),
+                        ident: x.name.clone(),
+                    };
+
+                    reqs.subjects
+                        .entry(binding)
+                        .or_default()
+                        .insert(sub.clone());
+                }
             }
 
             _ => {
-                collect_subjects_from_expr(reqs, lhs);
-                collect_subjects_from_expr(reqs, rhs);
+                collect_subjects_from_where_expr(reqs, lhs);
+                collect_subjects_from_where_expr(reqs, rhs);
             }
-        },
-
-        Value::Unary { op, expr } => todo!(),
-        _ => {}
+        }
     }
 }

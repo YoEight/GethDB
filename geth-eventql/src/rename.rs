@@ -1,9 +1,9 @@
 use std::collections::{BTreeMap, HashMap, HashSet};
 
 use crate::{
-    Expr, From, Pos, Query, Sort, Value, Where,
+    Expr, From, Literal, Pos, Query, Sort, Value, Where,
     error::RenameError,
-    parser::{Record, Source, SourceType},
+    parser::{Record, Source, SourceType, parse_subject},
 };
 
 #[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
@@ -321,11 +321,34 @@ fn rename_expr(scope: &mut Scope, expr: Expr<Pos>) -> crate::Result<Expr<Lexical
             }
         }
 
-        Value::Binary { lhs, op, rhs } => Value::Binary {
-            lhs: Box::new(rename_expr(scope, *lhs)?),
-            op,
-            rhs: Box::new(rename_expr(scope, *rhs)?),
-        },
+        Value::Binary { lhs, op, rhs } => {
+            let mut lhs = rename_expr(scope, *lhs)?;
+            let mut rhs = rename_expr(scope, *rhs)?;
+            let lhs_pos = lhs.tag.pos;
+            let rhs_pos = rhs.tag.pos;
+
+            // if we have a situation where the subject property is compared to a string literal, we assume it's a subject object.
+            // we do replace that string literal to a subject on behalf of the user.
+            match (lhs.as_mut(), lhs_pos, rhs.as_mut(), rhs_pos) {
+                (Value::Var(v), _, Value::Literal(lit), pos)
+                | (Value::Literal(lit), pos, Value::Var(v), _)
+                    if lit.is_string() =>
+                {
+                    if v.path.as_slice() == ["subject"] {
+                        let sub = parse_subject(pos, lit.as_str().expect("to be defined"))?;
+                        *lit = Literal::Subject(sub);
+                    }
+                }
+
+                _ => {}
+            }
+
+            Value::Binary {
+                lhs: Box::new(lhs),
+                op,
+                rhs: Box::new(rhs),
+            }
+        }
 
         Value::Unary { op, expr } => Value::Unary {
             op,
