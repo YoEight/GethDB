@@ -1,5 +1,6 @@
 use std::collections::{HashMap, HashSet};
 
+use geth_common::Record;
 use geth_eventql::{
     Expr, Infer, InferedQuery, Literal, Operation, Query, SourceType, Subject, Value, Where,
 };
@@ -116,4 +117,88 @@ fn collect_subjects_from_where_expr(reqs: &mut Requirements, expr: &Expr<Infer>)
             }
         }
     }
+}
+
+enum Instr<'a> {
+    Expr(&'a Expr<Infer>),
+    Operation(Operation),
+    Array(usize),
+    App(usize),
+}
+
+struct Table {
+    inner: HashMap<String, Literal>,
+}
+
+impl Table {
+    fn property(&self, key: &str) -> Option<&Literal> {
+        self.inner.get(key)
+    }
+
+    fn payload(&self, key: &str) -> Option<&Literal> {
+        todo!()
+    }
+}
+
+fn evaluate_predicate(env: &HashMap<String, Table>, expr: &Expr<Infer>) -> bool {
+    let mut stack = vec![Instr::Expr(expr)];
+    let mut params = Vec::<&Literal>::new();
+
+    while let Some(instr) = stack.pop() {
+        match instr {
+            Instr::Expr(expr) => match &expr.value {
+                Value::Literal(literal) => params.push(literal),
+
+                Value::Var(var) => {
+                    // technically, it's not possible for a var to not be here but we give us some leeway
+                    // by considering that situation to support some kind of RIGHT JOIN feature.
+                    let table = if let Some(t) = env.get(&var.name) {
+                        t
+                    } else {
+                        return false;
+                    };
+
+                    match var.path.as_slice() {
+                        [key] => {
+                            if let Some(lit) = table.property(key) {
+                                params.push(lit);
+                            }
+                        }
+
+                        [prop, key] if prop == "data" => {
+                            if let Some(lit) = table.payload(key) {
+                                params.push(lit);
+                            }
+                        }
+
+                        _ => {}
+                    }
+
+                    // if path == ["id"] {
+                    //     params.push(&Literal::String(record.id.to_string()));
+                    // }
+
+                    // match path {
+                    //     ["specversion"] => params.push(&Literal::String("1.0.0".to_string())),
+                    //     // TODO - put that todo notice here in case I forgot about that wildcard pattern
+                    //     _ => return false,
+                    // }
+                }
+
+                Value::Record(record) => todo!(),
+                Value::Array(exprs) => todo!(),
+                Value::App { fun, params } => todo!(),
+                Value::Binary { lhs, op, rhs } => todo!(),
+                Value::Unary { op, expr } => todo!(),
+            },
+
+            Instr::Operation(operation) => todo!(),
+
+            Instr::Array(_) => todo!(),
+
+            Instr::App(_) => todo!(),
+        }
+    }
+
+    todo!()
 }
