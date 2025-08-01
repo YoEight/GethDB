@@ -4,6 +4,7 @@ mod macros;
 use crate::tokenizer::Lexer;
 
 mod error;
+mod eval;
 mod infer;
 mod linearization;
 mod parser;
