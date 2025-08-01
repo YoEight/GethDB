@@ -5,6 +5,7 @@ use crate::tokenizer::Lexer;
 
 mod error;
 mod infer;
+mod linearization;
 mod parser;
 mod rename;
 mod sym;
@@ -37,5 +38,6 @@ pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferedQuery> {
 
 pub use infer::infer;
 pub use infer::{Infer, InferedQuery, Type};
+pub use linearization::{Instr, linearize};
 pub use rename::rename;
 pub use rename::{Lexical, Properties, Renamed, Scope, Scopes};
