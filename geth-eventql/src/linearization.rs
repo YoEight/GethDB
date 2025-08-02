@@ -5,7 +5,7 @@ pub enum Instr {
     Operation(Operation),
     Lookup(Var),
     Array(usize),
-    Call(String, usize),
+    Call(String),
     Key(String),
     Record(usize),
 }
@@ -14,7 +14,7 @@ pub enum Lexem {
     Value(Value<Infer>),
     Array(usize),
     Operation(Operation),
-    Call(String, usize),
+    Call(String),
     Record(usize),
     Key(String),
 }
@@ -38,7 +38,7 @@ pub fn linearize(expr: Expr<Infer>) -> Vec<Instr> {
                 }
 
                 Value::App { fun, params } => {
-                    stack.push(Lexem::Call(fun, params.len()));
+                    stack.push(Lexem::Call(fun));
 
                     for param in params {
                         stack.push(Lexem::Value(param.value));
@@ -70,7 +70,7 @@ pub fn linearize(expr: Expr<Infer>) -> Vec<Instr> {
 
             Lexem::Operation(op) => instrs.push(Instr::Operation(op)),
 
-            Lexem::Call(fun, siz) => instrs.push(Instr::Call(fun, siz)),
+            Lexem::Call(fun) => instrs.push(Instr::Call(fun)),
 
             Lexem::Record(siz) => instrs.push(Instr::Record(siz)),
 

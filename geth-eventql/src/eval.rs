@@ -1,13 +1,20 @@
 use std::collections::HashMap;
 
-use crate::{Instr, Literal, Operation, parser::Record};
+use crate::{Instr, Literal, Operation, Var};
 
 pub enum EvalError {
     UnexpectedRuntimeError,
+    UnexpectedVarNotFoundError(Var),
 }
 
-pub struct RuntimeEnv {
+pub struct Dictionary {
     inner: HashMap<String, Literal>,
+}
+
+impl Dictionary {
+    fn lookup(&self, var: &Var) -> Result<Literal> {
+        todo!()
+    }
 }
 
 pub struct Rec {
@@ -19,71 +26,145 @@ pub enum Output {
     Record(Rec),
 }
 
-fn pop_value(stack: &mut Vec<Instr>) -> Result<Instr, EvalError> {
-    if let Some(instr) = stack.pop() {
-        return Ok(instr);
-    }
-
-    Err(EvalError::UnexpectedRuntimeError)
+pub enum Either<A, B> {
+    Left(A),
+    Right(B),
 }
 
-pub fn eval(runtime: RuntimeEnv, mut stack: Vec<Instr>) -> Result<Output, EvalError> {
+type Result<A> = std::result::Result<A, EvalError>;
+
+pub struct Stack {
+    inner: Vec<Instr>,
+}
+
+impl Stack {
+    fn pop_or_bail(&mut self) -> Result<Instr> {
+        if let Some(instr) = self.inner.pop() {
+            return Ok(instr);
+        }
+
+        Err(EvalError::UnexpectedRuntimeError)
+    }
+
+    fn pop_as_literal_or_bail(&mut self, dict: &Dictionary) -> Result<Literal> {
+        todo!()
+    }
+
+    fn pop_as_string_or_bail(&mut self, dict: &Dictionary) -> Result<String> {
+        match self.pop_or_bail()? {
+            Instr::Literal(Literal::String(s)) => Ok(s),
+
+            Instr::Lookup(var) => {
+                if let Literal::String(s) = dict.lookup(&var)? {
+                    return Ok(s);
+                }
+
+                Err(EvalError::UnexpectedRuntimeError)
+            }
+
+            _ => Err(EvalError::UnexpectedRuntimeError),
+        }
+    }
+
+    fn pop_as_number_or_bail(&mut self, dict: &Dictionary) -> Result<Either<i64, f64>> {
+        match self.pop_or_bail()? {
+            Instr::Literal(lit) => match lit {
+                Literal::Integral(i) => Ok(Either::Left(i)),
+                Literal::Float(f) => Ok(Either::Right(f)),
+                _ => Err(EvalError::UnexpectedRuntimeError),
+            },
+
+            Instr::Lookup(var) => match dict.lookup(&var)? {
+                Literal::Integral(i) => Ok(Either::Left(i)),
+                Literal::Float(f) => Ok(Either::Right(f)),
+                _ => Err(EvalError::UnexpectedRuntimeError),
+            },
+
+            _ => Err(EvalError::UnexpectedRuntimeError),
+        }
+    }
+
+    fn pop_as_bool_or_bail(&mut self, dict: &Dictionary) -> Result<bool> {
+        match self.pop_or_bail()? {
+            Instr::Literal(lit) => match lit {
+                Literal::Bool(b) => Ok(b),
+                _ => Err(EvalError::UnexpectedRuntimeError),
+            },
+
+            Instr::Lookup(var) => match dict.lookup(&var)? {
+                Literal::Bool(b) => Ok(b),
+                _ => Err(EvalError::UnexpectedRuntimeError),
+            },
+
+            _ => Err(EvalError::UnexpectedRuntimeError),
+        }
+    }
+
+    fn pop(&mut self) -> Option<Instr> {
+        self.inner.pop()
+    }
+
+    fn push(&mut self, instr: Instr) {
+        self.inner.push(instr);
+    }
+
+    fn execute_builtin_fun(&mut self, dict: &Dictionary, name: &str) -> Result<Literal> {
+        let value = match name {
+            "lower" => todo!(),
+            _ => return Err(EvalError::UnexpectedRuntimeError),
+        };
+
+        Ok(value)
+    }
+}
+
+pub fn eval(dict: &Dictionary, mut stack: Stack) -> Result<Output> {
     while let Some(instr) = stack.pop() {
         match instr {
             Instr::Literal(l) => return Ok(Output::Literal(l)),
 
             Instr::Operation(op) => match op {
                 Operation::And => {
-                    let lhs = pop_value(&mut stack)?;
-                    let rhs = pop_value(&mut stack)?;
+                    let lhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail(dict)?;
 
-                    match (lhs, rhs) {
-                        (Instr::Literal(Literal::Bool(a)), Instr::Literal(Literal::Bool(b))) => {
-                            stack.push(Instr::Literal(Literal::Bool(a && b)));
-                        }
-
-                        _ => return Err(EvalError::UnexpectedRuntimeError),
-                    }
+                    stack.push(Instr::Literal(Literal::Bool(lhs && rhs)));
                 }
 
                 Operation::Or => {
-                    let lhs = pop_value(&mut stack)?;
-                    let rhs = pop_value(&mut stack)?;
+                    let lhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail(dict)?;
 
-                    match (lhs, rhs) {
-                        (Instr::Literal(Literal::Bool(a)), Instr::Literal(Literal::Bool(b))) => {
-                            stack.push(Instr::Literal(Literal::Bool(a || b)));
-                        }
-
-                        _ => return Err(EvalError::UnexpectedRuntimeError),
-                    }
+                    stack.push(Instr::Literal(Literal::Bool(lhs || rhs)));
                 }
 
                 Operation::Xor => {
-                    let lhs = pop_value(&mut stack)?;
-                    let rhs = pop_value(&mut stack)?;
+                    let lhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail(dict)?;
 
-                    match (lhs, rhs) {
-                        (Instr::Literal(Literal::Bool(a)), Instr::Literal(Literal::Bool(b))) => {
-                            stack.push(Instr::Literal(Literal::Bool(a ^ b)));
-                        }
-
-                        _ => return Err(EvalError::UnexpectedRuntimeError),
-                    }
+                    stack.push(Instr::Literal(Literal::Bool(lhs ^ rhs)));
                 }
 
                 Operation::Not => {
-                    let value = pop_value(&mut stack)?;
+                    let value = stack.pop_as_bool_or_bail(dict)?;
 
-                    if let Instr::Literal(Literal::Bool(a)) = value {
-                        stack.push(Instr::Literal(Literal::Bool(!a)));
-                        continue;
-                    }
-
-                    return Err(EvalError::UnexpectedRuntimeError);
+                    stack.push(Instr::Literal(Literal::Bool(!value)));
                 }
 
-                Operation::Contains => todo!(),
+                Operation::Contains => {
+                    let lhs = stack.pop_or_bail()?;
+
+                    let lhs = match lhs {
+                        Instr::Literal(lit) => lit,
+                        Instr::Lookup(var) => dict.lookup(&var)?,
+                        Instr::Call(fun) => todo!(),
+                        Instr::Key(_) => todo!(),
+                        Instr::Record(_) => todo!(),
+                    };
+
+                    let rhs = stack.pop_or_bail()?;
+                }
+
                 Operation::Equal => todo!(),
                 Operation::NotEqual => todo!(),
                 Operation::LessThan => todo!(),
