@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Display};
 
 use crate::sym::{Literal, Operation};
 
@@ -12,14 +12,41 @@ pub struct Query<A> {
     pub projection: Expr<A>,
 }
 
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+pub struct Subject {
+    pub(crate) inner: Vec<String>,
+}
+
+impl Display for Subject {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "/")?;
+
+        for segment in &self.inner {
+            write!(f, "{segment}/")?;
+        }
+
+        Ok(())
+    }
+}
+
+impl Subject {
+    pub fn is_root(&self) -> bool {
+        self.inner.is_empty()
+    }
+
+    pub fn path(&self) -> &[String] {
+        self.inner.as_slice()
+    }
+}
+
 pub enum SourceType<A> {
     Events,
-    Subject(String),
+    Subject(Subject),
     Subquery(Box<Query<A>>),
 }
 
 impl<A> SourceType<A> {
-    pub fn as_subject(&self) -> Option<&String> {
+    pub fn as_subject(&self) -> Option<&Subject> {
         if let Self::Subject(sub) = self {
             return Some(sub);
         }
@@ -67,9 +94,15 @@ pub struct Expr<A> {
     pub value: Value<A>,
 }
 
+impl<A> AsMut<Value<A>> for Expr<A> {
+    fn as_mut(&mut self) -> &mut Value<A> {
+        &mut self.value
+    }
+}
+
 impl<A> Expr<A> {
-    pub fn as_path(&self) -> Option<&Vec<String>> {
-        if let Value::Path(p) = &self.value {
+    pub fn as_var(&self) -> Option<&Var> {
+        if let Value::Var(p) = &self.value {
             return Some(p);
         }
 
@@ -83,6 +116,14 @@ impl<A> Expr<A> {
                 op: *op,
                 rhs: rhs.as_ref(),
             });
+        }
+
+        None
+    }
+
+    pub fn as_unary_op(&self) -> Option<UnaryOp<'_, A>> {
+        if let Value::Unary { op, expr } = &self.value {
+            return Some(UnaryOp { op: *op, expr });
         }
 
         None
@@ -127,14 +168,37 @@ pub struct BinaryOp<'a, A> {
     pub rhs: &'a Expr<A>,
 }
 
+pub struct UnaryOp<'a, A> {
+    pub op: Operation,
+    pub expr: &'a Expr<A>,
+}
+
 pub struct ApplyFun<'a, A> {
     pub name: &'a String,
     pub params: &'a Vec<Expr<A>>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Var {
+    pub name: String,
+    pub path: Vec<String>,
+}
+
+impl Display for Var {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.name)?;
+
+        for p in &self.path {
+            write!(f, ".{p}")?;
+        }
+
+        Ok(())
+    }
+}
+
 pub enum Value<A> {
     Literal(Literal),
-    Path(Vec<String>),
+    Var(Var),
     Record(Record<A>),
     Array(Vec<Expr<A>>),
     App {

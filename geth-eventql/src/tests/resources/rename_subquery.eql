@@ -1,0 +1,7 @@
+FROM e IN (
+  FROM e IN events
+  WHERE e.type == "io.eventsourcingdb.library.book-acquired"
+  PROJECT INTO { orderId: e.data.foobar, value: e.data.total }
+)
+WHERE e.value > 100
+PROJECT INTO e

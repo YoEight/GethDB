@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE 42
+PROJECT INTO e

@@ -1,0 +1,3 @@
+FROM e IN events
+WHERE e.data.foo == "foobar" AND e.data.foo == 42
+PROJECT INTO e

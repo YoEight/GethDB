@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use crate::Subject;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Keyword {
     From,
@@ -82,6 +84,21 @@ pub enum Literal {
     Integral(i64),
     Float(f64),
     Bool(bool),
+    Subject(Subject),
+}
+
+impl Literal {
+    pub fn is_string(&self) -> bool {
+        self.as_str().is_some()
+    }
+
+    pub fn as_str(&self) -> Option<&str> {
+        if let Self::String(s) = self {
+            return Some(s.as_str());
+        }
+
+        None
+    }
 }
 
 impl PartialEq for Literal {
@@ -89,6 +106,7 @@ impl PartialEq for Literal {
         match (self, other) {
             (Self::String(x), Self::String(y)) => x == y,
             (Self::Integral(x), Self::Integral(y)) => x == y,
+            (Self::Subject(x), Self::Subject(y)) => x == y,
             (Self::Bool(x), Self::Bool(y)) => x == y,
             _ => false,
         }
@@ -104,6 +122,7 @@ impl Display for Literal {
             Literal::Integral(n) => write!(f, "{n}"),
             Literal::Float(float) => write!(f, "{float}"),
             Literal::Bool(b) => write!(f, "{b}"),
+            Literal::Subject(sub) => write!(f, "{sub}"),
         }
     }
 }

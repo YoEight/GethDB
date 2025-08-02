@@ -9,6 +9,7 @@ use crate::{
     process::{
         grpc, indexing,
         manager::{ManagerClient, TimeoutTarget},
+        query,
         subscription::{self, pyro},
         writing, Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc,
     },
@@ -53,6 +54,7 @@ pub fn spawn_process(params: SpawnParams) -> Uuid {
             Proc::PubSub => spawn(params, sender_ready, subscription::run),
             Proc::Grpc => spawn(params, sender_ready, grpc::run),
             Proc::PyroWorker => spawn(params, sender_ready, pyro::worker::run),
+            Proc::Query => spawn(params, sender_ready, query::run),
             #[cfg(test)]
             Proc::Echo => spawn(params, sender_ready, echo::run),
             #[cfg(test)]
