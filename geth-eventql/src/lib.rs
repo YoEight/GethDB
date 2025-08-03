@@ -3,10 +3,10 @@ mod macros;
 
 use crate::tokenizer::Lexer;
 
+mod codegen;
 mod error;
 mod eval;
 mod infer;
-mod linearization;
 mod parser;
 mod rename;
 mod sym;
@@ -37,8 +37,8 @@ pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferedQuery> {
     infer(rename(parse(query)?)?)
 }
 
+pub use codegen::{Instr, codegen_expr};
 pub use infer::infer;
 pub use infer::{Infer, InferedQuery, Type};
-pub use linearization::{Instr, linearize};
 pub use rename::rename;
 pub use rename::{Lexical, Properties, Renamed, Scope, Scopes};

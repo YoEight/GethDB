@@ -47,55 +47,31 @@ impl Stack {
     }
 
     fn pop_as_literal_or_bail(&mut self, dict: &Dictionary) -> Result<Literal> {
-        todo!()
+        match self.pop_or_bail()? {
+            Instr::Literal(lit) => Ok(lit),
+            Instr::Lookup(var) => dict.lookup(&var),
+            _ => Err(EvalError::UnexpectedRuntimeError),
+        }
     }
 
     fn pop_as_string_or_bail(&mut self, dict: &Dictionary) -> Result<String> {
-        match self.pop_or_bail()? {
-            Instr::Literal(Literal::String(s)) => Ok(s),
-
-            Instr::Lookup(var) => {
-                if let Literal::String(s) = dict.lookup(&var)? {
-                    return Ok(s);
-                }
-
-                Err(EvalError::UnexpectedRuntimeError)
-            }
-
+        match self.pop_as_literal_or_bail(dict)? {
+            Literal::String(s) => Ok(s),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
     fn pop_as_number_or_bail(&mut self, dict: &Dictionary) -> Result<Either<i64, f64>> {
-        match self.pop_or_bail()? {
-            Instr::Literal(lit) => match lit {
-                Literal::Integral(i) => Ok(Either::Left(i)),
-                Literal::Float(f) => Ok(Either::Right(f)),
-                _ => Err(EvalError::UnexpectedRuntimeError),
-            },
-
-            Instr::Lookup(var) => match dict.lookup(&var)? {
-                Literal::Integral(i) => Ok(Either::Left(i)),
-                Literal::Float(f) => Ok(Either::Right(f)),
-                _ => Err(EvalError::UnexpectedRuntimeError),
-            },
-
+        match self.pop_as_literal_or_bail(dict)? {
+            Literal::Integral(i) => Ok(Either::Left(i)),
+            Literal::Float(f) => Ok(Either::Right(f)),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
     fn pop_as_bool_or_bail(&mut self, dict: &Dictionary) -> Result<bool> {
-        match self.pop_or_bail()? {
-            Instr::Literal(lit) => match lit {
-                Literal::Bool(b) => Ok(b),
-                _ => Err(EvalError::UnexpectedRuntimeError),
-            },
-
-            Instr::Lookup(var) => match dict.lookup(&var)? {
-                Literal::Bool(b) => Ok(b),
-                _ => Err(EvalError::UnexpectedRuntimeError),
-            },
-
+        match self.pop_as_literal_or_bail(dict)? {
+            Literal::Bool(b) => Ok(b),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
