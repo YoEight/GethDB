@@ -1,13 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
-use geth_common::Record;
 use geth_eventql::{
     Expr, Infer, InferedQuery, Literal, Operation, Query, SourceType, Subject, Value, Where,
 };
 
 use crate::process::{
-    messages::{QueryRequests, QueryResponses},
     Item, Managed, ProcessEnv,
+    messages::{QueryRequests, QueryResponses},
 };
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]

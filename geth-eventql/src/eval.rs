@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Instr, Literal, Operation, Var};
+use crate::{Instr, Literal, Operation, Var, parser::Record};
 
 pub enum EvalError {
     UnexpectedRuntimeError,
@@ -17,15 +17,6 @@ impl Dictionary {
     }
 }
 
-pub struct Rec {
-    inner: HashMap<String, Literal>,
-}
-
-pub enum Output {
-    Literal(Literal),
-    Record(Rec),
-}
-
 pub enum Either<A, B> {
     Left(A),
     Right(B),
@@ -33,127 +24,441 @@ pub enum Either<A, B> {
 
 type Result<A> = std::result::Result<A, EvalError>;
 
+pub struct Rec {
+    fields: HashMap<String, Entry>,
+}
+
+pub enum Entry {
+    Literal(Literal),
+    Array(Vec<Entry>),
+    Record(Rec),
+}
+
+#[derive(Default)]
 pub struct Stack {
-    inner: Vec<Instr>,
+    inner: Vec<Entry>,
 }
 
 impl Stack {
-    fn pop_or_bail(&mut self) -> Result<Instr> {
-        if let Some(instr) = self.inner.pop() {
-            return Ok(instr);
+    fn pop_or_bail(&mut self) -> Result<Entry> {
+        if let Some(item) = self.inner.pop() {
+            return Ok(item);
         }
 
         Err(EvalError::UnexpectedRuntimeError)
     }
 
-    fn pop_as_literal_or_bail(&mut self, dict: &Dictionary) -> Result<Literal> {
+    fn pop_as_literal_or_bail(&mut self) -> Result<Literal> {
         match self.pop_or_bail()? {
-            Instr::Literal(lit) => Ok(lit),
-            Instr::Lookup(var) => dict.lookup(&var),
+            Entry::Literal(lit) => Ok(lit),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
-    fn pop_as_string_or_bail(&mut self, dict: &Dictionary) -> Result<String> {
-        match self.pop_as_literal_or_bail(dict)? {
+    fn pop_as_string_or_bail(&mut self) -> Result<String> {
+        match self.pop_as_literal_or_bail()? {
             Literal::String(s) => Ok(s),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
     fn pop_as_number_or_bail(&mut self, dict: &Dictionary) -> Result<Either<i64, f64>> {
-        match self.pop_as_literal_or_bail(dict)? {
+        match self.pop_as_literal_or_bail()? {
             Literal::Integral(i) => Ok(Either::Left(i)),
             Literal::Float(f) => Ok(Either::Right(f)),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
-    fn pop_as_bool_or_bail(&mut self, dict: &Dictionary) -> Result<bool> {
-        match self.pop_as_literal_or_bail(dict)? {
+    fn pop_as_bool_or_bail(&mut self) -> Result<bool> {
+        match self.pop_as_literal_or_bail()? {
             Literal::Bool(b) => Ok(b),
             _ => Err(EvalError::UnexpectedRuntimeError),
         }
     }
 
-    fn pop(&mut self) -> Option<Instr> {
-        self.inner.pop()
+    fn pop_as_array_or_bail(&mut self) -> Result<Vec<Entry>> {
+        if let Entry::Array(xs) = self.pop_or_bail()? {
+            return Ok(xs);
+        }
+
+        Err(EvalError::UnexpectedRuntimeError)
     }
 
-    fn push(&mut self, instr: Instr) {
-        self.inner.push(instr);
+    fn push_literal(&mut self, lit: Literal) {
+        self.inner.push(Entry::Literal(lit));
     }
 
-    fn execute_builtin_fun(&mut self, dict: &Dictionary, name: &str) -> Result<Literal> {
-        let value = match name {
-            "lower" => todo!(),
-            _ => return Err(EvalError::UnexpectedRuntimeError),
-        };
+    fn push_array(&mut self, array: Vec<Entry>) {
+        self.inner.push(Entry::Array(array));
+    }
 
-        Ok(value)
+    fn push_record(&mut self, rec: Rec) {
+        self.inner.push(Entry::Record(rec));
     }
 }
 
-pub fn eval(dict: &Dictionary, mut stack: Stack) -> Result<Output> {
-    while let Some(instr) = stack.pop() {
+pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
+    let mut stack = Stack::default();
+
+    for instr in instrs {
         match instr {
-            Instr::Literal(l) => return Ok(Output::Literal(l)),
+            Instr::Push(lit) => stack.push_literal(lit),
+
+            Instr::LoadVar(var) => {
+                let lit = dict.lookup(&var)?;
+                stack.push_literal(lit);
+            }
 
             Instr::Operation(op) => match op {
                 Operation::And => {
-                    let lhs = stack.pop_as_bool_or_bail(dict)?;
-                    let rhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail()?;
+                    let lhs = stack.pop_as_bool_or_bail()?;
 
-                    stack.push(Instr::Literal(Literal::Bool(lhs && rhs)));
+                    stack.push_literal(Literal::Bool(lhs && rhs));
                 }
 
                 Operation::Or => {
-                    let lhs = stack.pop_as_bool_or_bail(dict)?;
-                    let rhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail()?;
+                    let lhs = stack.pop_as_bool_or_bail()?;
 
-                    stack.push(Instr::Literal(Literal::Bool(lhs || rhs)));
+                    stack.push_literal(Literal::Bool(lhs || rhs));
                 }
 
                 Operation::Xor => {
-                    let lhs = stack.pop_as_bool_or_bail(dict)?;
-                    let rhs = stack.pop_as_bool_or_bail(dict)?;
+                    let rhs = stack.pop_as_bool_or_bail()?;
+                    let lhs = stack.pop_as_bool_or_bail()?;
 
-                    stack.push(Instr::Literal(Literal::Bool(lhs ^ rhs)));
+                    stack.push_literal(Literal::Bool(lhs ^ rhs));
                 }
 
                 Operation::Not => {
-                    let value = stack.pop_as_bool_or_bail(dict)?;
+                    let value = stack.pop_as_bool_or_bail()?;
 
-                    stack.push(Instr::Literal(Literal::Bool(!value)));
+                    stack.push_literal(Literal::Bool(!value));
                 }
 
                 Operation::Contains => {
-                    let lhs = stack.pop_or_bail()?;
+                    let array = stack.pop_as_array_or_bail()?;
+                    let value = stack.pop_or_bail()?;
 
-                    let lhs = match lhs {
-                        Instr::Literal(lit) => lit,
-                        Instr::Lookup(var) => dict.lookup(&var)?,
-                        Instr::Call(fun) => todo!(),
-                        Instr::Key(_) => todo!(),
-                        Instr::Record(_) => todo!(),
-                    };
+                    for elem in array {
+                        match (&value, elem) {
+                            (
+                                Entry::Literal(Literal::Integral(value)),
+                                Entry::Literal(Literal::Integral(elem)),
+                            ) if *value == elem => {
+                                stack.push_literal(Literal::Bool(true));
+                                continue;
+                            }
 
-                    let rhs = stack.pop_or_bail()?;
+                            (
+                                Entry::Literal(Literal::Float(value)),
+                                Entry::Literal(Literal::Float(elem)),
+                            ) if *value == elem => {
+                                stack.push_literal(Literal::Bool(true));
+                                continue;
+                            }
+
+                            (
+                                Entry::Literal(Literal::Bool(value)),
+                                Entry::Literal(Literal::Bool(elem)),
+                            ) if *value == elem => {
+                                stack.push_literal(Literal::Bool(true));
+                                continue;
+                            }
+
+                            (
+                                Entry::Literal(Literal::String(value)),
+                                Entry::Literal(Literal::String(elem)),
+                            ) if value == &elem => {
+                                stack.push_literal(Literal::Bool(true));
+                                continue;
+                            }
+
+                            (
+                                Entry::Literal(Literal::Subject(value)),
+                                Entry::Literal(Literal::Subject(elem)),
+                            ) if value == &elem => {
+                                stack.push_literal(Literal::Bool(true));
+                                continue;
+                            }
+
+                            _ => {}
+                        }
+                    }
+
+                    stack.push_literal(Literal::Bool(false));
                 }
 
-                Operation::Equal => todo!(),
-                Operation::NotEqual => todo!(),
-                Operation::LessThan => todo!(),
-                Operation::GreaterThan => todo!(),
-                Operation::LessThanOrEqual => todo!(),
-                Operation::GreaterThanOrEqual => todo!(),
+                Operation::Equal => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
+
+                Operation::NotEqual => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
+
+                Operation::LessThan => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs < rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs < rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs < rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs < rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs < rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
+
+                Operation::GreaterThan => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs > rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs > rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs > rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs > rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs > rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
+
+                Operation::LessThanOrEqual => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
+
+                Operation::GreaterThanOrEqual => {
+                    let rhs = stack.pop_or_bail()?;
+                    let lhs = stack.pop_or_bail()?;
+
+                    match (lhs, rhs) {
+                        (
+                            Entry::Literal(Literal::Integral(lhs)),
+                            Entry::Literal(Literal::Integral(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Float(lhs)),
+                            Entry::Literal(Literal::Float(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::String(lhs)),
+                            Entry::Literal(Literal::String(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Bool(lhs)),
+                            Entry::Literal(Literal::Bool(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        (
+                            Entry::Literal(Literal::Subject(lhs)),
+                            Entry::Literal(Literal::Subject(rhs)),
+                        ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        _ => stack.push_literal(Literal::Bool(false)),
+                    }
+                }
             },
 
-            Instr::Lookup(var) => todo!(),
             Instr::Array(_) => todo!(),
-            Instr::Call(_, _) => todo!(),
-            Instr::Key(_) => todo!(),
-            Instr::Record(_) => todo!(),
+            Instr::Rec(_) => todo!(),
+            Instr::Call(_) => todo!(),
         }
     }
 

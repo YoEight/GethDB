@@ -12,7 +12,7 @@ pub struct Query<A> {
     pub projection: Expr<A>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
 pub struct Subject {
     pub(crate) inner: Vec<String>,
 }
