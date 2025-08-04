@@ -3,8 +3,8 @@ use std::time::Instant;
 use tokio::sync::mpsc::UnboundedSender;
 use uuid::Uuid;
 
-use crate::process::manager::{start_process_manager_with_catalog, Catalog};
 use crate::Options;
+use crate::process::manager::{Catalog, start_process_manager_with_catalog};
 
 #[cfg(test)]
 mod tests;

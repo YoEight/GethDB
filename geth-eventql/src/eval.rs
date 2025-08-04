@@ -313,7 +313,7 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                             Entry::Literal(Literal::Bool(lhs)),
                             Entry::Literal(Literal::Bool(rhs)),
                         ) => {
-                            stack.push_literal(Literal::Bool(lhs < rhs));
+                            stack.push_literal(Literal::Bool(!lhs & rhs));
                         }
 
                         (
@@ -357,7 +357,7 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                             Entry::Literal(Literal::Bool(lhs)),
                             Entry::Literal(Literal::Bool(rhs)),
                         ) => {
-                            stack.push_literal(Literal::Bool(lhs > rhs));
+                            stack.push_literal(Literal::Bool(lhs & !rhs));
                         }
 
                         (

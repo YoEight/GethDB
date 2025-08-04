@@ -8,26 +8,26 @@ mod options;
 mod process;
 
 use geth_mikoshi::{
-    storage::Storage, wal::chunks::ChunkContainer, FileSystemStorage, InMemoryStorage,
+    FileSystemStorage, InMemoryStorage, storage::Storage, wal::chunks::ChunkContainer,
 };
-use opentelemetry::{trace::TracerProvider, KeyValue};
+use opentelemetry::{KeyValue, trace::TracerProvider};
 use opentelemetry_appender_tracing::layer::OpenTelemetryTracingBridge;
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
-    logs::SdkLoggerProvider, metrics::PeriodicReader, trace::SdkTracerProvider, Resource,
+    Resource, logs::SdkLoggerProvider, metrics::PeriodicReader, trace::SdkTracerProvider,
 };
 pub use process::{
+    Proc, RequestContext,
     indexing::IndexClient,
-    manager::{start_process_manager_with_catalog, Catalog, CatalogBuilder, ManagerClient},
+    manager::{Catalog, CatalogBuilder, ManagerClient, start_process_manager_with_catalog},
     reading::{self, ReaderClient},
     start_process_manager,
     writing::WriterClient,
-    Proc, RequestContext,
 };
 use tokio::sync::OnceCell;
 use tracing_opentelemetry::OpenTelemetryLayer;
+use tracing_subscriber::{EnvFilter, prelude::*};
 use tracing_subscriber::{filter::filter_fn, layer::SubscriberExt};
-use tracing_subscriber::{prelude::*, EnvFilter};
 
 pub mod built_info {
     // The file has been placed there by the build script.

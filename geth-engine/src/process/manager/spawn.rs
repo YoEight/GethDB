@@ -6,14 +6,15 @@ use uuid::Uuid;
 #[cfg(test)]
 use crate::process::{echo, panic, sink};
 use crate::{
+    Options, Proc,
     process::{
-        grpc, indexing,
+        Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc, grpc, indexing,
         manager::{ManagerClient, TimeoutTarget},
         query,
         subscription::{self, pyro},
-        writing, Mailbox, Managed, ProcId, ProcessEnv, Raw, RunningProc,
+        writing,
     },
-    reading, Options, Proc,
+    reading,
 };
 
 pub struct SpawnParams {

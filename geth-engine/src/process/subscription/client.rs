@@ -7,7 +7,7 @@ use geth_common::{
     ProgramStats, ProgramSummary, Record, SubscriptionConfirmation, SubscriptionEvent,
     SubscriptionNotification, UnsubscribeReason,
 };
-use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver};
+use tokio::sync::mpsc::{UnboundedReceiver, unbounded_channel};
 use tracing::instrument;
 
 #[derive(Debug)]
@@ -97,13 +97,13 @@ impl Streaming {
                     ProgramResponses::Subscribed(s) => {
                         return Ok(Some(SubscriptionEvent::Notification(
                             SubscriptionNotification::Subscribed(s),
-                        )))
+                        )));
                     }
 
                     ProgramResponses::Unsubscribed(s) => {
                         return Ok(Some(SubscriptionEvent::Notification(
                             SubscriptionNotification::Unsubscribed(s),
-                        )))
+                        )));
                     }
 
                     x => {

@@ -1,27 +1,27 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     time::{Duration, Instant},
 };
 
 use geth_common::ProgramSummary;
-use tokio::sync::{oneshot, Notify};
+use tokio::sync::{Notify, oneshot};
 use uuid::Uuid;
 
 use crate::{
+    Options, Proc, RequestContext,
     process::{
+        Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult,
         manager::{
             catalog::ProvisionResult,
             proc::process_manager,
-            spawn::{spawn_process, SpawnParams},
+            spawn::{SpawnParams, spawn_process},
         },
         messages::{Messages, Notifications, Responses},
-        Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult,
     },
-    Options, Proc, RequestContext,
 };
 
 mod catalog;

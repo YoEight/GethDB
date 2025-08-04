@@ -71,7 +71,7 @@ pub fn codegen_expr(expr: Expr<Infer>) -> Vec<Instr> {
 
                 item.visited = true;
                 item.size = exprs.len();
-                let elems = mem::replace(exprs, Vec::new());
+                let elems = mem::take(exprs);
                 stack.push(item);
 
                 for elem in elems {

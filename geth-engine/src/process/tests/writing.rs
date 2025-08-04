@@ -1,6 +1,6 @@
-use crate::process::tests::Foo;
 use crate::Options;
-use crate::{process::reading::record_try_from, RequestContext};
+use crate::process::tests::Foo;
+use crate::{RequestContext, process::reading::record_try_from};
 use geth_common::{AppendStreamCompleted, Direction, ExpectedRevision, Propose, Record};
 use geth_mikoshi::hashing::mikoshi_hash;
 use uuid::Uuid;

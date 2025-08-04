@@ -9,8 +9,8 @@ use tokio::sync::oneshot;
 use uuid::Uuid;
 
 use crate::{
-    process::{messages::Messages, Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult},
     Proc, RequestContext,
+    process::{Item, Mail, ProcId, RunningProc, SpawnError, SpawnResult, messages::Messages},
 };
 
 #[derive(Debug)]

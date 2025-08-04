@@ -1,15 +1,15 @@
 use std::{pin::Pin, sync::Arc};
 
 use tokio::sync::Notify;
-use tonic::{transport::Server, Code, Status};
+use tonic::{Code, Status, transport::Server};
 
 use geth_grpc::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{
-    metrics::{get_metrics, Metrics},
-    process::{manager::ManagerClient, Managed, ProcessEnv},
     Options,
+    metrics::{Metrics, get_metrics},
+    process::{Managed, ProcessEnv, manager::ManagerClient},
 };
 
 mod protocol;

@@ -8,8 +8,9 @@ use tokio::select;
 use tracing::instrument;
 
 use crate::{
+    IndexClient, ManagerClient, ReaderClient, RequestContext,
     process::subscription::{self, SubscriptionClient},
-    reading, IndexClient, ManagerClient, ReaderClient, RequestContext,
+    reading,
 };
 
 #[derive(Clone, Copy, Debug)]

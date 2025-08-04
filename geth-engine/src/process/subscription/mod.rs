@@ -4,4 +4,4 @@ mod program;
 
 pub use client::{Streaming, SubscriptionClient};
 pub use proc::run;
-pub use program::{pyro, ProgramClient};
+pub use program::{ProgramClient, pyro};

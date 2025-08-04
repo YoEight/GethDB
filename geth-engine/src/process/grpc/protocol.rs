@@ -12,7 +12,7 @@ use tonic::{Request, Response, Status};
 use uuid::Uuid;
 
 use crate::metrics::get_metrics;
-use crate::process::consumer::{start_consumer, ConsumerResult};
+use crate::process::consumer::{ConsumerResult, start_consumer};
 use crate::process::reading::ReaderClient;
 use crate::process::subscription::SubscriptionClient;
 use crate::process::writing::WriterClient;
@@ -172,7 +172,7 @@ impl Protocol for ProtocolImpl {
                     Ok(result) => match result {
                         ConsumerResult::Success(c) => c,
                         ConsumerResult::StreamDeleted => {
-                            return Err(Status::failed_precondition("stream-deleted"))
+                            return Err(Status::failed_precondition("stream-deleted"));
                         }
                     },
                 };
