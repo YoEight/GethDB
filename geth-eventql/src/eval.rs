@@ -40,8 +40,12 @@ pub struct Stack {
 }
 
 impl Stack {
+    fn pop(&mut self) -> Option<Entry> {
+        self.inner.pop()
+    }
+
     fn pop_or_bail(&mut self) -> Result<Entry> {
-        if let Some(item) = self.inner.pop() {
+        if let Some(item) = self.pop() {
             return Ok(item);
         }
 
@@ -456,11 +460,34 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                 }
             },
 
-            Instr::Array(_) => todo!(),
-            Instr::Rec(_) => todo!(),
-            Instr::Call(_) => todo!(),
+            Instr::Array(siz) => {
+                let mut array = Vec::with_capacity(siz);
+
+                for _ in 0..siz {
+                    array.push(stack.pop_or_bail()?);
+                }
+
+                stack.push_array(array);
+            }
+
+            Instr::Rec(siz) => {
+                let mut fields = HashMap::with_capacity(siz);
+
+                for _ in 0..siz {
+                    let value = stack.pop_or_bail()?;
+                    let key = stack.pop_as_string_or_bail()?;
+
+                    fields.insert(key, value);
+                }
+
+                stack.push_record(Rec { fields });
+            }
+
+            Instr::Call(fun_name) => match fun_name.as_str() {
+                _ => {}
+            },
         }
     }
 
-    todo!()
+    Ok(stack.pop())
 }
