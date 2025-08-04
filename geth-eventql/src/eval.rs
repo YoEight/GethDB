@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use crate::{Instr, Literal, Operation, Var, parser::Record};
+use crate::{Instr, Literal, Operation, Var};
 
 pub enum EvalError {
     UnexpectedRuntimeError,
@@ -8,11 +8,11 @@ pub enum EvalError {
 }
 
 pub struct Dictionary {
-    inner: HashMap<String, Literal>,
+    pub inner: HashMap<String, Literal>,
 }
 
 impl Dictionary {
-    fn lookup(&self, var: &Var) -> Result<Literal> {
+    fn lookup(&self, _var: &Var) -> Result<Literal> {
         todo!()
     }
 }
@@ -25,7 +25,7 @@ pub enum Either<A, B> {
 type Result<A> = std::result::Result<A, EvalError>;
 
 pub struct Rec {
-    fields: HashMap<String, Entry>,
+    pub fields: HashMap<String, Entry>,
 }
 
 pub enum Entry {
