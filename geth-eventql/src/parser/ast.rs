@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, mem, ptr::NonNull};
 
-use crate::sym::{Literal, Operation};
+use crate::{
+    Pos, Type,
+    sym::{Literal, Operation},
+};
 
 pub struct Query<A> {
     pub tag: A,
@@ -12,7 +15,17 @@ pub struct Query<A> {
     pub projection: Expr<A>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+pub struct NewQuery {
+    pub attrs: Attributes,
+    pub from_stmts: Vec<From<A>>,
+    pub predicate: Option<Where<A>>,
+    pub group_by: Option<Expr<A>>,
+    pub order_by: Option<Sort<A>>,
+    pub limit: Option<Limit>,
+    pub projection: Expr<A>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
 pub struct Subject {
     pub(crate) inner: Vec<String>,
 }
@@ -80,6 +93,12 @@ impl<A> Source<A> {
 
 pub struct From<A> {
     pub tag: A,
+    pub ident: String,
+    pub source: Source<A>,
+}
+
+pub struct NewFrom {
+    pub attrs: Attributes,
     pub ident: String,
     pub source: Source<A>,
 }
@@ -194,6 +213,98 @@ impl Display for Var {
 
         Ok(())
     }
+}
+
+#[derive(Default)]
+pub struct Attributes {
+    pub pos: Pos,
+    pub typ: Type,
+    pub scope: u64,
+}
+
+#[derive(Default)]
+pub struct NodeValue {
+    pub str_val: String,
+    pub int_val: i64,
+    pub float_val: f64,
+    pub bool_val: bool,
+    pub sub_val: Subject,
+}
+
+pub enum NodeKind {
+    Literal,
+    Var,
+    Record,
+    Array,
+    App,
+    Operation,
+}
+
+pub struct Node {
+    pub attrs: Attributes,
+    pub kind: NodeKind,
+    pub value: NodeValue,
+    pub size: usize,
+    pub descendants: Vec<Node>,
+}
+
+struct NTState {
+    node: NonNull<Node>,
+    visited: bool,
+}
+
+impl NTState {
+    fn new(node: NonNull<Node>) -> Self {
+        Self {
+            node,
+            visited: false,
+        }
+    }
+}
+
+impl Node {
+    pub fn dfs<V>(&mut self, visitor: &mut V) -> crate::Result<()>
+    where
+        V: NodeVisitor,
+    {
+        let mut stack = vec![NTState::new(NonNull::from(self))];
+
+        while let Some(mut item) = stack.pop() {
+            let node = unsafe { item.node.as_mut() };
+
+            if node.is_leaf() {
+                visitor.on_leaf(node)?;
+                continue;
+            }
+
+            if node.is_parent() && item.visited {
+                visitor.on_node(node)?;
+                continue;
+            }
+
+            item.visited = true;
+            stack.push(item);
+
+            for desc in node.descendants.iter_mut() {
+                stack.push(NTState::new(NonNull::from(desc)));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn is_leaf(&self) -> bool {
+        matches!(self.kind, NodeKind::Literal | NodeKind::Var)
+    }
+
+    pub fn is_parent(&self) -> bool {
+        !self.is_leaf()
+    }
+}
+
+pub trait NodeVisitor {
+    fn on_node(&mut self, node: &mut Node) -> crate::Result<()>;
+    fn on_leaf(&mut self, leaf: &mut Node) -> crate::Result<()>;
 }
 
 pub enum Value<A> {
