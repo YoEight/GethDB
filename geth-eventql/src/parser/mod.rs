@@ -11,13 +11,13 @@ mod state;
 pub use ast::*;
 use state::ParserState;
 
-pub fn parse(lexer: Lexer<'_>) -> crate::Result<Query<Pos>> {
+pub fn parse(lexer: Lexer<'_>) -> crate::Result<Query> {
     let mut state = ParserState::new(lexer);
 
     parse_query(&mut state)
 }
 
-fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query<Pos>> {
+fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query> {
     let pos = state.pos();
     let mut from_stmts = Vec::new();
 
@@ -49,7 +49,7 @@ fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query<Pos>> {
     check_projection(&projection)?;
 
     Ok(Query {
-        tag: pos,
+        attrs: Attributes::new(pos),
         from_stmts,
         predicate,
         group_by,
@@ -59,17 +59,17 @@ fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query<Pos>> {
     })
 }
 
-fn check_projection(proj: &Expr<Pos>) -> crate::Result<()> {
+fn check_projection(proj: &Expr) -> crate::Result<()> {
     match &proj.value {
         Value::Binary { .. } | Value::Unary { .. } => bail!(
-            proj.tag,
+            proj.attrs.pos,
             ParserError::BinaryUnaryOperationUnallowedInProjection
         ),
         _ => Ok(()),
     }
 }
 
-fn parse_from_statement(state: &mut ParserState<'_>) -> crate::Result<From<Pos>> {
+fn parse_from_statement(state: &mut ParserState<'_>) -> crate::Result<FromSource> {
     state.skip_whitespace()?;
 
     let pos = state.pos();
@@ -82,14 +82,14 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> crate::Result<From<Pos>>
 
     let source = parse_source(state)?;
 
-    Ok(From {
-        tag: pos,
+    Ok(FromSource {
+        attrs: Attributes::new(pos),
         ident,
         source,
     })
 }
 
-fn parse_group_by(state: &mut ParserState<'_>) -> crate::Result<Option<Expr<Pos>>> {
+fn parse_group_by(state: &mut ParserState<'_>) -> crate::Result<Option<Expr>> {
     state.skip_whitespace()?;
     if let Some(sym) = state.look_ahead()?
         && sym != &Sym::Keyword(Keyword::Group)
@@ -105,7 +105,7 @@ fn parse_group_by(state: &mut ParserState<'_>) -> crate::Result<Option<Expr<Pos>
     Ok(Some(parse_expr_single(state)?))
 }
 
-fn parse_order_by(state: &mut ParserState<'_>) -> crate::Result<Option<Sort<Pos>>> {
+fn parse_order_by(state: &mut ParserState<'_>) -> crate::Result<Option<Sort>> {
     state.skip_whitespace()?;
     if let Some(sym) = state.look_ahead()?
         && sym != &Sym::Keyword(Keyword::Order)
@@ -177,16 +177,16 @@ fn parse_ident(state: &mut ParserState<'_>) -> crate::Result<String> {
     }
 }
 
-fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
+fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source> {
     let pos = state.pos();
     match state.shift_or_bail()? {
         Sym::Id(id) if id.to_lowercase() == "events" => Ok(Source {
-            tag: pos,
+            attrs: Attributes::new(pos),
             inner: SourceType::Events,
         }),
 
         Sym::Literal(Literal::String(sub)) => Ok(Source {
-            tag: pos,
+            attrs: Attributes::new(pos),
             inner: SourceType::Subject(parse_subject(pos, &sub)?),
         }),
 
@@ -197,7 +197,7 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source<Pos>> {
             state.expect(Sym::RParens)?;
 
             Ok(Source {
-                tag: pos,
+                attrs: Attributes::new(pos),
                 inner: SourceType::Subquery(Box::new(query)),
             })
         }
@@ -223,7 +223,7 @@ pub(crate) fn parse_subject(pos: Pos, subject: &str) -> crate::Result<Subject> {
     Ok(Subject { inner })
 }
 
-fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where<Pos>>> {
+fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where>> {
     state.skip_whitespace()?;
 
     if let Some(sym) = state.look_ahead()?
@@ -237,12 +237,15 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where
     state.skip_whitespace()?;
     let expr = parse_expr(state)?;
 
-    Ok(Some(Where { tag: pos, expr }))
+    Ok(Some(Where {
+        attrs: Attributes::new(pos),
+        expr,
+    }))
 }
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
-fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
+fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr> {
     state.skip_whitespace()?;
 
     let expr = parse_expr_single(state)?;
@@ -258,7 +261,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
         state.skip_whitespace()?;
 
         expr_stack.push(Expr {
-            tag: expr.tag,
+            attrs: expr.attrs,
             value: Value::Binary {
                 lhs: Box::new(expr),
                 op,
@@ -281,7 +284,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
             let lhs = expr_stack.pop().expect("to be always defined");
 
             expr_stack.push(Expr {
-                tag: lhs.tag,
+                attrs: lhs.attrs,
                 value: Value::Binary {
                     lhs: Box::new(lhs),
                     op,
@@ -298,7 +301,7 @@ fn parse_expr(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
 
 // TODO - move the parsing from the stack to the heap so we could never have stack overflow
 // errors.
-fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
+fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
     // because parse_expr can be call recursively, it's possible in some situations that we could
     // have dangling whitespaces. To prevent the parser from rejecting the query in that case, it's
     // better to skip the whitespace before doing anything.
@@ -309,7 +312,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
         Sym::LParens => {
             state.skip_whitespace()?;
             let mut expr = parse_expr(state)?;
-            expr.tag = pos;
+            expr.attrs = Attributes::new(pos);
             state.skip_whitespace()?;
             state.expect(Sym::RParens)?;
 
@@ -317,7 +320,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
         }
 
         Sym::Literal(l) => Ok(Expr {
-            tag: pos,
+            attrs: Attributes::new(pos),
             value: Value::Literal(l),
         }),
 
@@ -346,7 +349,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
                 state.expect(Sym::RParens)?;
 
                 return Ok(Expr {
-                    tag: pos,
+                    attrs: Attributes::new(pos),
                     value: Value::App { fun: id, params },
                 });
             }
@@ -362,7 +365,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
             }
 
             Ok(Expr {
-                tag: pos,
+                attrs: Attributes::new(pos),
                 value: Value::Var(var),
             })
         }
@@ -377,7 +380,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
                 state.shift()?;
 
                 return Ok(Expr {
-                    tag: pos,
+                    attrs: Attributes::new(pos),
                     value: Value::Array(values),
                 });
             }
@@ -395,7 +398,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
             state.expect(Sym::RBracket)?;
 
             Ok(Expr {
-                tag: pos,
+                attrs: Attributes::new(pos),
                 value: Value::Array(values),
             })
         }
@@ -426,7 +429,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
             state.expect(Sym::RBrace)?;
 
             Ok(Expr {
-                tag: pos,
+                attrs: Attributes::new(pos),
                 value: Value::Record(Record { fields }),
             })
         }
@@ -436,7 +439,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr<Pos>> {
             let expr = parse_expr_single(state)?;
 
             Ok(Expr {
-                tag: pos,
+                attrs: Attributes::new(pos),
                 value: Value::Unary {
                     op,
                     expr: Box::new(expr),

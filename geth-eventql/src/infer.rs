@@ -1,15 +1,14 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    Expr, From, Lexical, Literal, Operation, Pos, Query, Renamed, Scopes, Sort, Value, Var, Where,
-    error::InferError,
-    parser::{Record, Source, SourceType},
+    Expr, FromSource, Literal, Operation, Pos, Query, Scopes, Value, Var, Where, error::InferError,
+    parser::SourceType,
 };
 
 pub struct InferedQuery {
     assumptions: Assumptions,
     scopes: Scopes,
-    query: Query<Infer>,
+    query: Query,
 }
 
 impl InferedQuery {
@@ -21,7 +20,7 @@ impl InferedQuery {
         &self.scopes
     }
 
-    pub fn query(&self) -> &Query<Infer> {
+    pub fn query(&self) -> &Query {
         &self.query
     }
 }
@@ -96,10 +95,10 @@ impl Assumptions {
     }
 }
 
-pub fn infer(renamed: Renamed) -> crate::Result<InferedQuery> {
+pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
     let mut inner = HashMap::new();
 
-    for scope in renamed.scopes.iter() {
+    for scope in scopes.iter() {
         for (name, props) in scope.vars() {
             inner.insert(format!("{}:{name}", scope.id()), Type::Record);
             inner.insert(format!("{}:{name}:specversion", scope.id()), Type::String);
@@ -130,10 +129,10 @@ pub fn infer(renamed: Renamed) -> crate::Result<InferedQuery> {
 
     let mut type_check = Typecheck {
         assumptions: inner,
-        scopes: renamed.scopes,
+        scopes,
     };
 
-    let query = infer_query(&mut type_check, renamed.query)?;
+    infer_query(&mut type_check, &mut query)?;
 
     Ok(InferedQuery {
         assumptions: Assumptions {
@@ -176,198 +175,130 @@ impl Typecheck {
     }
 }
 
-fn infer_query(type_check: &mut Typecheck, query: Query<Lexical>) -> crate::Result<Query<Infer>> {
-    let mut from_stmts = Vec::new();
-
-    for stmt in query.from_stmts {
-        from_stmts.push(infer_from(type_check, stmt)?);
+fn infer_query(type_check: &mut Typecheck, query: &mut Query) -> crate::Result<()> {
+    for stmt in query.from_stmts.iter_mut() {
+        infer_from(type_check, stmt)?;
     }
 
-    let predicate = if let Some(predicate) = query.predicate {
-        Some(infer_where(type_check, predicate)?)
-    } else {
-        None
-    };
+    if let Some(predicate) = query.predicate.as_mut() {
+        Some(infer_where(type_check, predicate)?);
+    }
 
-    let group_by = if let Some(expr) = query.group_by {
-        Some(infer_expr_simple(type_check, Type::Unspecified, expr)?)
-    } else {
-        None
-    };
+    if let Some(expr) = query.group_by.as_mut() {
+        infer_expr_simple(type_check, Type::Unspecified, expr)?;
+    }
 
-    let order_by = if let Some(sort) = query.order_by {
-        Some(Sort {
-            expr: infer_expr_simple(type_check, Type::Unspecified, sort.expr)?,
-            order: sort.order,
-        })
-    } else {
-        None
-    };
+    if let Some(sort) = query.order_by.as_mut() {
+        infer_expr_simple(type_check, Type::Unspecified, &mut sort.expr)?;
+    }
 
-    Ok(Query {
-        tag: Infer {
-            pos: query.tag.pos,
-            scope: query.tag.scope,
-        },
+    infer_expr_simple(type_check, Type::Unspecified, &mut query.projection)?;
 
-        from_stmts,
-        predicate,
-        group_by,
-        order_by,
-        limit: query.limit,
-        projection: infer_expr_simple(type_check, Type::Unspecified, query.projection)?,
-    })
+    Ok(())
 }
 
-fn infer_from(type_check: &mut Typecheck, stmt: From<Lexical>) -> crate::Result<From<Infer>> {
-    let inner = match stmt.source.inner {
-        SourceType::Events => SourceType::Events,
-        SourceType::Subject(s) => SourceType::Subject(s),
-        SourceType::Subquery(query) => {
-            SourceType::Subquery(Box::new(infer_query(type_check, *query)?))
-        }
-    };
+fn infer_from(type_check: &mut Typecheck, stmt: &mut FromSource) -> crate::Result<()> {
+    if let SourceType::Subquery(query) = &mut stmt.source.inner {
+        infer_query(type_check, query.as_mut())?;
+    }
 
-    Ok(From {
-        tag: Infer {
-            pos: stmt.tag.pos,
-            scope: stmt.tag.scope,
-        },
-
-        ident: stmt.ident,
-        source: Source {
-            tag: Infer {
-                pos: stmt.source.tag.pos,
-                scope: stmt.source.tag.scope,
-            },
-            inner,
-        },
-    })
+    Ok(())
 }
 
-fn infer_where(
-    type_check: &mut Typecheck,
-    predicate: Where<Lexical>,
-) -> crate::Result<Where<Infer>> {
-    Ok(Where {
-        tag: Infer {
-            pos: predicate.tag.pos,
-            scope: predicate.tag.scope,
-        },
-        expr: infer_expr_simple(type_check, Type::Bool, predicate.expr)?,
-    })
+fn infer_where(type_check: &mut Typecheck, predicate: &mut Where) -> crate::Result<()> {
+    infer_expr_simple(type_check, Type::Bool, &mut predicate.expr)?;
+    Ok(())
 }
 
 fn infer_expr_simple(
     type_check: &mut Typecheck,
     assumption: Type,
-    expr: Expr<Lexical>,
-) -> crate::Result<Expr<Infer>> {
-    let (_, expr) = infer_expr(type_check, assumption, expr)?;
-    Ok(expr)
+    expr: &mut Expr,
+) -> crate::Result<()> {
+    infer_expr(type_check, assumption, expr)
 }
 
-fn infer_expr(
-    type_check: &mut Typecheck,
-    assumption: Type,
-    expr: Expr<Lexical>,
-) -> crate::Result<(Type, Expr<Infer>)> {
-    let (typ, value) = match expr.value {
+fn infer_expr(type_check: &mut Typecheck, assumption: Type, expr: &mut Expr) -> crate::Result<()> {
+    match &mut expr.value {
         Value::Literal(lit) => {
             let type_proj = Type::project(&lit);
-            let new_lit = Value::Literal(lit);
 
             if assumption != Type::Unspecified && assumption != type_proj {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, type_proj)
                 );
             }
 
-            (type_proj, new_lit)
+            expr.attrs.tpe = type_proj;
         }
 
         Value::Var(var) => {
-            let register_assumption = type_check.lookup_type_info(expr.tag.scope, &var);
+            let register_assumption = type_check.lookup_type_info(expr.attrs.scope, &var);
 
             if assumption == Type::Unspecified && register_assumption == assumption {
-                (Type::Unspecified, Value::Var(var))
+                expr.attrs.tpe = Type::Unspecified;
             } else if register_assumption == Type::Unspecified {
-                type_check.set_type_info(expr.tag.scope, &var, assumption);
-                (assumption, Value::Var(var))
+                type_check.set_type_info(expr.attrs.scope, &var, assumption);
+                expr.attrs.tpe = assumption;
             } else if assumption == Type::Unspecified {
-                (register_assumption, Value::Var(var))
+                expr.attrs.tpe = register_assumption;
             } else if assumption != register_assumption {
                 bail!(
-                    expr.tag.pos,
-                    InferError::VarTypeMismatch(var, assumption, register_assumption)
+                    expr.attrs.pos,
+                    InferError::VarTypeMismatch(var.clone(), assumption, register_assumption)
                 );
             } else {
-                (assumption, Value::Var(var))
+                expr.attrs.tpe = assumption;
             }
         }
 
         Value::Record(record) => {
             if assumption != Type::Unspecified && assumption != Type::Record {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, Type::Record)
                 );
             }
 
-            let mut fields = HashMap::new();
-
-            for (key, value) in record.fields {
-                fields.insert(
-                    key,
-                    infer_expr_simple(type_check, Type::Unspecified, value)?,
-                );
+            for value in record.fields.values_mut() {
+                infer_expr_simple(type_check, Type::Unspecified, value)?;
             }
 
-            (Type::Record, Value::Record(Record { fields }))
+            expr.attrs.tpe = Type::Record;
         }
 
         Value::Array(exprs) => {
             if assumption != Type::Unspecified && assumption != Type::Array {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, Type::Array)
                 );
             }
 
-            let mut new_exprs = Vec::new();
-
-            for value in exprs {
-                new_exprs.push(infer_expr_simple(type_check, Type::Unspecified, value)?);
+            for value in exprs.iter_mut() {
+                infer_expr_simple(type_check, Type::Unspecified, value)?;
             }
 
-            (Type::Array, Value::Array(new_exprs))
+            expr.attrs.tpe = Type::Array;
         }
 
-        Value::App { fun, params } => {
+        Value::App { params, .. } => {
             // TODO - we can make a lot of assumption when it comes to the return type of the
             // function call. Right now we are just going to ignore and forward the assumption
             // back.
 
-            let mut new_params = Vec::new();
-
             // TODO - based on the function we cold also make assumption about the type of its
             // parameters. Right now we are just going to ignore it.
-            for value in params {
-                new_params.push(infer_expr_simple(type_check, Type::Unspecified, value)?);
+            for value in params.iter_mut() {
+                infer_expr_simple(type_check, Type::Unspecified, value)?;
             }
 
-            (
-                assumption,
-                Value::App {
-                    fun,
-                    params: new_params,
-                },
-            )
+            expr.attrs.tpe = assumption;
         }
 
         Value::Binary { lhs, op, rhs } => {
-            let scope = expr.tag.scope;
+            let scope = expr.attrs.scope;
             let result_type = match op {
                 Operation::And
                 | Operation::Or
@@ -381,115 +312,92 @@ fn infer_expr(
                 | Operation::GreaterThanOrEqual => Type::Bool,
 
                 Operation::Not => {
-                    bail!(expr.tag.pos, InferError::UnsupportedBinaryOperation(op));
+                    bail!(expr.attrs.pos, InferError::UnsupportedBinaryOperation(*op));
                 }
             };
 
             if assumption != Type::Unspecified && assumption != result_type {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, result_type)
                 );
             }
 
-            let (mut lhs_type, lhs) = infer_expr(type_check, Type::Unspecified, *lhs)?;
+            infer_expr(type_check, Type::Unspecified, lhs.as_mut())?;
 
-            let rhs_assumption = match op {
+            let rhs_assumption = match &op {
                 Operation::Contains => Type::Array,
-                x if operation_requires_same_type(x) => lhs_type,
+                x if operation_requires_same_type(x) => lhs.attrs.tpe,
                 _ => Type::Unspecified,
             };
 
-            let (mut rhs_type, rhs) = infer_expr(type_check, rhs_assumption, *rhs)?;
+            infer_expr(type_check, rhs_assumption, rhs.as_mut())?;
 
-            if lhs_type == Type::Unspecified
-                && rhs_type != Type::Unspecified
+            if lhs.attrs.tpe == Type::Unspecified
+                && rhs.attrs.tpe != Type::Unspecified
                 && operation_requires_same_type(op)
             {
-                lhs_type = rhs_type;
+                lhs.attrs.tpe = rhs.attrs.tpe;
 
                 if let Some(var) = lhs.as_var() {
-                    type_check.set_type_info(scope, var, rhs_type);
+                    type_check.set_type_info(scope, var, rhs.attrs.tpe);
                 }
-            } else if rhs_type == Type::Unspecified
-                && lhs_type != Type::Unspecified
+            } else if rhs.attrs.tpe == Type::Unspecified
+                && lhs.attrs.tpe != Type::Unspecified
                 && operation_requires_same_type(op)
             {
-                rhs_type = lhs_type;
+                rhs.attrs.tpe = lhs.attrs.tpe;
 
                 if let Some(var) = rhs.as_var() {
-                    type_check.set_type_info(scope, var, lhs_type);
+                    type_check.set_type_info(scope, var, lhs.attrs.tpe);
                 }
             }
 
-            if operation_requires_same_type(op) && lhs_type != rhs_type {
-                bail!(expr.tag.pos, InferError::TypeMismatch(lhs_type, rhs_type));
-            }
-
-            if op == Operation::Contains && rhs_type != Type::Array {
+            if operation_requires_same_type(op) && lhs.attrs.tpe != rhs.attrs.tpe {
                 bail!(
-                    expr.tag.pos,
-                    InferError::TypeMismatch(rhs_type, Type::Array)
+                    expr.attrs.pos,
+                    InferError::TypeMismatch(lhs.attrs.tpe, rhs.attrs.tpe)
                 );
             }
 
-            (
-                result_type,
-                Value::Binary {
-                    lhs: Box::new(lhs),
-                    op,
-                    rhs: Box::new(rhs),
-                },
-            )
+            if op == &Operation::Contains && rhs.attrs.tpe != Type::Array {
+                bail!(
+                    expr.attrs.pos,
+                    InferError::TypeMismatch(rhs.attrs.tpe, Type::Array)
+                );
+            }
         }
 
         Value::Unary { op, expr } => {
-            let result_type = if op == Operation::Not {
+            let result_type = if op == &Operation::Not {
                 Type::Bool
             } else {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, Type::Bool)
                 );
             };
 
             if assumption != Type::Unspecified && assumption != result_type {
                 bail!(
-                    expr.tag.pos,
+                    expr.attrs.pos,
                     InferError::TypeMismatch(assumption, result_type)
                 );
             }
 
-            let new_assumption = if op == Operation::Not {
+            let new_assumption = if op == &Operation::Not {
                 Type::Bool
             } else {
                 assumption
             };
 
-            let expr = infer_expr_simple(type_check, new_assumption, *expr)?;
-
-            (
-                result_type,
-                Value::Unary {
-                    op,
-                    expr: Box::new(expr),
-                },
-            )
+            infer_expr_simple(type_check, new_assumption, expr.as_mut())?;
         }
-    };
+    }
 
-    Ok((
-        typ,
-        Expr {
-            tag: Infer {
-                pos: expr.tag.pos,
-                scope: expr.tag.scope,
-            },
-            value,
-        },
-    ))
+    Ok(())
 }
 
-fn operation_requires_same_type(op: Operation) -> bool {
+fn operation_requires_same_type(op: &Operation) -> bool {
     !matches!(op, Operation::Contains)
 }

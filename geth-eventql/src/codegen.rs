@@ -1,6 +1,6 @@
 use std::mem;
 
-use crate::{Expr, Infer, Literal, Operation, Value, Var};
+use crate::{Expr, Literal, Operation, Value, Var};
 
 pub enum Instr {
     Push(Literal),
@@ -12,13 +12,13 @@ pub enum Instr {
 }
 
 struct Item {
-    value: Value<Infer>,
+    value: Value,
     visited: bool,
     size: usize,
 }
 
 impl Item {
-    fn new(value: Value<Infer>) -> Self {
+    fn new(value: Value) -> Self {
         Self {
             value,
             visited: false,
@@ -27,7 +27,7 @@ impl Item {
     }
 }
 
-pub fn codegen_expr(expr: Expr<Infer>) -> Vec<Instr> {
+pub fn codegen_expr(expr: Expr) -> Vec<Instr> {
     let mut instrs = Vec::new();
     let mut stack = vec![Item::new(expr.value)];
 
@@ -109,13 +109,9 @@ pub fn codegen_expr(expr: Expr<Infer>) -> Vec<Instr> {
 
                 item.visited = true;
 
-                let tmp_lhs = mem::replace(lhs, unsafe {
-                    Box::<Expr<Infer>>::new_uninit().assume_init()
-                });
+                let tmp_lhs = mem::replace(lhs, unsafe { Box::<Expr>::new_uninit().assume_init() });
 
-                let tmp_rhs = mem::replace(rhs, unsafe {
-                    Box::<Expr<Infer>>::new_uninit().assume_init()
-                });
+                let tmp_rhs = mem::replace(rhs, unsafe { Box::<Expr>::new_uninit().assume_init() });
 
                 stack.push(item);
                 stack.push(Item::new(tmp_rhs.value));

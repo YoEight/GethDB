@@ -1,15 +1,35 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::sym::{Literal, Operation};
+use crate::{
+    Pos, Type,
+    sym::{Literal, Operation},
+};
 
-pub struct Query<A> {
-    pub tag: A,
-    pub from_stmts: Vec<From<A>>,
-    pub predicate: Option<Where<A>>,
-    pub group_by: Option<Expr<A>>,
-    pub order_by: Option<Sort<A>>,
+#[derive(Copy, Clone)]
+pub struct Attributes {
+    pub pos: Pos,
+    pub scope: u64,
+    pub tpe: Type,
+}
+
+impl Attributes {
+    pub fn new(pos: Pos) -> Self {
+        Self {
+            pos,
+            scope: u64::MAX,
+            tpe: Type::Unspecified,
+        }
+    }
+}
+
+pub struct Query {
+    pub attrs: Attributes,
+    pub from_stmts: Vec<FromSource>,
+    pub predicate: Option<Where>,
+    pub group_by: Option<Expr>,
+    pub order_by: Option<Sort>,
     pub limit: Option<Limit>,
-    pub projection: Expr<A>,
+    pub projection: Expr,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -39,13 +59,13 @@ impl Subject {
     }
 }
 
-pub enum SourceType<A> {
+pub enum SourceType {
     Events,
     Subject(Subject),
-    Subquery(Box<Query<A>>),
+    Subquery(Box<Query>),
 }
 
-impl<A> SourceType<A> {
+impl SourceType {
     pub fn as_subject(&self) -> Option<&Subject> {
         if let Self::Subject(sub) = self {
             return Some(sub);
@@ -63,13 +83,13 @@ impl<A> SourceType<A> {
     }
 }
 
-pub struct Source<A> {
-    pub tag: A,
-    pub inner: SourceType<A>,
+pub struct Source {
+    pub attrs: Attributes,
+    pub inner: SourceType,
 }
 
-impl<A> Source<A> {
-    pub fn as_subquery(&self) -> Option<&Query<A>> {
+impl Source {
+    pub fn as_subquery(&self) -> Option<&Query> {
         if let SourceType::Subquery(q) = &self.inner {
             return Some(q);
         }
@@ -78,29 +98,29 @@ impl<A> Source<A> {
     }
 }
 
-pub struct From<A> {
-    pub tag: A,
+pub struct FromSource {
+    pub attrs: Attributes,
     pub ident: String,
-    pub source: Source<A>,
+    pub source: Source,
 }
 
-pub struct Where<A> {
-    pub tag: A,
-    pub expr: Expr<A>,
+pub struct Where {
+    pub attrs: Attributes,
+    pub expr: Expr,
 }
 
-pub struct Expr<A> {
-    pub tag: A,
-    pub value: Value<A>,
+pub struct Expr {
+    pub attrs: Attributes,
+    pub value: Value,
 }
 
-impl<A> AsMut<Value<A>> for Expr<A> {
-    fn as_mut(&mut self) -> &mut Value<A> {
+impl AsMut<Value> for Expr {
+    fn as_mut(&mut self) -> &mut Value {
         &mut self.value
     }
 }
 
-impl<A> Expr<A> {
+impl Expr {
     pub fn as_var(&self) -> Option<&Var> {
         if let Value::Var(p) = &self.value {
             return Some(p);
@@ -109,7 +129,7 @@ impl<A> Expr<A> {
         None
     }
 
-    pub fn as_binary_op(&self) -> Option<BinaryOp<'_, A>> {
+    pub fn as_binary_op(&self) -> Option<BinaryOp<'_>> {
         if let Value::Binary { lhs, op, rhs } = &self.value {
             return Some(BinaryOp {
                 lhs: lhs.as_ref(),
@@ -121,7 +141,7 @@ impl<A> Expr<A> {
         None
     }
 
-    pub fn as_unary_op(&self) -> Option<UnaryOp<'_, A>> {
+    pub fn as_unary_op(&self) -> Option<UnaryOp<'_>> {
         if let Value::Unary { op, expr } = &self.value {
             return Some(UnaryOp { op: *op, expr });
         }
@@ -145,7 +165,7 @@ impl<A> Expr<A> {
         None
     }
 
-    pub fn as_record(&self) -> Option<&Record<A>> {
+    pub fn as_record(&self) -> Option<&Record> {
         if let Value::Record(r) = &self.value {
             return Some(r);
         }
@@ -153,7 +173,7 @@ impl<A> Expr<A> {
         None
     }
 
-    pub fn as_apply_fun(&self) -> Option<ApplyFun<'_, A>> {
+    pub fn as_apply_fun(&self) -> Option<ApplyFun<'_>> {
         if let Value::App { fun, params } = &self.value {
             return Some(ApplyFun { name: fun, params });
         }
@@ -162,20 +182,20 @@ impl<A> Expr<A> {
     }
 }
 
-pub struct BinaryOp<'a, A> {
-    pub lhs: &'a Expr<A>,
+pub struct BinaryOp<'a> {
+    pub lhs: &'a Expr,
     pub op: Operation,
-    pub rhs: &'a Expr<A>,
+    pub rhs: &'a Expr,
 }
 
-pub struct UnaryOp<'a, A> {
+pub struct UnaryOp<'a> {
     pub op: Operation,
-    pub expr: &'a Expr<A>,
+    pub expr: &'a Expr,
 }
 
-pub struct ApplyFun<'a, A> {
+pub struct ApplyFun<'a> {
     pub name: &'a String,
-    pub params: &'a Vec<Expr<A>>,
+    pub params: &'a Vec<Expr>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -196,38 +216,38 @@ impl Display for Var {
     }
 }
 
-pub enum Value<A> {
+pub enum Value {
     Literal(Literal),
     Var(Var),
-    Record(Record<A>),
-    Array(Vec<Expr<A>>),
+    Record(Record),
+    Array(Vec<Expr>),
     App {
         fun: String,
-        params: Vec<Expr<A>>,
+        params: Vec<Expr>,
     },
     Binary {
-        lhs: Box<Expr<A>>,
+        lhs: Box<Expr>,
         op: Operation,
-        rhs: Box<Expr<A>>,
+        rhs: Box<Expr>,
     },
     Unary {
         op: Operation,
-        expr: Box<Expr<A>>,
+        expr: Box<Expr>,
     },
 }
 
-pub struct Record<A> {
-    pub fields: HashMap<String, Expr<A>>,
+pub struct Record {
+    pub fields: HashMap<String, Expr>,
 }
 
-impl<A> Record<A> {
-    pub fn get(&self, id: &str) -> Option<&Expr<A>> {
+impl Record {
+    pub fn get(&self, id: &str) -> Option<&Expr> {
         self.fields.get(id)
     }
 }
 
-pub struct Sort<A> {
-    pub expr: Expr<A>,
+pub struct Sort {
+    pub expr: Expr,
     pub order: Order,
 }
 
