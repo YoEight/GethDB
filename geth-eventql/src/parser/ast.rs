@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, ptr::NonNull};
 
 use crate::{
     Pos, Type,
@@ -180,6 +180,105 @@ impl Expr {
 
         None
     }
+
+    pub fn dfs_post_order<V: NodeVisitor>(&mut self, visitor: &mut V) -> crate::Result<()> {
+        let mut stack = vec![NT::new(self)];
+
+        while let Some(mut item) = stack.pop() {
+            let node = unsafe { item.node.as_mut() };
+
+            match &mut node.value {
+                Value::Literal(lit) => {
+                    visitor.on_literal(&mut node.attrs, lit)?;
+                }
+
+                Value::Var(var) => {
+                    visitor.on_var(&mut node.attrs, var)?;
+                }
+
+                Value::Record(record) => {
+                    if item.visited {
+                        visitor.on_record(&mut node.attrs, record)?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    stack.push(item);
+
+                    for expr in record.fields.values_mut() {
+                        stack.push(NT::new(expr));
+                    }
+                }
+
+                Value::Array(exprs) => {
+                    if item.visited {
+                        visitor.on_array(&mut node.attrs, exprs)?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    stack.push(item);
+
+                    for expr in exprs.iter_mut() {
+                        stack.push(NT::new(expr));
+                    }
+                }
+
+                Value::App { fun, params } => {
+                    if item.visited {
+                        visitor.on_app(&mut node.attrs, &fun, params)?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    stack.push(item);
+
+                    for param in params.iter_mut() {
+                        stack.push(NT::new(param));
+                    }
+                }
+
+                Value::Binary { lhs, op, rhs } => {
+                    if item.visited {
+                        visitor.on_binary(&mut node.attrs, op, lhs, rhs)?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    stack.push(item);
+                    stack.push(NT::new(lhs));
+                    stack.push(NT::new(rhs));
+                }
+
+                Value::Unary { op, expr } => {
+                    if item.visited {
+                        visitor.on_unary(&mut node.attrs, op, expr)?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    stack.push(item);
+                    stack.push(NT::new(expr));
+                }
+            }
+        }
+
+        Ok(())
+    }
+}
+
+struct NT {
+    node: NonNull<Expr>,
+    visited: bool,
+}
+
+impl NT {
+    fn new(node: &mut Expr) -> Self {
+        Self {
+            node: NonNull::from(node),
+            visited: false,
+        }
+    }
 }
 
 pub struct BinaryOp<'a> {
@@ -267,4 +366,33 @@ pub struct Limit {
 pub enum Order {
     Asc,
     Desc,
+}
+
+pub trait NodeVisitor {
+    fn on_literal(&mut self, attrs: &mut Attributes, lit: &mut Literal) -> crate::Result<()>;
+    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()>;
+    fn on_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()>;
+    fn on_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()>;
+
+    fn on_app(
+        &mut self,
+        attrs: &mut Attributes,
+        name: &str,
+        params: &mut Vec<Expr>,
+    ) -> crate::Result<()>;
+
+    fn on_binary(
+        &mut self,
+        attrs: &mut Attributes,
+        op: &Operation,
+        lhs: &mut Expr,
+        rhs: &mut Expr,
+    ) -> crate::Result<()>;
+
+    fn on_unary(
+        &mut self,
+        attrs: &mut Attributes,
+        op: &Operation,
+        expr: &mut Expr,
+    ) -> crate::Result<()>;
 }
