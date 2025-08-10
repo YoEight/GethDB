@@ -80,7 +80,7 @@ fn query_dfs_post_order<V: QueryVisitor>(
         }
 
         if let Some(predicate) = query.predicate.as_mut() {
-            visitor.enter_where_clause(&mut predicate.attrs)?;
+            visitor.enter_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
             on_expr(visitor, &mut predicate.expr)?;
             visitor.exit_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
         }
@@ -305,11 +305,12 @@ impl Expr {
 
                 Value::App { fun, params } => {
                     if item.visited {
-                        visitor.on_app(&mut node.attrs, fun, params)?;
+                        visitor.on_app_after(&mut node.attrs, fun, params)?;
                         continue;
                     }
 
                     item.visited = true;
+                    visitor.on_app_before(&mut node.attrs, fun, params)?;
                     stack.push(item);
 
                     for param in params.iter_mut() {
@@ -319,11 +320,12 @@ impl Expr {
 
                 Value::Binary { lhs, op, rhs } => {
                     if item.visited {
-                        visitor.on_binary(&mut node.attrs, op, lhs, rhs)?;
+                        visitor.exit_binary_op(&mut node.attrs, op, lhs, rhs)?;
                         continue;
                     }
 
                     item.visited = true;
+                    visitor.enter_binary_op(&mut node.attrs, op, lhs, rhs)?;
                     stack.push(item);
                     stack.push(NT::new(lhs));
                     stack.push(NT::new(rhs));
@@ -331,11 +333,12 @@ impl Expr {
 
                 Value::Unary { op, expr } => {
                     if item.visited {
-                        visitor.on_unary(&mut node.attrs, op, expr)?;
+                        visitor.exit_unary_op(&mut node.attrs, op, expr)?;
                         continue;
                     }
 
                     item.visited = true;
+                    visitor.enter_unary_op(&mut node.attrs, op, expr)?;
                     stack.push(item);
                     stack.push(NT::new(expr));
                 }
@@ -499,7 +502,7 @@ pub trait QueryVisitor {
         Ok(())
     }
 
-    fn enter_where_clause(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
+    fn enter_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
@@ -552,7 +555,7 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_app(
+    fn on_app_before(
         &mut self,
         attrs: &mut Attributes,
         name: &str,
@@ -561,7 +564,16 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_binary(
+    fn on_app_after(
+        &mut self,
+        attrs: &mut Attributes,
+        name: &str,
+        params: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_binary_op(
         &mut self,
         attrs: &mut Attributes,
         op: &Operation,
@@ -571,7 +583,26 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_unary(
+    fn exit_binary_op(
+        &mut self,
+        attrs: &mut Attributes,
+        op: &Operation,
+        lhs: &mut Expr,
+        rhs: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_unary_op(
+        &mut self,
+        attrs: &mut Attributes,
+        op: &Operation,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_unary_op(
         &mut self,
         attrs: &mut Attributes,
         op: &Operation,

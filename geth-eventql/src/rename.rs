@@ -148,7 +148,7 @@ impl ExprVisitor for RenameExpr<'_> {
         Ok(())
     }
 
-    fn on_binary(
+    fn exit_binary_op(
         &mut self,
         _attrs: &mut Attributes,
         _op: &crate::Operation,
