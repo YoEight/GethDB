@@ -305,12 +305,12 @@ impl Expr {
 
                 Value::App { fun, params } => {
                     if item.visited {
-                        visitor.on_app_after(&mut node.attrs, fun, params)?;
+                        visitor.exit_app(&mut node.attrs, fun, params)?;
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.on_app_before(&mut node.attrs, fun, params)?;
+                    visitor.enter_app(&mut node.attrs, fun, params)?;
                     stack.push(item);
 
                     for param in params.iter_mut().rev() {
@@ -555,7 +555,7 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_app_before(
+    fn enter_app(
         &mut self,
         attrs: &mut Attributes,
         name: &str,
@@ -564,7 +564,7 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_app_after(
+    fn exit_app(
         &mut self,
         attrs: &mut Attributes,
         name: &str,

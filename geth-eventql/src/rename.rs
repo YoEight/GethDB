@@ -168,7 +168,7 @@ impl ExprVisitor for RenameExpr<'_> {
         Ok(())
     }
 
-    fn on_app_after(
+    fn exit_app(
         &mut self,
         attrs: &mut Attributes,
         _name: &str,

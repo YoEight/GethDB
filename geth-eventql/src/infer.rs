@@ -247,7 +247,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn on_app_after(
+    fn exit_app(
         &mut self,
         _attrs: &mut Attributes,
         _name: &str,
