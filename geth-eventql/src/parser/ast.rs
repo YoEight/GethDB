@@ -298,7 +298,7 @@ impl Expr {
                     item.visited = true;
                     stack.push(item);
 
-                    for expr in exprs.iter_mut() {
+                    for expr in exprs.iter_mut().rev() {
                         stack.push(NT::new(expr));
                     }
                 }
@@ -313,7 +313,7 @@ impl Expr {
                     visitor.on_app_before(&mut node.attrs, fun, params)?;
                     stack.push(item);
 
-                    for param in params.iter_mut() {
+                    for param in params.iter_mut().rev() {
                         stack.push(NT::new(param));
                     }
                 }
@@ -327,8 +327,8 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_binary_op(&mut node.attrs, op, lhs, rhs)?;
                     stack.push(item);
-                    stack.push(NT::new(lhs));
                     stack.push(NT::new(rhs));
+                    stack.push(NT::new(lhs));
                 }
 
                 Value::Unary { op, expr } => {

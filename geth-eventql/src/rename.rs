@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Expr, Literal, Query, Value, Var,
     error::RenameError,
-    parser::{Attributes, ExprVisitor, QueryVisitor, parse_subject},
+    parser::{Attributes, ExprVisitor, QueryVisitor, Record, parse_subject},
 };
 
 pub fn rename(query: &mut Query) -> crate::Result<Scopes> {
@@ -96,14 +96,14 @@ impl QueryVisitor for Analysis {
         Ok(())
     }
 
-    fn exit_source(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
+    fn exit_from(&mut self, attrs: &mut Attributes, _ident: &str) -> crate::Result<()> {
         attrs.scope = self.scope_id();
-
         Ok(())
     }
 
-    fn exit_from(&mut self, attrs: &mut Attributes, _ident: &str) -> crate::Result<()> {
+    fn exit_source(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
         attrs.scope = self.scope_id();
+
         Ok(())
     }
 
@@ -122,9 +122,17 @@ struct RenameExpr<'a> {
 }
 
 impl ExprVisitor for RenameExpr<'_> {
+    fn on_literal(&mut self, attrs: &mut Attributes, _lit: &mut Literal) -> crate::Result<()> {
+        attrs.scope = self.inner.scope_id();
+
+        Ok(())
+    }
+
     fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
         let scope = self.inner.scope_mut();
         let mut prev = "";
+
+        attrs.scope = scope.id;
 
         if !scope.contains_variable(&var.name) {
             bail!(
@@ -148,9 +156,32 @@ impl ExprVisitor for RenameExpr<'_> {
         Ok(())
     }
 
+    fn on_record(&mut self, attrs: &mut Attributes, _record: &mut Record) -> crate::Result<()> {
+        attrs.scope = self.inner.scope_id();
+
+        Ok(())
+    }
+
+    fn on_array(&mut self, attrs: &mut Attributes, _values: &mut Vec<Expr>) -> crate::Result<()> {
+        attrs.scope = self.inner.scope_id();
+
+        Ok(())
+    }
+
+    fn on_app_after(
+        &mut self,
+        attrs: &mut Attributes,
+        _name: &str,
+        _params: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
+        attrs.scope = self.inner.scope_id();
+
+        Ok(())
+    }
+
     fn exit_binary_op(
         &mut self,
-        _attrs: &mut Attributes,
+        attrs: &mut Attributes,
         _op: &crate::Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -173,6 +204,20 @@ impl ExprVisitor for RenameExpr<'_> {
 
             _ => {}
         }
+
+        attrs.scope = self.inner.scope_id();
+
+        Ok(())
+    }
+
+    fn exit_unary_op(
+        &mut self,
+        attrs: &mut Attributes,
+        _op: &crate::Operation,
+        _expr: &mut Expr,
+    ) -> crate::Result<()> {
+        attrs.scope = self.inner.scope_id();
+
         Ok(())
     }
 }
