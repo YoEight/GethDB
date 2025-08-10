@@ -96,29 +96,27 @@ impl ReaderClient {
             )
             .await?;
 
-        if let Some(resp) = mailbox.recv().await {
-            if let Ok(resp) = resp.try_into() {
-                match resp {
-                    ReadResponses::Error => {
-                        eyre::bail!(
-                            "internal error when running a read request to the reader process"
-                        );
-                    }
+        if let Some(resp) = mailbox.recv().await
+            && let Ok(resp) = resp.try_into()
+        {
+            match resp {
+                ReadResponses::Error => {
+                    eyre::bail!("internal error when running a read request to the reader process");
+                }
 
-                    ReadResponses::StreamDeleted => {
-                        return Ok(ReadStreamCompleted::StreamDeleted);
-                    }
+                ReadResponses::StreamDeleted => {
+                    return Ok(ReadStreamCompleted::StreamDeleted);
+                }
 
-                    ReadResponses::Entries(entries) => {
-                        return Ok(ReadStreamCompleted::Success(Streaming {
-                            inner: mailbox,
-                            batch: Some(entries.into_iter()),
-                        }));
-                    }
+                ReadResponses::Entries(entries) => {
+                    return Ok(ReadStreamCompleted::Success(Streaming {
+                        inner: mailbox,
+                        batch: Some(entries.into_iter()),
+                    }));
+                }
 
-                    _ => {
-                        eyre::bail!("protocol error when communicating with the reader process");
-                    }
+                _ => {
+                    eyre::bail!("protocol error when communicating with the reader process");
                 }
             }
         }

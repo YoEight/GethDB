@@ -1,48 +1,179 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     mem,
+    ptr::NonNull,
 };
 
 use crate::{
-    Expr, FromSource, Literal, Pos, Query, Sort, Value, Where,
+    Expr, Literal, Query, Value, Var,
     error::RenameError,
-    parser::{Source, SourceType, parse_subject},
+    parser::{Attributes, ExprVisitor, QueryVisitor, parse_subject},
 };
 
-#[derive(Debug, Copy, Clone, Eq, PartialEq, Ord, PartialOrd)]
-pub struct Lexical {
-    pub pos: Pos,
-    pub scope: u64,
+pub fn rename(query: &mut Query) -> crate::Result<Scopes> {
+    let mut analysis = Analysis::default();
+
+    query.dfs_post_order(&mut analysis)?;
+
+    Ok(Scopes {
+        inner: analysis.scopes,
+    })
 }
 
-#[derive(Default)]
 struct Analysis {
     scope_id_gen: u64,
-    current_scope: u64,
+    scope: NonNull<Scope>,
     scopes: BTreeMap<u64, Scope>,
+    history: Vec<u64>,
+}
+
+impl Default for Analysis {
+    fn default() -> Self {
+        Self {
+            scope_id_gen: 0,
+            scope: NonNull::dangling(),
+            scopes: Default::default(),
+            history: vec![],
+        }
+    }
 }
 
 impl Analysis {
-    fn scope_mut(&mut self) -> &mut Scope {
-        self.scopes
-            .entry(self.scope_id_gen)
-            .or_insert_with(|| Scope {
-                id: self.scope_id_gen,
-                properties: Default::default(),
-            })
+    fn scope_id(&self) -> u64 {
+        unsafe { self.scope.as_ref().id }
     }
 
-    fn current_scope_id(&self) -> u64 {
-        self.current_scope
-    }
+    fn enter_scope(&mut self) {
+        if self.scope_id_gen > 0 {
+            self.history.push(self.scope_id());
+        }
 
-    fn new_scope(&mut self) {
+        let new_id = self.scope_id_gen;
+        let new_scope = Scope::new(new_id);
         self.scope_id_gen += 1;
-        self.current_scope = self.scope_id_gen;
+        self.scopes.insert(new_id, new_scope);
+        self.scope = NonNull::from(self.scopes.get_mut(&new_id).unwrap());
     }
 
-    fn set_scope(&mut self, scope: u64) {
-        self.current_scope = scope;
+    fn exit_scope(&mut self) {
+        if let Some(scope_id) = self.history.pop() {
+            self.scope = NonNull::from(self.scopes.get_mut(&scope_id).unwrap());
+        }
+    }
+
+    fn scope_mut(&mut self) -> &mut Scope {
+        unsafe { self.scope.as_mut() }
+    }
+}
+
+impl QueryVisitor for Analysis {
+    type Inner<'a> = RenameExpr<'a>;
+
+    fn enter_query(&mut self) -> crate::Result<()> {
+        self.enter_scope();
+
+        Ok(())
+    }
+
+    fn exit_query(&mut self) -> crate::Result<()> {
+        self.exit_scope();
+
+        Ok(())
+    }
+
+    fn enter_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+        let scope = self.scope_mut();
+
+        if scope.contains_variable(ident) {
+            bail!(
+                attrs.pos,
+                RenameError::VariableAlreadyExists(ident.to_string())
+            );
+        }
+
+        scope.new_var(ident.to_string());
+
+        Ok(())
+    }
+
+    fn exit_source(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
+        attrs.scope = self.scope_id();
+
+        Ok(())
+    }
+
+    fn exit_from(&mut self, attrs: &mut Attributes, _ident: &str) -> crate::Result<()> {
+        attrs.scope = self.scope_id();
+        Ok(())
+    }
+
+    fn exit_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+        attrs.scope = expr.attrs.scope;
+        Ok(())
+    }
+
+    fn expr_visitor(&mut self) -> Self::Inner<'_> {
+        RenameExpr { inner: self }
+    }
+}
+
+struct RenameExpr<'a> {
+    inner: &'a mut Analysis,
+}
+
+impl ExprVisitor for RenameExpr<'_> {
+    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
+        let scope = self.inner.scope_mut();
+        let mut prev = "";
+
+        if !scope.contains_variable(&var.name) {
+            bail!(
+                attrs.pos,
+                RenameError::VariableDoesNotExist(mem::take(&mut var.name))
+            );
+        }
+
+        for (depth, ident) in var.path.iter().enumerate() {
+            if depth == 1 {
+                if prev != "data" {
+                    bail!(attrs.pos, RenameError::OnlyDataFieldDynAccessField);
+                }
+
+                scope.var_properties_mut(&var.name).add(ident.clone());
+            }
+
+            prev = ident.as_str();
+        }
+
+        Ok(())
+    }
+
+    fn on_binary(
+        &mut self,
+        _attrs: &mut Attributes,
+        _op: &crate::Operation,
+        lhs: &mut Expr,
+        rhs: &mut Expr,
+    ) -> crate::Result<()> {
+        let lhs_pos = lhs.attrs.pos;
+        let rhs_pos = rhs.attrs.pos;
+
+        // if we have a situation where the subject property is compared to a string literal, we assume it's a subject object.
+        // we do replace that string literal to a subject on behalf of the user.
+        match (lhs.as_mut(), lhs_pos, rhs.as_mut(), rhs_pos) {
+            (Value::Var(v), _, Value::Literal(lit), pos)
+            | (Value::Literal(lit), pos, Value::Var(v), _)
+                if lit.is_string() =>
+            {
+                if v.path.as_slice() == ["subject"] {
+                    let sub = parse_subject(pos, lit.as_str().expect("to be defined"))?;
+                    *lit = Literal::Subject(sub);
+                }
+            }
+
+            _ => {}
+        }
+        Ok(())
     }
 }
 
@@ -71,6 +202,13 @@ pub struct Scope {
 }
 
 impl Scope {
+    fn new(id: u64) -> Self {
+        Self {
+            id,
+            properties: HashMap::default(),
+        }
+    }
+
     pub fn id(&self) -> u64 {
         self.id
     }
@@ -128,173 +266,4 @@ impl Scopes {
     pub fn iter(&self) -> impl Iterator<Item = &Scope> {
         self.inner.values()
     }
-}
-
-pub fn rename(query: &mut Query) -> crate::Result<Scopes> {
-    let mut analysis = Analysis::default();
-
-    rename_query(&mut analysis, query)?;
-
-    Ok(Scopes {
-        inner: analysis.scopes,
-    })
-}
-
-fn rename_query(analysis: &mut Analysis, query: &mut Query) -> crate::Result<()> {
-    let scope = analysis.current_scope_id();
-
-    for from_stmt in query.from_stmts.iter_mut() {
-        rename_from(analysis, from_stmt)?;
-    }
-
-    analysis.set_scope(scope);
-    let scope = analysis.scope_mut();
-
-    if let Some(predicate) = query.predicate.as_mut() {
-        rename_where(scope, predicate)?;
-    }
-
-    if let Some(expr) = query.group_by.as_mut() {
-        rename_expr(scope, expr)?;
-    }
-
-    if let Some(sort) = query.order_by.as_mut() {
-        rename_sort(scope, sort)?;
-    }
-
-    rename_expr(scope, &mut query.projection)?;
-
-    Ok(())
-}
-
-fn rename_from(analysis: &mut Analysis, from: &mut FromSource) -> crate::Result<()> {
-    let scope = {
-        let scope = analysis.scope_mut();
-
-        if scope.contains_variable(&from.ident) {
-            bail!(
-                from.attrs.pos,
-                RenameError::VariableAlreadyExists(mem::take(&mut from.ident))
-            );
-        }
-
-        scope.new_var(from.ident.clone());
-        scope.id
-    };
-
-    rename_source(analysis, &mut from.source)?;
-    from.attrs.scope = scope;
-
-    Ok(())
-}
-
-fn rename_source(analysis: &mut Analysis, source: &mut Source) -> crate::Result<()> {
-    rename_source_type(analysis, &mut source.inner)?;
-    source.attrs.scope = analysis.current_scope_id();
-
-    Ok(())
-}
-
-fn rename_source_type(analysis: &mut Analysis, source_type: &mut SourceType) -> crate::Result<()> {
-    if let SourceType::Subquery(query) = source_type {
-        analysis.new_scope();
-        rename_query(analysis, query)?;
-    }
-
-    Ok(())
-}
-
-fn rename_where(scope: &mut Scope, predicate: &mut Where) -> crate::Result<()> {
-    predicate.attrs.scope = scope.id;
-
-    rename_expr(scope, &mut predicate.expr)?;
-
-    Ok(())
-}
-
-fn rename_sort(scope: &mut Scope, sort: &mut Sort) -> crate::Result<()> {
-    rename_expr(scope, &mut sort.expr)
-}
-
-fn rename_expr(scope: &mut Scope, expr: &mut Expr) -> crate::Result<()> {
-    expr.attrs.scope = scope.id;
-
-    match &mut expr.value {
-        Value::Literal(_) => {}
-
-        Value::Var(var) => {
-            let mut prev = "";
-
-            if !scope.contains_variable(&var.name) {
-                bail!(
-                    expr.attrs.pos,
-                    RenameError::VariableDoesNotExist(mem::take(&mut var.name))
-                );
-            }
-
-            for (depth, ident) in var.path.iter().enumerate() {
-                if depth == 1 {
-                    if prev != "data" {
-                        bail!(expr.attrs.pos, RenameError::OnlyDataFieldDynAccessField);
-                    }
-
-                    scope.var_properties_mut(&var.name).add(ident.clone());
-                }
-
-                prev = ident.as_str();
-            }
-        }
-
-        Value::Record(record) => {
-            for expr in record.fields.values_mut() {
-                rename_expr(scope, expr)?;
-            }
-        }
-
-        Value::Array(exprs) => {
-            for expr in exprs.iter_mut() {
-                rename_expr(scope, expr)?;
-            }
-        }
-
-        Value::App { params, .. } => {
-            for param in params.iter_mut() {
-                rename_expr(scope, param)?;
-            }
-        }
-
-        Value::Binary { lhs, rhs, .. } => {
-            rename_expr(scope, lhs.as_mut())?;
-            rename_expr(scope, rhs.as_mut())?;
-            let lhs_pos = lhs.attrs.pos;
-            let rhs_pos = rhs.attrs.pos;
-
-            // if we have a situation where the subject property is compared to a string literal, we assume it's a subject object.
-            // we do replace that string literal to a subject on behalf of the user.
-            match (
-                lhs.as_mut().as_mut(),
-                lhs_pos,
-                rhs.as_mut().as_mut(),
-                rhs_pos,
-            ) {
-                (Value::Var(v), _, Value::Literal(lit), pos)
-                | (Value::Literal(lit), pos, Value::Var(v), _)
-                    if lit.is_string() =>
-                {
-                    if v.path.as_slice() == ["subject"] {
-                        let sub = parse_subject(pos, lit.as_str().expect("to be defined"))?;
-                        *lit = Literal::Subject(sub);
-                    }
-                }
-
-                _ => {}
-            }
-        }
-
-        Value::Unary { expr, .. } => {
-            rename_expr(scope, expr.as_mut())?;
-        }
-    };
-
-    Ok(())
 }

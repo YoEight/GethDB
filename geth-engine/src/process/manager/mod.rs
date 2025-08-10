@@ -187,13 +187,13 @@ impl Manager {
             }
 
             Item::Stream(stream) => {
-                if let Some(proc) = self.catalog.get_process(cmd.dest) {
-                    if !proc.mailbox.send(Item::Stream(stream)) {
-                        self.handle_terminate(ProcTerminatedParams {
-                            id: cmd.dest,
-                            error: None,
-                        });
-                    }
+                if let Some(proc) = self.catalog.get_process(cmd.dest)
+                    && !proc.mailbox.send(Item::Stream(stream))
+                {
+                    self.handle_terminate(ProcTerminatedParams {
+                        id: cmd.dest,
+                        error: None,
+                    });
                 }
             }
         }
@@ -273,20 +273,19 @@ impl Manager {
             }
 
             for dependent in running.dependents {
-                if let Some(running) = self.catalog.get_process(dependent) {
-                    if !self.closing
-                        && !running.mailbox.send(Item::Mail(Mail {
-                            context: RequestContext::new(),
-                            origin: 0,
-                            correlation: Uuid::nil(),
-                            payload: Notifications::ProcessTerminated(cmd.id).into(),
-                            created: Instant::now(),
-                        }))
-                    {
-                        // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
-                        // I could rewrite `handle_terminate` to avoid recursion.
-                        tracing::warn!(id = dependent, proc = ?running.proc, closing = self.closing, "process seems to be terminated");
-                    }
+                if let Some(running) = self.catalog.get_process(dependent)
+                    && !self.closing
+                    && !running.mailbox.send(Item::Mail(Mail {
+                        context: RequestContext::new(),
+                        origin: 0,
+                        correlation: Uuid::nil(),
+                        payload: Notifications::ProcessTerminated(cmd.id).into(),
+                        created: Instant::now(),
+                    }))
+                {
+                    // I don't want to call `handle_terminate` here because it could end up blowing up the stack.
+                    // I could rewrite `handle_terminate` to avoid recursion.
+                    tracing::warn!(id = dependent, proc = ?running.proc, closing = self.closing, "process seems to be terminated");
                 }
             }
         } else if !self.closing {

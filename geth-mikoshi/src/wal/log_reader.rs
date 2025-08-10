@@ -34,7 +34,7 @@ impl LogReader {
         Ok(position.get_u64_le())
     }
 
-    pub fn entries(&self, start: u64, limit: u64) -> Entries {
+    pub fn entries(&self, start: u64, limit: u64) -> Entries<'_> {
         Entries::new(self, start, limit)
     }
 

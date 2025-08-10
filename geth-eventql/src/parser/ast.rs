@@ -33,72 +33,82 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn dfs_post_order<V: NodeVisitor>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        let mut stack = vec![NT::new(self)];
-
-        while let Some(mut item) = stack.pop() {
-            let query = unsafe { item.node.as_mut() };
-
-            if !item.visited {
-                item.visited = true;
-                stack.push(item);
-
-                visitor.enter_query()?;
-
-                for from_stmt in self.from_stmts.iter_mut() {
-                    visitor.enter_from(&mut from_stmt.attrs, &from_stmt.ident)?;
-
-                    match &mut from_stmt.source.inner {
-                        SourceType::Events => {
-                            visitor.on_source_events(&mut from_stmt.attrs, &from_stmt.ident)?
-                        }
-
-                        SourceType::Subject(subject) => visitor.on_source_subject(
-                            &mut from_stmt.attrs,
-                            &from_stmt.ident,
-                            subject,
-                        )?,
-
-                        SourceType::Subquery(sub_query) => {
-                            if visitor.on_source_subquery(&mut from_stmt.attrs, &from_stmt.ident)? {
-                                stack.push(NT::new(sub_query));
-                            }
-                        }
-                    }
-
-                    visitor.leave_from(&mut from_stmt.attrs, &from_stmt.ident)?;
-                }
-            }
-
-            if let Some(predicate) = query.predicate.as_mut() {
-                visitor.enter_where_clause(&mut predicate.attrs)?;
-                on_expr(visitor, &mut predicate.expr)?;
-                visitor.leave_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
-            }
-
-            if let Some(expr) = query.group_by.as_mut() {
-                visitor.enter_group_by(expr)?;
-                on_expr(visitor, expr)?;
-                visitor.leave_group_by(expr)?;
-            }
-
-            if let Some(sort) = query.order_by.as_mut() {
-                visitor.enter_order_by(&mut sort.order, &mut sort.expr)?;
-                on_expr(visitor, &mut sort.expr)?;
-                visitor.leave_order_by(&mut sort.order, &mut sort.expr)?;
-            }
-
-            visitor.enter_projection(&mut query.projection)?;
-            on_expr(visitor, &mut query.projection)?;
-            visitor.leave_projection(&mut query.projection)?;
-        }
-
-        Ok(())
+    pub fn dfs_post_order<V: QueryVisitor>(&mut self, visitor: &mut V) -> crate::Result<()> {
+        query_dfs_post_order(vec![NT::new(self)], visitor)
     }
 }
 
-fn on_expr<V: NodeVisitor>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
-    expr.dfs_post_order(visitor.expr_visitor())
+fn query_dfs_post_order<V: QueryVisitor>(
+    mut stack: Vec<NT<Query>>,
+    visitor: &mut V,
+) -> crate::Result<()> {
+    while let Some(mut item) = stack.pop() {
+        let query = unsafe { item.node.as_mut() };
+
+        if !item.visited {
+            item.visited = true;
+            stack.push(item);
+
+            visitor.enter_query()?;
+
+            for from_stmt in query.from_stmts.iter_mut() {
+                visitor.enter_from(&mut from_stmt.attrs, &from_stmt.ident)?;
+
+                match &mut from_stmt.source.inner {
+                    SourceType::Events => {
+                        visitor.on_source_events(&mut from_stmt.attrs, &from_stmt.ident)?
+                    }
+
+                    SourceType::Subject(subject) => visitor.on_source_subject(
+                        &mut from_stmt.attrs,
+                        &from_stmt.ident,
+                        subject,
+                    )?,
+
+                    SourceType::Subquery(sub_query) => {
+                        if visitor.on_source_subquery(&mut from_stmt.attrs, &from_stmt.ident)? {
+                            stack.push(NT::new(sub_query));
+                        }
+                    }
+                }
+
+                visitor.exit_source(&mut from_stmt.source.attrs)?;
+                visitor.exit_from(&mut from_stmt.attrs, &from_stmt.ident)?;
+            }
+
+            continue;
+        }
+
+        if let Some(predicate) = query.predicate.as_mut() {
+            visitor.enter_where_clause(&mut predicate.attrs)?;
+            on_expr(visitor, &mut predicate.expr)?;
+            visitor.exit_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
+        }
+
+        if let Some(expr) = query.group_by.as_mut() {
+            visitor.enter_group_by(expr)?;
+            on_expr(visitor, expr)?;
+            visitor.leave_group_by(expr)?;
+        }
+
+        if let Some(sort) = query.order_by.as_mut() {
+            visitor.enter_order_by(&mut sort.order, &mut sort.expr)?;
+            on_expr(visitor, &mut sort.expr)?;
+            visitor.leave_order_by(&mut sort.order, &mut sort.expr)?;
+        }
+
+        visitor.enter_projection(&mut query.projection)?;
+        on_expr(visitor, &mut query.projection)?;
+        visitor.leave_projection(&mut query.projection)?;
+        visitor.exit_query()?;
+    }
+
+    Ok(())
+}
+
+fn on_expr<V: QueryVisitor>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
+    let mut expr_visitor = visitor.expr_visitor();
+    expr.dfs_post_order(&mut expr_visitor)
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -295,7 +305,7 @@ impl Expr {
 
                 Value::App { fun, params } => {
                     if item.visited {
-                        visitor.on_app(&mut node.attrs, &fun, params)?;
+                        visitor.on_app(&mut node.attrs, fun, params)?;
                         continue;
                     }
 
@@ -437,58 +447,119 @@ pub enum Order {
     Desc,
 }
 
-pub trait NodeVisitor {
-    type Inner: ExprVisitor;
+#[allow(dead_code)]
+pub enum Context {
+    Unspecified,
+    Where,
+    GroupBy,
+    OrderBy,
+    Projection,
+}
 
-    fn enter_query(&mut self) -> crate::Result<()>;
-    fn enter_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()>;
+#[allow(unused_variables)]
+pub trait QueryVisitor {
+    type Inner<'a>: ExprVisitor
+    where
+        Self: 'a;
 
-    fn on_source_events(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()>;
+    fn enter_query(&mut self) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_query(&mut self) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn on_source_events(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+        Ok(())
+    }
 
     fn on_source_subject(
         &mut self,
         attrs: &mut Attributes,
         ident: &str,
         subject: &mut Subject,
-    ) -> crate::Result<()>;
+    ) -> crate::Result<()> {
+        Ok(())
+    }
 
-    fn on_source_subquery(&mut self, _attrs: &mut Attributes, _ident: &str) -> crate::Result<bool> {
+    fn on_source_subquery(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<bool> {
         Ok(true)
     }
 
-    fn leave_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()>;
-
-    fn enter_where_clause(&mut self, attrs: &mut Attributes) -> crate::Result<()>;
-    fn leave_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()>;
-
-    fn enter_group_by(&mut self, expr: &mut Expr) -> crate::Result<()>;
-    fn leave_group_by(&mut self, expr: &mut Expr) -> crate::Result<()>;
-
-    fn enter_order_by(&mut self, order: &mut Order, expr: &mut Expr) -> crate::Result<()>;
-    fn leave_order_by(&mut self, order: &mut Order, expr: &mut Expr) -> crate::Result<()>;
-
-    fn enter_projection(&mut self, expr: &mut Expr) -> crate::Result<()>;
-    fn leave_projection(&mut self, expr: &mut Expr) -> crate::Result<()>;
-
-    fn expr_visitor(&mut self) -> &mut Self::Inner;
-
-    fn on_expr(&mut self, expr: &mut Expr) -> crate::Result<()> {
-        expr.dfs_post_order(self.expr_visitor())
+    fn exit_source(&mut self, _attrs: &mut Attributes) -> crate::Result<()> {
+        Ok(())
     }
+
+    fn enter_where_clause(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a>;
 }
 
+#[allow(unused_variables)]
 pub trait ExprVisitor {
-    fn on_literal(&mut self, attrs: &mut Attributes, lit: &mut Literal) -> crate::Result<()>;
-    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()>;
-    fn on_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()>;
-    fn on_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()>;
+    fn on_literal(&mut self, attrs: &mut Attributes, lit: &mut Literal) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn on_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn on_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
+        Ok(())
+    }
 
     fn on_app(
         &mut self,
         attrs: &mut Attributes,
         name: &str,
         params: &mut Vec<Expr>,
-    ) -> crate::Result<()>;
+    ) -> crate::Result<()> {
+        Ok(())
+    }
 
     fn on_binary(
         &mut self,
@@ -496,12 +567,16 @@ pub trait ExprVisitor {
         op: &Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
-    ) -> crate::Result<()>;
+    ) -> crate::Result<()> {
+        Ok(())
+    }
 
     fn on_unary(
         &mut self,
         attrs: &mut Attributes,
         op: &Operation,
         expr: &mut Expr,
-    ) -> crate::Result<()>;
+    ) -> crate::Result<()> {
+        Ok(())
+    }
 }

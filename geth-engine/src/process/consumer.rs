@@ -223,10 +223,10 @@ impl Consumer {
 
                 State::Live => {
                     if let Some(event) = self.sub_streaming.next().await? {
-                        if let SubscriptionEvent::EventAppeared(temp) = &event {
-                            if temp.revision < self.end {
-                                continue;
-                            }
+                        if let SubscriptionEvent::EventAppeared(temp) = &event
+                            && temp.revision < self.end
+                        {
+                            continue;
                         }
 
                         return Ok(Some(event));

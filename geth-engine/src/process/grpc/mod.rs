@@ -116,13 +116,13 @@ where
 
         Box::pin(async move {
             let resp = inner.call(req).await?;
-            if let Some(status) = Status::from_header_map(resp.headers()) {
-                if status.code() != Code::Ok {
-                    if is_client_error(status.code()) {
-                        metrics.observe_client_error();
-                    } else if is_server_error(status.code()) {
-                        metrics.observe_server_error();
-                    }
+            if let Some(status) = Status::from_header_map(resp.headers())
+                && status.code() != Code::Ok
+            {
+                if is_client_error(status.code()) {
+                    metrics.observe_client_error();
+                } else if is_server_error(status.code()) {
+                    metrics.observe_server_error();
                 }
             }
 

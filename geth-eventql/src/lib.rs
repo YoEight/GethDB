@@ -45,4 +45,4 @@ pub use eval::{Dictionary, Entry, EvalError, eval};
 pub use infer::infer;
 pub use infer::{Infer, InferedQuery, Type};
 pub use rename::rename;
-pub use rename::{Lexical, Properties, Scope, Scopes};
+pub use rename::{Properties, Scope, Scopes};

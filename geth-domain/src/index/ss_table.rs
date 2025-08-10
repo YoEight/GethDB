@@ -288,7 +288,7 @@ impl SsTable {
         self.iter().map(|t| (t.key, t.revision, t.position))
     }
 
-    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> ScanForward {
+    pub fn scan_forward(&self, key: u64, start: u64, count: usize) -> ScanForward<'_> {
         ScanForward {
             key,
             revision: start,
@@ -300,7 +300,7 @@ impl SsTable {
         }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanBackward {
+    pub fn scan_backward(&self, key: u64, start: u64, count: usize) -> ScanBackward<'_> {
         let mut candidates = self.find_best_candidates(key, start);
 
         candidates.rotate_left(candidates.len() - 1);

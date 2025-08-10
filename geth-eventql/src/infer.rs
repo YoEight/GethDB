@@ -181,7 +181,7 @@ fn infer_query(type_check: &mut Typecheck, query: &mut Query) -> crate::Result<(
     }
 
     if let Some(predicate) = query.predicate.as_mut() {
-        Some(infer_where(type_check, predicate)?);
+        infer_where(type_check, predicate)?;
     }
 
     if let Some(expr) = query.group_by.as_mut() {
@@ -221,7 +221,7 @@ fn infer_expr_simple(
 fn infer_expr(type_check: &mut Typecheck, assumption: Type, expr: &mut Expr) -> crate::Result<()> {
     match &mut expr.value {
         Value::Literal(lit) => {
-            let type_proj = Type::project(&lit);
+            let type_proj = Type::project(lit);
 
             if assumption != Type::Unspecified && assumption != type_proj {
                 bail!(
@@ -234,12 +234,12 @@ fn infer_expr(type_check: &mut Typecheck, assumption: Type, expr: &mut Expr) -> 
         }
 
         Value::Var(var) => {
-            let register_assumption = type_check.lookup_type_info(expr.attrs.scope, &var);
+            let register_assumption = type_check.lookup_type_info(expr.attrs.scope, var);
 
             if assumption == Type::Unspecified && register_assumption == assumption {
                 expr.attrs.tpe = Type::Unspecified;
             } else if register_assumption == Type::Unspecified {
-                type_check.set_type_info(expr.attrs.scope, &var, assumption);
+                type_check.set_type_info(expr.attrs.scope, var, assumption);
                 expr.attrs.tpe = assumption;
             } else if assumption == Type::Unspecified {
                 expr.attrs.tpe = register_assumption;
