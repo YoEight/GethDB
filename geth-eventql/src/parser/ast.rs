@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display, ptr::NonNull};
+use std::{collections::BTreeMap, fmt::Display, ptr::NonNull};
 
 use crate::{
     Pos, Type,
@@ -277,25 +277,28 @@ impl Expr {
 
                 Value::Record(record) => {
                     if item.visited {
-                        visitor.on_record(&mut node.attrs, record)?;
+                        visitor.exit_record(&mut node.attrs, record)?;
                         continue;
                     }
 
                     item.visited = true;
+                    visitor.enter_record(&mut node.attrs, record)?;
                     stack.push(item);
 
-                    for expr in record.fields.values_mut() {
+                    for (key, expr) in record.fields.iter_mut() {
+                        visitor.enter_record_entry(&mut node.attrs, key, expr)?;
                         stack.push(NT::new(expr));
                     }
                 }
 
                 Value::Array(exprs) => {
                     if item.visited {
-                        visitor.on_array(&mut node.attrs, exprs)?;
+                        visitor.exit_array(&mut node.attrs, exprs)?;
                         continue;
                     }
 
                     item.visited = true;
+                    visitor.enter_array(&mut node.attrs, exprs)?;
                     stack.push(item);
 
                     for expr in exprs.iter_mut().rev() {
@@ -418,7 +421,7 @@ pub enum Value {
 }
 
 pub struct Record {
-    pub fields: HashMap<String, Expr>,
+    pub fields: BTreeMap<String, Expr>,
 }
 
 impl Record {
@@ -547,11 +550,28 @@ pub trait ExprVisitor {
         Ok(())
     }
 
-    fn on_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
+    fn enter_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn enter_record_entry(
+        &mut self,
+        attrs: &mut Attributes,
+        key: &str,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
         Ok(())
     }
 

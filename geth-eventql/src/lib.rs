@@ -40,7 +40,7 @@ pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferedQuery> {
     infer(scopes, query)
 }
 
-pub use codegen::{Instr, codegen_expr};
+pub use codegen::{Instr, codegen};
 pub use eval::{Dictionary, Entry, EvalError, eval};
 pub use infer::infer;
 pub use infer::{Infer, InferedQuery, Type};

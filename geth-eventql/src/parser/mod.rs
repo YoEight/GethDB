@@ -3,7 +3,7 @@ use crate::{
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
 };
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 
 mod ast;
 mod state;
@@ -406,7 +406,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
         Sym::LBrace => {
             state.skip_whitespace()?;
 
-            let mut fields = HashMap::new();
+            let mut fields = BTreeMap::new();
 
             while let Some(Sym::Id(id)) = state.look_ahead()? {
                 let id = id.clone();

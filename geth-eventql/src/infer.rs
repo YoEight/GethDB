@@ -227,7 +227,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn on_record(&mut self, attrs: &mut Attributes, _record: &mut Record) -> crate::Result<()> {
+    fn exit_record(&mut self, attrs: &mut Attributes, _record: &mut Record) -> crate::Result<()> {
         if attrs.tpe != Type::Unspecified && attrs.tpe != Type::Record {
             bail!(attrs.pos, InferError::TypeMismatch(attrs.tpe, Type::Record));
         }
@@ -237,7 +237,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn on_array(&mut self, attrs: &mut Attributes, _values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn exit_array(&mut self, attrs: &mut Attributes, _values: &mut Vec<Expr>) -> crate::Result<()> {
         if attrs.tpe != Type::Unspecified && attrs.tpe != Type::Array {
             bail!(attrs.pos, InferError::TypeMismatch(attrs.tpe, Type::Array));
         }
