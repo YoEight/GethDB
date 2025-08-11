@@ -165,3 +165,9 @@ impl Display for Sym {
         }
     }
 }
+
+impl From<Keyword> for Sym {
+    fn from(value: Keyword) -> Self {
+        Self::Keyword(value)
+    }
+}

@@ -34,6 +34,14 @@ impl<'a> ParserState<'a> {
         Ok(self.buf.as_ref().map(|x| &x.sym))
     }
 
+    pub fn is_next_sym<S: Into<Sym>>(&mut self, other: S) -> crate::Result<bool> {
+        if let Some(sym) = self.look_ahead()? {
+            return Ok(sym == &other.into());
+        }
+
+        Ok(false)
+    }
+
     pub fn shift(&mut self) -> crate::Result<Option<Sym>> {
         if self.buf.is_none() {
             return self.lexer.next_sym();

@@ -11,6 +11,12 @@ pub struct Pos {
     column: u64,
 }
 
+impl Default for Pos {
+    fn default() -> Self {
+        Self { line: 1, column: 1 }
+    }
+}
+
 impl Display for Pos {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}:{}", self.line, self.column)

@@ -22,6 +22,12 @@ impl Attributes {
     }
 }
 
+impl Default for Attributes {
+    fn default() -> Self {
+        Self::new(Default::default())
+    }
+}
+
 pub struct Query {
     pub attrs: Attributes,
     pub from_stmts: Vec<FromSource>,

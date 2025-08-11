@@ -1,9 +1,12 @@
 use crate::{
-    error::ParserError,
+    error::{LexerError, ParserError},
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
 };
-use std::collections::BTreeMap;
+use std::{
+    collections::BTreeMap,
+    mem::{self, MaybeUninit},
+};
 
 mod ast;
 mod state;
@@ -15,6 +18,385 @@ pub fn parse(lexer: Lexer<'_>) -> crate::Result<Query> {
     let mut state = ParserState::new(lexer);
 
     parse_query(&mut state)
+}
+
+pub struct QueryBuilder {
+    attrs: Attributes,
+    from_stmt_builder: FromStatementBuilder,
+    where_clause_builder: WhereClauseBuilder,
+    from_stmts: Vec<FromSource>,
+    group_by: Option<Expr>,
+    order_by: Option<Sort>,
+    limit: Option<Limit>,
+    projection: Option<Expr>,
+    expr: ExprBuilder,
+}
+
+impl Default for QueryBuilder {
+    fn default() -> Self {
+        QueryBuilder::new(Default::default())
+    }
+}
+
+impl QueryBuilder {
+    fn new(pos: Pos) -> Self {
+        Self {
+            attrs: Attributes::new(pos),
+            from_stmt_builder: Default::default(),
+            where_clause_builder: Default::default(),
+            from_stmts: vec![],
+            group_by: None,
+            order_by: None,
+            limit: None,
+            projection: None,
+            expr: Default::default(),
+        }
+    }
+
+    fn set_projection(&mut self, expr: Expr) {
+        self.projection = Some(expr);
+    }
+
+    fn add_from_stmt(&mut self, source: Source) {
+        self.from_stmts.push(self.from_stmt_builder.build(source));
+    }
+
+    fn build(&mut self) -> crate::Result<Query> {
+        let mut complete = mem::take(self);
+        let projection = if let Some(p) = complete.projection.take() {
+            p
+        } else {
+            bail!(complete.attrs.pos, LexerError::UnexpectedEndOfQuery);
+        };
+
+        Ok(Query {
+            attrs: complete.attrs,
+            from_stmts: complete.from_stmts,
+            predicate: complete.where_clause_builder.build(),
+            group_by: complete.group_by,
+            order_by: complete.order_by,
+            limit: complete.limit,
+            projection,
+        })
+    }
+}
+
+pub struct FromStatementBuilder {
+    attrs: Attributes,
+    ident: String,
+}
+
+impl Default for FromStatementBuilder {
+    fn default() -> Self {
+        Self {
+            attrs: Attributes::new(Pos::default()),
+            ident: String::new(),
+        }
+    }
+}
+
+#[derive(Default)]
+struct WhereClauseBuilder {
+    attrs: Attributes,
+    expr: Option<Expr>,
+}
+
+impl WhereClauseBuilder {
+    fn build(&mut self) -> Option<Where> {
+        let complete = mem::take(self);
+        let expr = complete.expr?;
+
+        Some(Where {
+            attrs: complete.attrs,
+            expr,
+        })
+    }
+}
+
+impl FromStatementBuilder {
+    fn build(&mut self, source: Source) -> FromSource {
+        let complete = mem::take(self);
+
+        FromSource {
+            attrs: complete.attrs,
+            ident: complete.ident,
+            source,
+        }
+    }
+}
+
+#[derive(Default)]
+struct ExprBuilder {
+    params: Vec<Expr>,
+    parens_level: usize,
+}
+
+#[derive(Debug)]
+enum Ctx {
+    FromStatement,
+    FromStatementSource,
+    WhereClause,
+    Expr,
+}
+
+pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
+    let mut state = ParserState::new(lexer);
+    let mut stack = vec![Ctx::FromStatement];
+    let mut query_builder = QueryBuilder::new(state.pos());
+    let mut queries = Vec::<QueryBuilder>::new();
+    let mut params = Vec::<Expr>::new();
+
+    while let Some(mut ctx) = stack.pop() {
+        match &mut ctx {
+            Ctx::FromStatement => {
+                state.skip_whitespace()?;
+
+                if query_builder.from_stmts.is_empty() || state.is_next_sym(Keyword::From)? {
+                    query_builder.from_stmt_builder.attrs.pos = state.pos();
+                    state.expect(Sym::Keyword(Keyword::From))?;
+                    state.skip_whitespace()?;
+                    query_builder.from_stmt_builder.ident = parse_ident(&mut state)?;
+                    state.skip_whitespace()?;
+                    state.expect(Sym::Keyword(Keyword::In))?;
+                    state.skip_whitespace()?;
+
+                    stack.push(Ctx::FromStatementSource);
+                    continue;
+                }
+
+                stack.push(Ctx::WhereClause);
+            }
+
+            Ctx::FromStatementSource => {
+                if let Some(mut parent_query) = queries.pop() {
+                    let sub_query = query_builder.build()?;
+                    parent_query.add_from_stmt(Source {
+                        attrs: sub_query.attrs,
+                        inner: SourceType::Subquery(Box::new(sub_query)),
+                    });
+
+                    state.skip_whitespace()?;
+                    state.expect(Sym::RParens)?;
+                    state.skip_whitespace()?;
+
+                    query_builder = parent_query;
+                } else {
+                    let pos = state.pos();
+                    match state.shift_or_bail()? {
+                        Sym::Id(id) if id.to_lowercase() == "events" => {
+                            query_builder.add_from_stmt(Source {
+                                attrs: Attributes::new(pos),
+                                inner: SourceType::Events,
+                            });
+                        }
+
+                        Sym::Literal(Literal::String(sub)) => {
+                            query_builder.add_from_stmt(Source {
+                                attrs: Attributes::new(pos),
+                                inner: SourceType::Subject(parse_subject(pos, &sub)?),
+                            });
+                        }
+
+                        Sym::LParens => {
+                            state.skip_whitespace()?;
+                            stack.push(ctx);
+                            stack.push(Ctx::FromStatement);
+                            queries.push(query_builder);
+                            query_builder = QueryBuilder::new(state.pos());
+
+                            continue;
+                        }
+
+                        x => bail!(state.pos(), ParserError::ExpectedSource(x)),
+                    }
+                }
+
+                state.skip_whitespace()?;
+                stack.push(Ctx::FromStatement);
+            }
+
+            Ctx::WhereClause => {
+                state.skip_whitespace()?;
+
+                if !state.is_next_sym(Keyword::Where)? {
+                    todo!();
+                }
+
+                query_builder.where_clause_builder.attrs.pos = state.pos();
+                state.shift()?;
+                state.skip_whitespace()?;
+                stack.push(ctx);
+                stack.push(Ctx::Expr);
+            }
+
+            Ctx::Expr => {
+                state.skip_whitespace()?;
+                let pos = state.pos();
+
+                stack.push(ctx);
+                match state.shift_or_bail()? {
+                    Sym::LParens => {
+                        state.skip_whitespace()?;
+                        query_builder.expr.parens_level += 1;
+                        // let mut expr = parse_expr(&mut state)?;
+                        // expr.attrs = Attributes::new(pos);
+                        // state.skip_whitespace()?;
+                        // state.expect(Sym::RParens)?;
+
+                        // Ok(expr)
+                    }
+
+                    Sym::Literal(l) => {
+                        params.push(Expr {
+                            attrs: Attributes::new(pos),
+                            value: Value::Literal(l),
+                        });
+                    }
+
+                    Sym::Id(id) => {
+                        if state.is_next_sym(Sym::LParens)? {
+                            state.shift()?;
+                            state.skip_whitespace()?;
+
+                            let mut params = Vec::new();
+
+                            if !state.is_next_sym(Sym::RParens)? {
+                                todo!();
+                                // params.push(parse_expr_single(state)?);
+                                // state.skip_whitespace()?;
+
+                                // while let Some(Sym::Comma) = state.look_ahead()? {
+                                //     state.shift()?;
+                                //     state.skip_whitespace()?;
+                                //     params.push(parse_expr_single(state)?);
+                                //     state.skip_whitespace()?;
+                                // }
+                            }
+
+                            state.skip_whitespace()?;
+                            state.expect(Sym::RParens)?;
+
+                            query_builder.expr.params.push(Expr {
+                                attrs: Attributes::new(pos),
+                                value: Value::App { fun: id, params },
+                            });
+
+                            continue;
+                        }
+
+                        let mut var = Var {
+                            name: id,
+                            path: vec![],
+                        };
+
+                        while state.is_next_sym(Sym::Dot)? {
+                            state.shift()?;
+                            var.path.push(parse_ident(&mut state)?);
+                        }
+
+                        query_builder.expr.params.push(Expr {
+                            attrs: Attributes::new(pos),
+                            value: Value::Var(var),
+                        })
+                    }
+
+                    Sym::LBracket => {
+                        // let mut values = Vec::new();
+                        state.skip_whitespace()?;
+
+                        if state.is_next_sym(Sym::RBracket)? {
+                            state.shift()?;
+
+                            query_builder.expr.params.push(Expr {
+                                attrs: Attributes::new(pos),
+                                value: Value::Array(vec![]),
+                            });
+
+                            continue;
+                        }
+
+                        todo!();
+                        // values.push(parse_expr_single(state)?);
+                        // state.skip_whitespace()?;
+
+                        // while let Some(Sym::Comma) = state.look_ahead()? {
+                        //     state.shift()?;
+                        //     state.skip_whitespace()?;
+                        //     values.push(parse_expr_single(state)?);
+                        //     state.skip_whitespace()?;
+                        // }
+
+                        // state.expect(Sym::RBracket)?;
+
+                        // Ok(Expr {
+                        //     attrs: Attributes::new(pos),
+                        //     value: Value::Array(values),
+                        // })
+                    }
+
+                    Sym::LBrace => {
+                        state.skip_whitespace()?;
+
+                        let mut fields = BTreeMap::new();
+
+                        if state.is_next_sym(Sym::RBrace)? {
+                            state.shift()?;
+                            query_builder.expr.params.push(Expr {
+                                attrs: Attributes::new(pos),
+                                value: Value::Record(Record { fields }),
+                            });
+
+                            continue;
+                        }
+
+                        todo!();
+                        // while let Some(Sym::Id(id)) = state.look_ahead()? {
+                        //     let id = id.clone();
+                        //     state.shift()?;
+                        //     state.skip_whitespace()?;
+                        //     state.expect(Sym::Colon)?;
+                        //     state.skip_whitespace()?;
+                        //     fields.insert(id, parse_expr_single(state)?);
+                        //     state.skip_whitespace()?;
+
+                        //     if let Some(Sym::Comma) = state.look_ahead()? {
+                        //         state.shift()?;
+                        //         state.skip_whitespace()?;
+                        //     } else {
+                        //         break;
+                        //     }
+                        // }
+
+                        // state.skip_whitespace()?;
+                        // state.expect(Sym::RBrace)?;
+
+                        // Ok(Expr {
+                        //     attrs: Attributes::new(pos),
+                        //     value: Value::Record(Record { fields }),
+                        // })
+                    }
+
+                    Sym::Operation(op) => {
+                        todo!();
+                        // state.skip_whitespace()?;
+                        // let expr = parse_expr_single(state)?;
+
+                        // Ok(Expr {
+                        //     attrs: Attributes::new(pos),
+                        //     value: Value::Unary {
+                        //         op,
+                        //         expr: Box::new(expr),
+                        //     },
+                        // })
+                    }
+
+                    x => bail!(state.pos(), ParserError::ExpectedExpr(x)),
+                }
+            }
+        }
+    }
+
+    query_builder.build()
 }
 
 fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query> {
