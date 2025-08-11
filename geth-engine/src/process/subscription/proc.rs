@@ -1,4 +1,4 @@
-use crate::metrics::{get_metrics, Metrics};
+use crate::metrics::{Metrics, get_metrics};
 use crate::names::types::STREAM_DELETED;
 use crate::process::messages::{
     Messages, Notifications, ProgramProcess, ProgramRequests, ProgramResponses, Responses,

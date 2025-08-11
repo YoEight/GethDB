@@ -60,7 +60,7 @@ impl IndexClient {
                     return Ok(ReadCompleted::Success(Streaming {
                         inner,
                         batch: Some(entries.into_iter()),
-                    }))
+                    }));
                 }
 
                 _ => {
@@ -134,7 +134,9 @@ impl IndexClient {
                 }
 
                 _ => {
-                    eyre::bail!("unexpected response when fetching the latest revision from the index process");
+                    eyre::bail!(
+                        "unexpected response when fetching the latest revision from the index process"
+                    );
                 }
             }
         }

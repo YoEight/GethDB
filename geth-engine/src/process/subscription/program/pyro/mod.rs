@@ -3,26 +3,26 @@ use std::{collections::HashMap, sync::Arc};
 use base64::Engine as _;
 use chrono::{DateTime, Utc};
 use geth_common::{ContentType, Record, Revision, SubscriptionConfirmation, SubscriptionEvent};
-use pyro_core::{ast::Prop, sym::Literal, NominalTyping};
+use pyro_core::{NominalTyping, ast::Prop, sym::Literal};
 use pyro_runtime::{
-    helpers::{Declared, TypeBuilder},
     Channel, Engine, Env, PyroProcess, PyroType, PyroValue, RuntimeValue,
+    helpers::{Declared, TypeBuilder},
 };
 use serde_json::Value;
 use tokio::{
     select,
     sync::{
-        mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
         Mutex,
+        mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     },
 };
 
 use crate::{
-    process::{
-        consumer::{start_consumer, ConsumerResult},
-        ProcId, RequestContext,
-    },
     ManagerClient,
+    process::{
+        ProcId, RequestContext,
+        consumer::{ConsumerResult, start_consumer},
+    },
 };
 
 pub mod worker;

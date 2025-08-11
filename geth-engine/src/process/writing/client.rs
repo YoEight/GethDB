@@ -1,6 +1,6 @@
 use crate::process::{
-    messages::{WriteRequests, WriteResponses},
     ManagerClient, ProcId, RequestContext,
+    messages::{WriteRequests, WriteResponses},
 };
 use geth_common::{
     AppendError, AppendStreamCompleted, DeleteError, DeleteStreamCompleted, ExpectedRevision,

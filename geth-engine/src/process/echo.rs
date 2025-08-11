@@ -1,4 +1,4 @@
-use crate::process::{env::Managed, Item, ProcessEnv};
+use crate::process::{Item, ProcessEnv, env::Managed};
 
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     while let Some(item) = env.recv().await {

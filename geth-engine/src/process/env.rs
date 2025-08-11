@@ -7,8 +7,8 @@ use tokio::{
 };
 
 use crate::{
-    process::{subscription::SubscriptionClient, Item},
     IndexClient, ManagerClient, Options, Proc,
+    process::{Item, subscription::SubscriptionClient},
 };
 
 pub struct Managed {

@@ -34,7 +34,7 @@ impl MemTable {
         self.entries_count += 1;
     }
 
-    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward {
+    pub fn scan_forward(&self, key: u64, start: u64, max: usize) -> ScanForward<'_> {
         ScanForward {
             key,
             start,
@@ -44,7 +44,7 @@ impl MemTable {
         }
     }
 
-    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward {
+    pub fn scan_backward(&self, key: u64, start: u64, max: usize) -> ScanBackward<'_> {
         ScanBackward {
             key,
             start,

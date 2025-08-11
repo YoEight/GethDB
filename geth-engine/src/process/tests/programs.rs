@@ -7,7 +7,7 @@ use geth_common::{
 };
 use uuid::Uuid;
 
-use crate::{process::tests::Foo, Options, RequestContext};
+use crate::{Options, RequestContext, process::tests::Foo};
 
 #[tokio::test]
 pub async fn test_program_created() -> eyre::Result<()> {

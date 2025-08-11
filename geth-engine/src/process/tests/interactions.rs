@@ -1,9 +1,9 @@
 use crate::{
-    process::{
-        messages::TestSinkResponses, sink::SinkClient, start_process_manager_with_catalog, Catalog,
-        Mail, Proc,
-    },
     Options, RequestContext,
+    process::{
+        Catalog, Mail, Proc, messages::TestSinkResponses, sink::SinkClient,
+        start_process_manager_with_catalog,
+    },
 };
 use bytes::{BufMut, BytesMut};
 

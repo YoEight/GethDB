@@ -3,10 +3,10 @@ use std::sync::Arc;
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::{
-    process::manager::{
-        catalog::Catalog, client::ManagerClient, Manager, ManagerCommand, ShutdownReporter,
-    },
     Options,
+    process::manager::{
+        Manager, ManagerCommand, ShutdownReporter, catalog::Catalog, client::ManagerClient,
+    },
 };
 
 pub fn process_manager(

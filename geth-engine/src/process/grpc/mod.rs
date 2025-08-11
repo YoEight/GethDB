@@ -1,15 +1,15 @@
 use std::{pin::Pin, sync::Arc};
 
 use tokio::sync::Notify;
-use tonic::{transport::Server, Code, Status};
+use tonic::{Code, Status, transport::Server};
 
 use geth_grpc::generated::protocol::protocol_server::ProtocolServer;
 use tracing::instrument;
 
 use crate::{
-    metrics::{get_metrics, Metrics},
-    process::{manager::ManagerClient, Managed, ProcessEnv},
     Options,
+    metrics::{Metrics, get_metrics},
+    process::{Managed, ProcessEnv, manager::ManagerClient},
 };
 
 mod protocol;
@@ -116,13 +116,13 @@ where
 
         Box::pin(async move {
             let resp = inner.call(req).await?;
-            if let Some(status) = Status::from_header_map(resp.headers()) {
-                if status.code() != Code::Ok {
-                    if is_client_error(status.code()) {
-                        metrics.observe_client_error();
-                    } else if is_server_error(status.code()) {
-                        metrics.observe_server_error();
-                    }
+            if let Some(status) = Status::from_header_map(resp.headers())
+                && status.code() != Code::Ok
+            {
+                if is_client_error(status.code()) {
+                    metrics.observe_client_error();
+                } else if is_server_error(status.code()) {
+                    metrics.observe_server_error();
                 }
             }
 

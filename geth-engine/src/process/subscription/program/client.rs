@@ -3,11 +3,11 @@ use tokio::sync::mpsc::UnboundedSender;
 use tracing::instrument;
 
 use crate::{
-    process::{
-        messages::{Messages, ProgramRequests, ProgramResponses},
-        ProcId, RequestContext,
-    },
     ManagerClient,
+    process::{
+        ProcId, RequestContext,
+        messages::{Messages, ProgramRequests, ProgramResponses},
+    },
 };
 
 pub enum ProgramStartResult {

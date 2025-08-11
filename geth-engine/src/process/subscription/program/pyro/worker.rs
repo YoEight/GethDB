@@ -5,18 +5,18 @@ use geth_common::{ContentType, ProgramStats, Record};
 use uuid::Uuid;
 
 use crate::{
+    RequestContext,
     process::{
+        Item, Managed, ProcId, ProcessEnv,
         messages::{ProgramRequests, ProgramResponses, SubscribeResponses},
         subscription::{
             program::{
-                pyro::{create_pyro_runtime, from_runtime_value_to_json},
                 ProgramArgs,
+                pyro::{create_pyro_runtime, from_runtime_value_to_json},
             },
             pyro::{PyroEvent, PyroRuntimeNotification},
         },
-        Item, Managed, ProcId, ProcessEnv,
     },
-    RequestContext,
 };
 
 struct WorkerArgs {
@@ -32,21 +32,21 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
     tracing::debug!("computation unit allocated, waiting for program instructions");
     while let Some(item) = env.recv().await {
-        if let Item::Mail(message) = item {
-            if let Ok(ProgramRequests::Start { name, code, sender }) = message.payload.try_into() {
-                args = Some(WorkerArgs {
-                    context: message.context,
-                    program: ProgramArgs {
-                        name,
-                        code,
-                        output: sender,
-                    },
-                    origin: message.origin,
-                    correlation: message.correlation,
-                });
+        if let Item::Mail(message) = item
+            && let Ok(ProgramRequests::Start { name, code, sender }) = message.payload.try_into()
+        {
+            args = Some(WorkerArgs {
+                context: message.context,
+                program: ProgramArgs {
+                    name,
+                    code,
+                    output: sender,
+                },
+                origin: message.origin,
+                correlation: message.correlation,
+            });
 
-                break;
-            }
+            break;
         }
     }
 
@@ -123,8 +123,8 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
             }
 
             Some(item) = env.recv() => {
-                if let Item::Mail(mail) = item {
-                    if let Ok(req) = mail.payload.try_into() {
+                if let Item::Mail(mail) = item
+                    && let Ok(req) = mail.payload.try_into() {
                         match req {
                             ProgramRequests::Stop { .. } => {
                                 tracing::info!(name = args.program.name, correlation = %args.context.correlation, "program stopped");
@@ -148,7 +148,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                             }
                         }
                     }
-                }
+
             }
 
             Some(output) = runtime.recv() => {

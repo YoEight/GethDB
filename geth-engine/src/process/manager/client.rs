@@ -2,23 +2,23 @@ use std::time::{Duration, Instant};
 
 use geth_common::ProgramSummary;
 use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel},
     oneshot,
 };
 use tracing::instrument;
 use uuid::Uuid;
 
 use crate::{
+    IndexClient, Proc, ReaderClient, RequestContext, WriterClient,
     process::{
+        Item, Mail, ProcId, RunningProc, SpawnResult, Stream,
         manager::{
             FindParams, ManagerCommand, ProcReadyParams, ProcTerminatedParams, SendParams,
             ShutdownNotification, ShutdownParams, TimeoutParams, TimeoutTarget, WaitForParams,
         },
         messages::Messages,
         subscription::SubscriptionClient,
-        Item, Mail, ProcId, RunningProc, SpawnResult, Stream,
     },
-    IndexClient, Proc, ReaderClient, RequestContext, WriterClient,
 };
 
 #[derive(Clone, Debug)]
