@@ -1,4 +1,5 @@
 use crate::{
+    Operation,
     error::{LexerError, ParserError},
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
@@ -125,10 +126,20 @@ impl FromStatementBuilder {
     }
 }
 
+#[derive(Copy, Clone, PartialEq, Eq)]
+enum ExprState {
+    Grouping,
+    App,
+    Array,
+    Record,
+    Operation(Operation),
+    Done,
+}
+
 #[derive(Default)]
 struct ExprBuilder {
     params: Vec<Expr>,
-    parens_level: usize,
+    state: Vec<ExprState>,
 }
 
 #[derive(Debug)]
@@ -144,7 +155,6 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
     let mut stack = vec![Ctx::FromStatement];
     let mut query_builder = QueryBuilder::new(state.pos());
     let mut queries = Vec::<QueryBuilder>::new();
-    let mut params = Vec::<Expr>::new();
 
     while let Some(mut ctx) = stack.pop() {
         match &mut ctx {
@@ -230,6 +240,17 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
             }
 
             Ctx::Expr => {
+                let state_op = query_builder.expr.state.pop();
+                // while let Some(expr_state) = query_builder.expr.state.pop() {
+                //     match expr_state {
+                //         ExprState::Grouping => todo!(),
+                //         ExprState::App => todo!(),
+                //         ExprState::Array => todo!(),
+                //         ExprState::Record => todo!(),
+                //         ExprState::Operation(operation) => todo!(),
+                //     }
+                // }
+
                 state.skip_whitespace()?;
                 let pos = state.pos();
 
@@ -237,7 +258,7 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                 match state.shift_or_bail()? {
                     Sym::LParens => {
                         state.skip_whitespace()?;
-                        query_builder.expr.parens_level += 1;
+                        query_builder.expr.state.push(ExprState::Grouping);
                         // let mut expr = parse_expr(&mut state)?;
                         // expr.attrs = Attributes::new(pos);
                         // state.skip_whitespace()?;
@@ -246,11 +267,17 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                         // Ok(expr)
                     }
 
+                    Sym::RParens if state_op.is_some_and(|s| s == ExprState::Grouping) => {
+                        // grouping layer closed
+                    }
+
                     Sym::Literal(l) => {
-                        params.push(Expr {
+                        query_builder.expr.params.push(Expr {
                             attrs: Attributes::new(pos),
                             value: Value::Literal(l),
                         });
+
+                        query_builder.expr.state.push(ExprState::Done);
                     }
 
                     Sym::Id(id) => {
@@ -258,10 +285,10 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                             state.shift()?;
                             state.skip_whitespace()?;
 
-                            let mut params = Vec::new();
-
                             if !state.is_next_sym(Sym::RParens)? {
-                                todo!();
+                                query_builder.expr.state.push(ExprState::App);
+                                continue;
+
                                 // params.push(parse_expr_single(state)?);
                                 // state.skip_whitespace()?;
 
@@ -278,9 +305,13 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
 
                             query_builder.expr.params.push(Expr {
                                 attrs: Attributes::new(pos),
-                                value: Value::App { fun: id, params },
+                                value: Value::App {
+                                    fun: id,
+                                    params: vec![],
+                                },
                             });
 
+                            query_builder.expr.state.push(ExprState::Done);
                             continue;
                         }
 
@@ -297,7 +328,9 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                         query_builder.expr.params.push(Expr {
                             attrs: Attributes::new(pos),
                             value: Value::Var(var),
-                        })
+                        });
+
+                        query_builder.expr.state.push(ExprState::Done);
                     }
 
                     Sym::LBracket => {
@@ -312,10 +345,11 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                                 value: Value::Array(vec![]),
                             });
 
+                            query_builder.expr.state.push(ExprState::Done);
                             continue;
                         }
 
-                        todo!();
+                        query_builder.expr.state.push(ExprState::Array);
                         // values.push(parse_expr_single(state)?);
                         // state.skip_whitespace()?;
 
@@ -337,19 +371,20 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                     Sym::LBrace => {
                         state.skip_whitespace()?;
 
-                        let mut fields = BTreeMap::new();
-
                         if state.is_next_sym(Sym::RBrace)? {
                             state.shift()?;
                             query_builder.expr.params.push(Expr {
                                 attrs: Attributes::new(pos),
-                                value: Value::Record(Record { fields }),
+                                value: Value::Record(Record {
+                                    fields: BTreeMap::new(),
+                                }),
                             });
 
+                            query_builder.expr.state.push(ExprState::Done);
                             continue;
                         }
 
-                        todo!();
+                        query_builder.expr.state.push(ExprState::Record);
                         // while let Some(Sym::Id(id)) = state.look_ahead()? {
                         //     let id = id.clone();
                         //     state.shift()?;
@@ -377,7 +412,7 @@ pub fn parse_new(lexer: Lexer<'_>) -> crate::Result<Query> {
                     }
 
                     Sym::Operation(op) => {
-                        todo!();
+                        query_builder.expr.state.push(ExprState::Operation(op));
                         // state.skip_whitespace()?;
                         // let expr = parse_expr_single(state)?;
 
