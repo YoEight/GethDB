@@ -49,7 +49,7 @@ fn parse_query(state: &mut ParserState<'_>) -> crate::Result<Query> {
     check_projection(&projection)?;
 
     Ok(Query {
-        attrs: Attributes::new(pos),
+        attrs: NodeAttributes::new(pos),
         from_stmts,
         predicate,
         group_by,
@@ -83,7 +83,7 @@ fn parse_from_statement(state: &mut ParserState<'_>) -> crate::Result<FromSource
     let source = parse_source(state)?;
 
     Ok(FromSource {
-        attrs: Attributes::new(pos),
+        attrs: NodeAttributes::new(pos),
         ident,
         source,
     })
@@ -181,12 +181,12 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source> {
     let pos = state.pos();
     match state.shift_or_bail()? {
         Sym::Id(id) if id.to_lowercase() == "events" => Ok(Source {
-            attrs: Attributes::new(pos),
+            attrs: NodeAttributes::new(pos),
             inner: SourceType::Events,
         }),
 
         Sym::Literal(Literal::String(sub)) => Ok(Source {
-            attrs: Attributes::new(pos),
+            attrs: NodeAttributes::new(pos),
             inner: SourceType::Subject(parse_subject(pos, &sub)?),
         }),
 
@@ -197,7 +197,7 @@ fn parse_source(state: &mut ParserState<'_>) -> crate::Result<Source> {
             state.expect(Sym::RParens)?;
 
             Ok(Source {
-                attrs: Attributes::new(pos),
+                attrs: NodeAttributes::new(pos),
                 inner: SourceType::Subquery(Box::new(query)),
             })
         }
@@ -238,7 +238,7 @@ fn parse_where_clause(state: &mut ParserState<'_>) -> crate::Result<Option<Where
     let expr = parse_expr(state)?;
 
     Ok(Some(Where {
-        attrs: Attributes::new(pos),
+        attrs: NodeAttributes::new(pos),
         expr,
     }))
 }
@@ -312,7 +312,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
         Sym::LParens => {
             state.skip_whitespace()?;
             let mut expr = parse_expr(state)?;
-            expr.attrs = Attributes::new(pos);
+            expr.attrs = NodeAttributes::new(pos);
             state.skip_whitespace()?;
             state.expect(Sym::RParens)?;
 
@@ -320,7 +320,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
         }
 
         Sym::Literal(l) => Ok(Expr {
-            attrs: Attributes::new(pos),
+            attrs: NodeAttributes::new(pos),
             value: Value::Literal(l),
         }),
 
@@ -349,7 +349,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
                 state.expect(Sym::RParens)?;
 
                 return Ok(Expr {
-                    attrs: Attributes::new(pos),
+                    attrs: NodeAttributes::new(pos),
                     value: Value::App { fun: id, params },
                 });
             }
@@ -365,7 +365,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
             }
 
             Ok(Expr {
-                attrs: Attributes::new(pos),
+                attrs: NodeAttributes::new(pos),
                 value: Value::Var(var),
             })
         }
@@ -380,7 +380,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
                 state.shift()?;
 
                 return Ok(Expr {
-                    attrs: Attributes::new(pos),
+                    attrs: NodeAttributes::new(pos),
                     value: Value::Array(values),
                 });
             }
@@ -398,7 +398,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
             state.expect(Sym::RBracket)?;
 
             Ok(Expr {
-                attrs: Attributes::new(pos),
+                attrs: NodeAttributes::new(pos),
                 value: Value::Array(values),
             })
         }
@@ -429,7 +429,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
             state.expect(Sym::RBrace)?;
 
             Ok(Expr {
-                attrs: Attributes::new(pos),
+                attrs: NodeAttributes::new(pos),
                 value: Value::Record(Record { fields }),
             })
         }
@@ -439,7 +439,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
             let expr = parse_expr_single(state)?;
 
             Ok(Expr {
-                attrs: Attributes::new(pos),
+                attrs: NodeAttributes::new(pos),
                 value: Value::Unary {
                     op,
                     expr: Box::new(expr),

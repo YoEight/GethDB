@@ -2,7 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use geth_common::{Direction, Revision};
 use geth_eventql::{
-    Expr, FromSource, InferedQuery, Literal, Operation, Query, SourceType, Subject, Value, Where,
+    ContextFrame, Expr, ExprVisitorMut, Literal, NodeAttributes, Operation, Query, QueryVisitorMut,
+    Subject, Value,
 };
 
 use crate::{
@@ -19,7 +20,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
         if let Item::Stream(stream) = item
             && let Ok(QueryRequests::Query { query }) = stream.payload.try_into()
         {
-            let query = match geth_eventql::parse_rename_and_infer(&query) {
+            let mut infered = match geth_eventql::parse_rename_and_infer(&query) {
                 Ok(q) => q,
                 Err(e) => {
                     let _ = stream.sender.send(QueryResponses::Error(e.into()).into());
@@ -27,7 +28,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                 }
             };
 
-            let reqs = collect_requirements(&query);
+            let reqs = collect_requirements(infered.query_mut());
             let reader = env.client.new_reader_client().await?;
             // let mut sources = HashMap::with_capacity(reqs.subjects.len());
             let ctx = RequestContext::new();
@@ -55,6 +56,19 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     Ok(())
 }
 
+struct Requirements {
+    subjects: HashMap<Binding, HashSet<Subject>>,
+}
+
+fn collect_requirements(query: &mut Query) -> Requirements {
+    let mut collect_reqs = CollectRequirements::default();
+    query.dfs_post_order_mut(&mut collect_reqs).unwrap();
+
+    Requirements {
+        subjects: collect_reqs.subjects,
+    }
+}
+
 #[derive(Hash, PartialEq, Eq)]
 struct Binding {
     scope: u64,
@@ -62,54 +76,74 @@ struct Binding {
 }
 
 #[derive(Default)]
-struct Requirements {
+struct CollectRequirements {
+    context: ContextFrame,
     subjects: HashMap<Binding, HashSet<Subject>>,
 }
 
-fn collect_requirements(query: &InferedQuery) -> Requirements {
-    let mut reqs = Requirements::default();
+impl QueryVisitorMut for CollectRequirements {
+    type Inner<'a> = CollectRequirementsFromExpr<'a>;
 
-    collect_subjects_from_query(&mut reqs, query.query());
+    fn enter_where_clause(
+        &mut self,
+        _attrs: &mut NodeAttributes,
+        _expr: &mut Expr,
+    ) -> geth_eventql::Result<()> {
+        self.context = ContextFrame::Where;
 
-    reqs
-}
-
-fn collect_subjects_from_query(reqs: &mut Requirements, query: &Query) {
-    for from_stmt in &query.from_stmts {
-        collect_subjects_from_decl(reqs, from_stmt);
+        Ok(())
     }
 
-    if let Some(clause) = &query.predicate {
-        collect_subjects_from_where_clause(reqs, clause);
+    fn exit_where_clause(
+        &mut self,
+        _attrs: &mut NodeAttributes,
+        _expr: &mut Expr,
+    ) -> geth_eventql::Result<()> {
+        self.context = ContextFrame::Unspecified;
+
+        Ok(())
+    }
+
+    fn on_source_subject(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        ident: &str,
+        subject: &mut Subject,
+    ) -> geth_eventql::Result<()> {
+        let binding = Binding {
+            scope: attrs.scope,
+            ident: ident.to_string(),
+        };
+
+        self.subjects
+            .entry(binding)
+            .or_default()
+            .insert(subject.clone());
+
+        Ok(())
+    }
+
+    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
+        CollectRequirementsFromExpr { inner: self }
     }
 }
 
-fn collect_subjects_from_decl(reqs: &mut Requirements, from_stmt: &FromSource) {
-    match &from_stmt.source.inner {
-        SourceType::Events => {}
+struct CollectRequirementsFromExpr<'a> {
+    inner: &'a mut CollectRequirements,
+}
 
-        SourceType::Subject(sub) => {
-            let binding = Binding {
-                scope: from_stmt.source.attrs.scope,
-                ident: from_stmt.ident.clone(),
-            };
-
-            reqs.subjects
-                .entry(binding)
-                .or_default()
-                .insert(sub.clone());
+impl ExprVisitorMut for CollectRequirementsFromExpr<'_> {
+    fn exit_binary_op(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        op: &Operation,
+        lhs: &mut Expr,
+        rhs: &mut Expr,
+    ) -> geth_eventql::Result<()> {
+        if self.inner.context != ContextFrame::Where {
+            return Ok(());
         }
 
-        SourceType::Subquery(query) => collect_subjects_from_query(reqs, query),
-    }
-}
-
-fn collect_subjects_from_where_clause(reqs: &mut Requirements, clause: &Where) {
-    collect_subjects_from_where_expr(reqs, &clause.expr);
-}
-
-fn collect_subjects_from_where_expr(reqs: &mut Requirements, expr: &Expr) {
-    if let Value::Binary { lhs, op, rhs } = &expr.value {
         match (&lhs.value, &rhs.value) {
             (Value::Var(_), Value::Var(_)) => {
                 // TODO - a possible optimization could be to check if two variables are looking at the same subject.
@@ -124,21 +158,21 @@ fn collect_subjects_from_where_expr(reqs: &mut Requirements, expr: &Expr) {
             | (Value::Literal(Literal::Subject(sub)), Value::Var(x)) => {
                 if x.path.as_slice() == ["subject"] && op == &Operation::Equal {
                     let binding = Binding {
-                        scope: expr.attrs.scope,
+                        scope: attrs.scope,
                         ident: x.name.clone(),
                     };
 
-                    reqs.subjects
+                    self.inner
+                        .subjects
                         .entry(binding)
                         .or_default()
                         .insert(sub.clone());
                 }
             }
 
-            _ => {
-                collect_subjects_from_where_expr(reqs, lhs);
-                collect_subjects_from_where_expr(reqs, rhs);
-            }
+            _ => {}
         }
+
+        Ok(())
     }
 }

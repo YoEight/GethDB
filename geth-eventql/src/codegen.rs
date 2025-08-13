@@ -1,6 +1,6 @@
 use crate::{
     Expr, Literal, Operation, Query, Var,
-    parser::{ExprVisitor, QueryVisitor},
+    parser::{ExprVisitorMut, QueryVisitorMut},
 };
 
 pub enum Instr {
@@ -15,7 +15,7 @@ pub enum Instr {
 pub fn codegen(query: &mut Query) -> crate::Result<Vec<Instr>> {
     let mut state = Codegen::default();
 
-    query.dfs_post_order(&mut state)?;
+    query.dfs_post_order_mut(&mut state)?;
 
     Ok(state.instrs)
 }
@@ -25,7 +25,7 @@ pub struct Codegen {
     instrs: Vec<Instr>,
 }
 
-impl QueryVisitor for Codegen {
+impl QueryVisitorMut for Codegen {
     type Inner<'a> = ExprCodegen<'a>;
 
     fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
@@ -37,10 +37,10 @@ pub struct ExprCodegen<'a> {
     inner: &'a mut Codegen,
 }
 
-impl ExprVisitor for ExprCodegen<'_> {
+impl ExprVisitorMut for ExprCodegen<'_> {
     fn on_literal(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         lit: &mut Literal,
     ) -> crate::Result<()> {
         self.inner.instrs.push(Instr::Push(lit.clone()));
@@ -50,7 +50,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn on_var(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         var: &mut Var,
     ) -> crate::Result<()> {
         self.inner.instrs.push(Instr::LoadVar(var.clone()));
@@ -60,7 +60,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn enter_record_entry(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         key: &str,
         _expr: &mut Expr,
     ) -> crate::Result<()> {
@@ -73,7 +73,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn exit_record(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         record: &mut crate::parser::Record,
     ) -> crate::Result<()> {
         self.inner.instrs.push(Instr::Rec(record.fields.len()));
@@ -83,7 +83,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn exit_array(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         values: &mut Vec<Expr>,
     ) -> crate::Result<()> {
         self.inner.instrs.push(Instr::Array(values.len()));
@@ -93,7 +93,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn exit_app(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         name: &str,
         _params: &mut Vec<Expr>,
     ) -> crate::Result<()> {
@@ -104,7 +104,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn exit_binary_op(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         op: &Operation,
         _lhs: &mut Expr,
         _rhs: &mut Expr,
@@ -116,7 +116,7 @@ impl ExprVisitor for ExprCodegen<'_> {
 
     fn exit_unary_op(
         &mut self,
-        _attrs: &mut crate::parser::Attributes,
+        _attrs: &mut crate::parser::NodeAttributes,
         op: &Operation,
         _expr: &mut Expr,
     ) -> crate::Result<()> {

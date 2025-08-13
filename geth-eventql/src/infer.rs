@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use crate::{
     Expr, Literal, Operation, Pos, Query, Scopes, Var,
     error::InferError,
-    parser::{Attributes, ExprVisitor, QueryVisitor, Record},
+    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut, Record},
 };
 
 pub struct InferedQuery {
@@ -23,6 +23,10 @@ impl InferedQuery {
 
     pub fn query(&self) -> &Query {
         &self.query
+    }
+
+    pub fn query_mut(&mut self) -> &mut Query {
+        &mut self.query
     }
 }
 
@@ -133,7 +137,7 @@ pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
         scopes,
     };
 
-    query.dfs_post_order(&mut type_check)?;
+    query.dfs_post_order_mut(&mut type_check)?;
 
     Ok(InferedQuery {
         assumptions: Assumptions {
@@ -176,10 +180,14 @@ impl Typecheck {
     }
 }
 
-impl QueryVisitor for Typecheck {
+impl QueryVisitorMut for Typecheck {
     type Inner<'a> = TypecheckExpr<'a>;
 
-    fn enter_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+    fn enter_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
         attrs.tpe = Type::Bool;
         expr.attrs.tpe = Type::Bool;
 
@@ -195,8 +203,8 @@ struct TypecheckExpr<'a> {
     inner: &'a mut Typecheck,
 }
 
-impl ExprVisitor for TypecheckExpr<'_> {
-    fn on_literal(&mut self, attrs: &mut Attributes, lit: &mut Literal) -> crate::Result<()> {
+impl ExprVisitorMut for TypecheckExpr<'_> {
+    fn on_literal(&mut self, attrs: &mut NodeAttributes, lit: &mut Literal) -> crate::Result<()> {
         let type_proj = Type::project(lit);
 
         if attrs.tpe != Type::Unspecified && attrs.tpe != type_proj {
@@ -208,7 +216,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
+    fn on_var(&mut self, attrs: &mut NodeAttributes, var: &mut Var) -> crate::Result<()> {
         let register_assumption = self.inner.lookup_type_info(attrs.scope, var);
 
         if attrs.tpe == Type::Unspecified && register_assumption == attrs.tpe {
@@ -227,7 +235,11 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn exit_record(&mut self, attrs: &mut Attributes, _record: &mut Record) -> crate::Result<()> {
+    fn exit_record(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        _record: &mut Record,
+    ) -> crate::Result<()> {
         if attrs.tpe != Type::Unspecified && attrs.tpe != Type::Record {
             bail!(attrs.pos, InferError::TypeMismatch(attrs.tpe, Type::Record));
         }
@@ -237,7 +249,11 @@ impl ExprVisitor for TypecheckExpr<'_> {
         Ok(())
     }
 
-    fn exit_array(&mut self, attrs: &mut Attributes, _values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn exit_array(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        _values: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
         if attrs.tpe != Type::Unspecified && attrs.tpe != Type::Array {
             bail!(attrs.pos, InferError::TypeMismatch(attrs.tpe, Type::Array));
         }
@@ -249,7 +265,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
 
     fn exit_app(
         &mut self,
-        _attrs: &mut Attributes,
+        _attrs: &mut NodeAttributes,
         _name: &str,
         _params: &mut Vec<Expr>,
     ) -> crate::Result<()> {
@@ -264,7 +280,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
 
     fn enter_binary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -290,7 +306,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
 
     fn exit_binary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -357,7 +373,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
 
     fn enter_unary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         expr: &mut Expr,
     ) -> crate::Result<()> {
@@ -371,7 +387,7 @@ impl ExprVisitor for TypecheckExpr<'_> {
 
     fn exit_unary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         expr: &mut Expr,
     ) -> crate::Result<()> {

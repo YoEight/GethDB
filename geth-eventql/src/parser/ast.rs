@@ -6,13 +6,13 @@ use crate::{
 };
 
 #[derive(Copy, Clone)]
-pub struct Attributes {
+pub struct NodeAttributes {
     pub pos: Pos,
     pub scope: u64,
     pub tpe: Type,
 }
 
-impl Attributes {
+impl NodeAttributes {
     pub fn new(pos: Pos) -> Self {
         Self {
             pos,
@@ -23,7 +23,7 @@ impl Attributes {
 }
 
 pub struct Query {
-    pub attrs: Attributes,
+    pub attrs: NodeAttributes,
     pub from_stmts: Vec<FromSource>,
     pub predicate: Option<Where>,
     pub group_by: Option<Expr>,
@@ -33,12 +33,12 @@ pub struct Query {
 }
 
 impl Query {
-    pub fn dfs_post_order<V: QueryVisitor>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        query_dfs_post_order(vec![NT::new(self)], visitor)
+    pub fn dfs_post_order_mut<V: QueryVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
+        query_dfs_post_order_mut(vec![NT::new(self)], visitor)
     }
 }
 
-fn query_dfs_post_order<V: QueryVisitor>(
+fn query_dfs_post_order_mut<V: QueryVisitorMut>(
     mut stack: Vec<NT<Query>>,
     visitor: &mut V,
 ) -> crate::Result<()> {
@@ -106,7 +106,7 @@ fn query_dfs_post_order<V: QueryVisitor>(
     Ok(())
 }
 
-fn on_expr<V: QueryVisitor>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
+fn on_expr<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
     let mut expr_visitor = visitor.expr_visitor();
     expr.dfs_post_order(&mut expr_visitor)
 }
@@ -163,7 +163,7 @@ impl SourceType {
 }
 
 pub struct Source {
-    pub attrs: Attributes,
+    pub attrs: NodeAttributes,
     pub inner: SourceType,
 }
 
@@ -178,18 +178,18 @@ impl Source {
 }
 
 pub struct FromSource {
-    pub attrs: Attributes,
+    pub attrs: NodeAttributes,
     pub ident: String,
     pub source: Source,
 }
 
 pub struct Where {
-    pub attrs: Attributes,
+    pub attrs: NodeAttributes,
     pub expr: Expr,
 }
 
 pub struct Expr {
-    pub attrs: Attributes,
+    pub attrs: NodeAttributes,
     pub value: Value,
 }
 
@@ -260,7 +260,7 @@ impl Expr {
         None
     }
 
-    pub fn dfs_post_order<V: ExprVisitor>(&mut self, visitor: &mut V) -> crate::Result<()> {
+    pub fn dfs_post_order<V: ExprVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
         let mut stack = vec![NT::new(self)];
 
         while let Some(mut item) = stack.pop() {
@@ -453,8 +453,8 @@ pub enum Order {
     Desc,
 }
 
-#[allow(dead_code)]
-pub enum Context {
+#[derive(PartialEq, Eq, Copy, Clone)]
+pub enum ContextFrame {
     Unspecified,
     Where,
     GroupBy,
@@ -462,9 +462,15 @@ pub enum Context {
     Projection,
 }
 
+impl Default for ContextFrame {
+    fn default() -> Self {
+        Self::Unspecified
+    }
+}
+
 #[allow(unused_variables)]
-pub trait QueryVisitor {
-    type Inner<'a>: ExprVisitor
+pub trait QueryVisitorMut {
+    type Inner<'a>: ExprVisitorMut
     where
         Self: 'a;
 
@@ -476,40 +482,52 @@ pub trait QueryVisitor {
         Ok(())
     }
 
-    fn enter_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+    fn enter_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+    fn exit_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_source_events(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+    fn on_source_events(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         Ok(())
     }
 
     fn on_source_subject(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         ident: &str,
         subject: &mut Subject,
     ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_source_subquery(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<bool> {
+    fn on_source_subquery(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        ident: &str,
+    ) -> crate::Result<bool> {
         Ok(true)
     }
 
-    fn exit_source(&mut self, _attrs: &mut Attributes) -> crate::Result<()> {
+    fn exit_source(&mut self, _attrs: &mut NodeAttributes) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+    fn enter_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+    fn exit_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
@@ -541,43 +559,59 @@ pub trait QueryVisitor {
 }
 
 #[allow(unused_variables)]
-pub trait ExprVisitor {
-    fn on_literal(&mut self, attrs: &mut Attributes, lit: &mut Literal) -> crate::Result<()> {
+pub trait ExprVisitorMut {
+    fn on_literal(&mut self, attrs: &mut NodeAttributes, lit: &mut Literal) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
+    fn on_var(&mut self, attrs: &mut NodeAttributes, var: &mut Var) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
+    fn enter_record(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        record: &mut Record,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
     fn enter_record_entry(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         key: &str,
         expr: &mut Expr,
     ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_record(&mut self, attrs: &mut Attributes, record: &mut Record) -> crate::Result<()> {
+    fn exit_record(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        record: &mut Record,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn enter_array(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        values: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_array(&mut self, attrs: &mut Attributes, values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn exit_array(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        values: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
     fn enter_app(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         name: &str,
         params: &mut Vec<Expr>,
     ) -> crate::Result<()> {
@@ -586,7 +620,7 @@ pub trait ExprVisitor {
 
     fn exit_app(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         name: &str,
         params: &mut Vec<Expr>,
     ) -> crate::Result<()> {
@@ -595,7 +629,7 @@ pub trait ExprVisitor {
 
     fn enter_binary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -605,7 +639,7 @@ pub trait ExprVisitor {
 
     fn exit_binary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -615,7 +649,7 @@ pub trait ExprVisitor {
 
     fn enter_unary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         expr: &mut Expr,
     ) -> crate::Result<()> {
@@ -624,7 +658,7 @@ pub trait ExprVisitor {
 
     fn exit_unary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         op: &Operation,
         expr: &mut Expr,
     ) -> crate::Result<()> {

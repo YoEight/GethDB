@@ -7,13 +7,13 @@ use std::{
 use crate::{
     Expr, Literal, Query, Value, Var,
     error::RenameError,
-    parser::{Attributes, ExprVisitor, QueryVisitor, Record, parse_subject},
+    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut, Record, parse_subject},
 };
 
 pub fn rename(query: &mut Query) -> crate::Result<Scopes> {
     let mut analysis = Analysis::default();
 
-    query.dfs_post_order(&mut analysis)?;
+    query.dfs_post_order_mut(&mut analysis)?;
 
     Ok(Scopes {
         inner: analysis.scopes,
@@ -66,7 +66,7 @@ impl Analysis {
     }
 }
 
-impl QueryVisitor for Analysis {
+impl QueryVisitorMut for Analysis {
     type Inner<'a> = RenameExpr<'a>;
 
     fn enter_query(&mut self) -> crate::Result<()> {
@@ -81,7 +81,7 @@ impl QueryVisitor for Analysis {
         Ok(())
     }
 
-    fn enter_from(&mut self, attrs: &mut Attributes, ident: &str) -> crate::Result<()> {
+    fn enter_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         let scope = self.scope_mut();
 
         if scope.contains_variable(ident) {
@@ -96,18 +96,22 @@ impl QueryVisitor for Analysis {
         Ok(())
     }
 
-    fn exit_from(&mut self, attrs: &mut Attributes, _ident: &str) -> crate::Result<()> {
+    fn exit_from(&mut self, attrs: &mut NodeAttributes, _ident: &str) -> crate::Result<()> {
         attrs.scope = self.scope_id();
         Ok(())
     }
 
-    fn exit_source(&mut self, attrs: &mut Attributes) -> crate::Result<()> {
+    fn exit_source(&mut self, attrs: &mut NodeAttributes) -> crate::Result<()> {
         attrs.scope = self.scope_id();
 
         Ok(())
     }
 
-    fn exit_where_clause(&mut self, attrs: &mut Attributes, expr: &mut Expr) -> crate::Result<()> {
+    fn exit_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
         attrs.scope = expr.attrs.scope;
         Ok(())
     }
@@ -121,14 +125,14 @@ struct RenameExpr<'a> {
     inner: &'a mut Analysis,
 }
 
-impl ExprVisitor for RenameExpr<'_> {
-    fn on_literal(&mut self, attrs: &mut Attributes, _lit: &mut Literal) -> crate::Result<()> {
+impl ExprVisitorMut for RenameExpr<'_> {
+    fn on_literal(&mut self, attrs: &mut NodeAttributes, _lit: &mut Literal) -> crate::Result<()> {
         attrs.scope = self.inner.scope_id();
 
         Ok(())
     }
 
-    fn on_var(&mut self, attrs: &mut Attributes, var: &mut Var) -> crate::Result<()> {
+    fn on_var(&mut self, attrs: &mut NodeAttributes, var: &mut Var) -> crate::Result<()> {
         let scope = self.inner.scope_mut();
         let mut prev = "";
 
@@ -156,13 +160,21 @@ impl ExprVisitor for RenameExpr<'_> {
         Ok(())
     }
 
-    fn exit_record(&mut self, attrs: &mut Attributes, _record: &mut Record) -> crate::Result<()> {
+    fn exit_record(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        _record: &mut Record,
+    ) -> crate::Result<()> {
         attrs.scope = self.inner.scope_id();
 
         Ok(())
     }
 
-    fn exit_array(&mut self, attrs: &mut Attributes, _values: &mut Vec<Expr>) -> crate::Result<()> {
+    fn exit_array(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        _values: &mut Vec<Expr>,
+    ) -> crate::Result<()> {
         attrs.scope = self.inner.scope_id();
 
         Ok(())
@@ -170,7 +182,7 @@ impl ExprVisitor for RenameExpr<'_> {
 
     fn exit_app(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         _name: &str,
         _params: &mut Vec<Expr>,
     ) -> crate::Result<()> {
@@ -181,7 +193,7 @@ impl ExprVisitor for RenameExpr<'_> {
 
     fn exit_binary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         _op: &crate::Operation,
         lhs: &mut Expr,
         rhs: &mut Expr,
@@ -212,7 +224,7 @@ impl ExprVisitor for RenameExpr<'_> {
 
     fn exit_unary_op(
         &mut self,
-        attrs: &mut Attributes,
+        attrs: &mut NodeAttributes,
         _op: &crate::Operation,
         _expr: &mut Expr,
     ) -> crate::Result<()> {
