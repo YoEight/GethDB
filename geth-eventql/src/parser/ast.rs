@@ -665,3 +665,81 @@ pub trait ExprVisitorMut {
         Ok(())
     }
 }
+
+#[allow(unused_variables)]
+pub trait QueryVisitor {
+    type Inner<'a>: ExprVisitor
+    where
+        Self: 'a;
+
+    fn enter_query(&mut self) {}
+    fn exit_query(&mut self) {}
+    fn enter_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn exit_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {}
+    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str) {}
+
+    fn exit_source(&mut self, _attrs: &mut NodeAttributes) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_where_clause(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        expr: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn enter_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn leave_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a>;
+}
+
+#[allow(unused_variables)]
+pub trait ExprVisitor {
+    fn on_literal(&mut self, attrs: &NodeAttributes, lit: &Literal) {}
+    fn on_var(&mut self, attrs: &NodeAttributes, var: &Var) {}
+    fn enter_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
+    fn enter_record_entry(&mut self, attrs: &NodeAttributes, key: &str, expr: &Expr) {}
+    fn exit_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
+    fn enter_array(&mut self, attrs: &NodeAttributes, values: &Vec<Expr>) {}
+    fn exit_array(&mut self, attrs: &NodeAttributes, values: &Vec<Expr>) {}
+    fn enter_app(&mut self, attrs: &NodeAttributes, name: &str, params: &Vec<Expr>) {}
+    fn exit_app(&mut self, attrs: &NodeAttributes, name: &str, params: &Vec<Expr>) {}
+    fn enter_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
+    fn exit_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
+    fn enter_unary_op(&mut self, attrs: &NodeAttributes, op: &Operation, expr: &Expr) {}
+    fn exit_unary_op(&mut self, attrs: &NodeAttributes, op: &Operation, expr: &Expr) {}
+}
