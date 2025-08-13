@@ -7,6 +7,7 @@ COPY ./geth-engine/ ./geth-engine
 COPY ./geth-grpc/ ./geth-grpc
 COPY ./geth-mikoshi/ ./geth-mikoshi
 COPY ./geth-node/ ./geth-node
+COPY ./geth-eventql/ ./geth-eventql
 
 WORKDIR /build/.git
 COPY ./.git/ .
