@@ -34,81 +34,150 @@ pub struct Query {
 
 impl Query {
     pub fn dfs_post_order_mut<V: QueryVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        query_dfs_post_order_mut(vec![NT::new(self)], visitor)
+        query_dfs_post_order_mut(vec![ItemMut::new(self)], visitor)
+    }
+
+    pub fn dfs_post_order<V: QueryVisitor>(&self, visitor: &mut V) {
+        query_dfs_post_order(vec![Item::new(self)], visitor);
     }
 }
 
 fn query_dfs_post_order_mut<V: QueryVisitorMut>(
-    mut stack: Vec<NT<Query>>,
+    mut stack: Vec<ItemMut<Query>>,
     visitor: &mut V,
 ) -> crate::Result<()> {
     while let Some(mut item) = stack.pop() {
-        let query = unsafe { item.node.as_mut() };
+        let query = unsafe { item.value.as_mut() };
 
         if !item.visited {
             item.visited = true;
             stack.push(item);
 
-            visitor.enter_query()?;
+            visitor.enter_query_mut()?;
 
             for from_stmt in query.from_stmts.iter_mut() {
-                visitor.enter_from(&mut from_stmt.attrs, &from_stmt.ident)?;
+                visitor.enter_from_mut(&mut from_stmt.attrs, &from_stmt.ident)?;
 
                 match &mut from_stmt.source.inner {
                     SourceType::Events => {
-                        visitor.on_source_events(&mut from_stmt.attrs, &from_stmt.ident)?
+                        visitor.on_source_events_mut(&mut from_stmt.attrs, &from_stmt.ident)?
                     }
 
-                    SourceType::Subject(subject) => visitor.on_source_subject(
+                    SourceType::Subject(subject) => visitor.on_source_subject_mut(
                         &mut from_stmt.attrs,
                         &from_stmt.ident,
                         subject,
                     )?,
 
                     SourceType::Subquery(sub_query) => {
-                        if visitor.on_source_subquery(&mut from_stmt.attrs, &from_stmt.ident)? {
-                            stack.push(NT::new(sub_query));
+                        if visitor.on_source_subquery_mut(&mut from_stmt.attrs, &from_stmt.ident)? {
+                            stack.push(ItemMut::new(sub_query));
                         }
                     }
                 }
 
-                visitor.exit_source(&mut from_stmt.source.attrs)?;
-                visitor.exit_from(&mut from_stmt.attrs, &from_stmt.ident)?;
+                visitor.exit_source_mut(&mut from_stmt.source.attrs)?;
+                visitor.exit_from_mut(&mut from_stmt.attrs, &from_stmt.ident)?;
             }
 
             continue;
         }
 
         if let Some(predicate) = query.predicate.as_mut() {
-            visitor.enter_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
-            on_expr(visitor, &mut predicate.expr)?;
-            visitor.exit_where_clause(&mut predicate.attrs, &mut predicate.expr)?;
+            visitor.enter_where_clause_mut(&mut predicate.attrs, &mut predicate.expr)?;
+            on_expr_mut(visitor, &mut predicate.expr)?;
+            visitor.exit_where_clause_mut(&mut predicate.attrs, &mut predicate.expr)?;
         }
 
         if let Some(expr) = query.group_by.as_mut() {
-            visitor.enter_group_by(expr)?;
-            on_expr(visitor, expr)?;
-            visitor.leave_group_by(expr)?;
+            visitor.enter_group_by_mut(expr)?;
+            on_expr_mut(visitor, expr)?;
+            visitor.leave_group_by_mut(expr)?;
         }
 
         if let Some(sort) = query.order_by.as_mut() {
-            visitor.enter_order_by(&mut sort.order, &mut sort.expr)?;
-            on_expr(visitor, &mut sort.expr)?;
-            visitor.leave_order_by(&mut sort.order, &mut sort.expr)?;
+            visitor.enter_order_by_mut(&mut sort.order, &mut sort.expr)?;
+            on_expr_mut(visitor, &mut sort.expr)?;
+            visitor.leave_order_by_mut(&mut sort.order, &mut sort.expr)?;
         }
 
-        visitor.enter_projection(&mut query.projection)?;
-        on_expr(visitor, &mut query.projection)?;
-        visitor.leave_projection(&mut query.projection)?;
-        visitor.exit_query()?;
+        visitor.enter_projection_mut(&mut query.projection)?;
+        on_expr_mut(visitor, &mut query.projection)?;
+        visitor.leave_projection_mut(&mut query.projection)?;
+        visitor.exit_query_mut()?;
     }
 
     Ok(())
 }
 
-fn on_expr<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
+fn on_expr_mut<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
+    let mut expr_visitor = visitor.expr_visitor_mut();
+    expr.dfs_post_order_mut(&mut expr_visitor)
+}
+
+fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &mut V) {
+    while let Some(mut item) = stack.pop() {
+        let query = item.value;
+        if !item.visited {
+            item.visited = true;
+            stack.push(item);
+
+            visitor.enter_query();
+
+            for from_stmt in query.from_stmts.iter() {
+                visitor.enter_from(&from_stmt.attrs, &from_stmt.ident);
+
+                match &from_stmt.source.inner {
+                    SourceType::Events => {
+                        visitor.on_source_events(&from_stmt.attrs, &from_stmt.ident)
+                    }
+
+                    SourceType::Subject(subject) => {
+                        visitor.on_source_subject(&from_stmt.attrs, &from_stmt.ident, subject)
+                    }
+
+                    SourceType::Subquery(sub_query) => {
+                        if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
+                            stack.push(Item::new(sub_query));
+                        }
+                    }
+                }
+
+                visitor.exit_source(&from_stmt.source.attrs);
+                visitor.exit_from(&from_stmt.attrs, &from_stmt.ident);
+            }
+
+            continue;
+        }
+
+        if let Some(predicate) = query.predicate.as_ref() {
+            visitor.enter_where_clause(&predicate.attrs, &predicate.expr);
+            on_expr(visitor, &predicate.expr);
+            visitor.exit_where_clause(&predicate.attrs, &predicate.expr);
+        }
+
+        if let Some(expr) = query.group_by.as_ref() {
+            visitor.enter_group_by(expr);
+            on_expr(visitor, expr);
+            visitor.leave_group_by(expr);
+        }
+
+        if let Some(sort) = query.order_by.as_ref() {
+            visitor.enter_order_by(&sort.order, &sort.expr);
+            on_expr(visitor, &sort.expr);
+            visitor.leave_order_by(&sort.order, &sort.expr);
+        }
+
+        visitor.enter_projection(&query.projection);
+        on_expr(visitor, &query.projection);
+        visitor.leave_projection(&query.projection);
+        visitor.exit_query();
+    }
+}
+
+fn on_expr<V: QueryVisitor>(visitor: &mut V, expr: &Expr) {
     let mut expr_visitor = visitor.expr_visitor();
-    expr.dfs_post_order(&mut expr_visitor)
+    expr.dfs_post_order(&mut expr_visitor);
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
@@ -260,11 +329,11 @@ impl Expr {
         None
     }
 
-    pub fn dfs_post_order<V: ExprVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        let mut stack = vec![NT::new(self)];
+    pub fn dfs_post_order_mut<V: ExprVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
+        let mut stack = vec![ItemMut::new(self)];
 
         while let Some(mut item) = stack.pop() {
-            let node = unsafe { item.node.as_mut() };
+            let node = unsafe { item.value.as_mut() };
 
             match &mut node.value {
                 Value::Literal(lit) => {
@@ -287,7 +356,7 @@ impl Expr {
 
                     for (key, expr) in record.fields.iter_mut() {
                         visitor.enter_record_entry(&mut node.attrs, key, expr)?;
-                        stack.push(NT::new(expr));
+                        stack.push(ItemMut::new(expr));
                     }
                 }
 
@@ -302,7 +371,7 @@ impl Expr {
                     stack.push(item);
 
                     for expr in exprs.iter_mut().rev() {
-                        stack.push(NT::new(expr));
+                        stack.push(ItemMut::new(expr));
                     }
                 }
 
@@ -317,7 +386,7 @@ impl Expr {
                     stack.push(item);
 
                     for param in params.iter_mut().rev() {
-                        stack.push(NT::new(param));
+                        stack.push(ItemMut::new(param));
                     }
                 }
 
@@ -330,8 +399,8 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_binary_op(&mut node.attrs, op, lhs, rhs)?;
                     stack.push(item);
-                    stack.push(NT::new(rhs));
-                    stack.push(NT::new(lhs));
+                    stack.push(ItemMut::new(rhs));
+                    stack.push(ItemMut::new(lhs));
                 }
 
                 Value::Unary { op, expr } => {
@@ -343,24 +412,126 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_unary_op(&mut node.attrs, op, expr)?;
                     stack.push(item);
-                    stack.push(NT::new(expr));
+                    stack.push(ItemMut::new(expr));
                 }
             }
         }
 
         Ok(())
     }
+
+    pub fn dfs_post_order<V: ExprVisitor>(&self, visitor: &mut V) {
+        let mut stack = vec![Item::new(self)];
+
+        while let Some(mut item) = stack.pop() {
+            match &item.value.value {
+                Value::Literal(lit) => {
+                    visitor.on_literal(&item.value.attrs, lit);
+                }
+
+                Value::Var(var) => {
+                    visitor.on_var(&item.value.attrs, var);
+                }
+
+                Value::Record(record) => {
+                    if item.visited {
+                        visitor.exit_record(&item.value.attrs, record);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_record(&item.value.attrs, record);
+                    let attrs = &item.value.attrs;
+                    stack.push(item);
+
+                    for (key, expr) in record.fields.iter() {
+                        visitor.enter_record_entry(attrs, key, expr);
+                        stack.push(Item::new(expr));
+                    }
+                }
+
+                Value::Array(exprs) => {
+                    if item.visited {
+                        visitor.exit_array(&item.value.attrs, exprs);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_array(&item.value.attrs, exprs);
+                    stack.push(item);
+
+                    for expr in exprs.iter().rev() {
+                        stack.push(Item::new(expr));
+                    }
+                }
+
+                Value::App { fun, params } => {
+                    if item.visited {
+                        visitor.exit_app(&item.value.attrs, fun, params);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_app(&item.value.attrs, fun, params);
+                    stack.push(item);
+
+                    for param in params.iter().rev() {
+                        stack.push(Item::new(param));
+                    }
+                }
+
+                Value::Binary { lhs, op, rhs } => {
+                    if item.visited {
+                        visitor.exit_binary_op(&item.value.attrs, op, lhs, rhs);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_binary_op(&item.value.attrs, op, lhs, rhs);
+                    stack.push(item);
+                    stack.push(Item::new(rhs));
+                    stack.push(Item::new(lhs));
+                }
+
+                Value::Unary { op, expr } => {
+                    if item.visited {
+                        visitor.exit_unary_op(&item.value.attrs, op, expr);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_unary_op(&item.value.attrs, op, expr);
+                    stack.push(item);
+                    stack.push(Item::new(expr));
+                }
+            }
+        }
+    }
 }
 
-struct NT<A> {
-    node: NonNull<A>,
+struct ItemMut<A> {
+    value: NonNull<A>,
     visited: bool,
 }
 
-impl<A> NT<A> {
+impl<A> ItemMut<A> {
     fn new(node: &mut A) -> Self {
         Self {
-            node: NonNull::from(node),
+            value: NonNull::from(node),
+            visited: false,
+        }
+    }
+}
+
+struct Item<'a, A> {
+    value: &'a A,
+    visited: bool,
+}
+
+impl<'a, A> Item<'a, A> {
+    fn new(node: &'a A) -> Self {
+        Self {
+            value: node,
             visited: false,
         }
     }
@@ -474,27 +645,31 @@ pub trait QueryVisitorMut {
     where
         Self: 'a;
 
-    fn enter_query(&mut self) -> crate::Result<()> {
+    fn enter_query_mut(&mut self) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_query(&mut self) -> crate::Result<()> {
+    fn exit_query_mut(&mut self) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
+    fn enter_from_mut(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         Ok(())
     }
 
-    fn exit_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
+    fn exit_from_mut(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_source_events(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
+    fn on_source_events_mut(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        ident: &str,
+    ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn on_source_subject(
+    fn on_source_subject_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         ident: &str,
@@ -503,7 +678,7 @@ pub trait QueryVisitorMut {
         Ok(())
     }
 
-    fn on_source_subquery(
+    fn on_source_subquery_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         ident: &str,
@@ -511,11 +686,11 @@ pub trait QueryVisitorMut {
         Ok(true)
     }
 
-    fn exit_source(&mut self, _attrs: &mut NodeAttributes) -> crate::Result<()> {
+    fn exit_source_mut(&mut self, _attrs: &mut NodeAttributes) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_where_clause(
+    fn enter_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         expr: &mut Expr,
@@ -523,7 +698,7 @@ pub trait QueryVisitorMut {
         Ok(())
     }
 
-    fn exit_where_clause(
+    fn exit_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         expr: &mut Expr,
@@ -531,31 +706,31 @@ pub trait QueryVisitorMut {
         Ok(())
     }
 
-    fn enter_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+    fn enter_group_by_mut(&mut self, expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn leave_group_by(&mut self, expr: &mut Expr) -> crate::Result<()> {
+    fn leave_group_by_mut(&mut self, expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+    fn enter_order_by_mut(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn leave_order_by(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
+    fn leave_order_by_mut(&mut self, order: &mut Order, _expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+    fn enter_projection_mut(&mut self, expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn leave_projection(&mut self, expr: &mut Expr) -> crate::Result<()> {
+    fn leave_projection_mut(&mut self, expr: &mut Expr) -> crate::Result<()> {
         Ok(())
     }
 
-    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a>;
+    fn expr_visitor_mut<'a>(&'a mut self) -> Self::Inner<'a>;
 }
 
 #[allow(unused_variables)]
@@ -664,4 +839,48 @@ pub trait ExprVisitorMut {
     ) -> crate::Result<()> {
         Ok(())
     }
+}
+
+#[allow(unused_variables)]
+pub trait QueryVisitor {
+    type Inner<'a>: ExprVisitor
+    where
+        Self: 'a;
+
+    fn enter_query(&mut self) {}
+    fn exit_query(&mut self) {}
+    fn enter_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn exit_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {}
+    fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {}
+    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str) -> bool {
+        true
+    }
+    fn exit_source(&mut self, attrs: &NodeAttributes) {}
+    fn enter_where_clause(&mut self, attrs: &NodeAttributes, expr: &Expr) {}
+    fn exit_where_clause(&mut self, attrs: &NodeAttributes, expr: &Expr) {}
+    fn enter_group_by(&mut self, expr: &Expr) {}
+    fn leave_group_by(&mut self, expr: &Expr) {}
+    fn enter_order_by(&mut self, order: &Order, expr: &Expr) {}
+    fn leave_order_by(&mut self, order: &Order, expr: &Expr) {}
+    fn enter_projection(&mut self, expr: &Expr) {}
+    fn leave_projection(&mut self, expr: &Expr) {}
+    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a>;
+}
+
+#[allow(unused_variables)]
+pub trait ExprVisitor {
+    fn on_literal(&mut self, attrs: &NodeAttributes, lit: &Literal) {}
+    fn on_var(&mut self, attrs: &NodeAttributes, var: &Var) {}
+    fn enter_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
+    fn enter_record_entry(&mut self, attrs: &NodeAttributes, key: &str, expr: &Expr) {}
+    fn exit_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
+    fn enter_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
+    fn exit_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
+    fn enter_app(&mut self, attrs: &NodeAttributes, name: &str, params: &[Expr]) {}
+    fn exit_app(&mut self, attrs: &NodeAttributes, name: &str, params: &[Expr]) {}
+    fn enter_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
+    fn exit_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
+    fn enter_unary_op(&mut self, attrs: &NodeAttributes, op: &Operation, expr: &Expr) {}
+    fn exit_unary_op(&mut self, attrs: &NodeAttributes, op: &Operation, expr: &Expr) {}
 }

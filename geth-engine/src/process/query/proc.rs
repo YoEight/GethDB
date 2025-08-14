@@ -2,7 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use geth_common::{Direction, Revision};
 use geth_eventql::{
-    ContextFrame, Expr, ExprVisitorMut, Literal, NodeAttributes, Operation, Query, QueryVisitorMut,
+    ContextFrame, Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor,
     Subject, Value,
 };
 
@@ -20,7 +20,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
         if let Item::Stream(stream) = item
             && let Ok(QueryRequests::Query { query }) = stream.payload.try_into()
         {
-            let mut infered = match geth_eventql::parse_rename_and_infer(&query) {
+            let infered = match geth_eventql::parse_rename_and_infer(&query) {
                 Ok(q) => q,
                 Err(e) => {
                     let _ = stream.sender.send(QueryResponses::Error(e.into()).into());
@@ -28,7 +28,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                 }
             };
 
-            let reqs = collect_requirements(infered.query_mut());
+            let reqs = collect_requirements(infered.query());
             let reader = env.client.new_reader_client().await?;
             // let mut sources = HashMap::with_capacity(reqs.subjects.len());
             let ctx = RequestContext::new();
@@ -60,9 +60,9 @@ struct Requirements {
     subjects: HashMap<Binding, HashSet<Subject>>,
 }
 
-fn collect_requirements(query: &mut Query) -> Requirements {
+fn collect_requirements(query: &Query) -> Requirements {
     let mut collect_reqs = CollectRequirements::default();
-    query.dfs_post_order_mut(&mut collect_reqs).unwrap();
+    query.dfs_post_order(&mut collect_reqs);
 
     Requirements {
         subjects: collect_reqs.subjects,
@@ -81,35 +81,18 @@ struct CollectRequirements {
     subjects: HashMap<Binding, HashSet<Subject>>,
 }
 
-impl QueryVisitorMut for CollectRequirements {
+impl QueryVisitor for CollectRequirements {
     type Inner<'a> = CollectRequirementsFromExpr<'a>;
 
-    fn enter_where_clause(
-        &mut self,
-        _attrs: &mut NodeAttributes,
-        _expr: &mut Expr,
-    ) -> geth_eventql::Result<()> {
+    fn enter_where_clause(&mut self, _attrs: &NodeAttributes, _expr: &Expr) {
         self.context = ContextFrame::Where;
-
-        Ok(())
     }
 
-    fn exit_where_clause(
-        &mut self,
-        _attrs: &mut NodeAttributes,
-        _expr: &mut Expr,
-    ) -> geth_eventql::Result<()> {
+    fn exit_where_clause(&mut self, _attrs: &NodeAttributes, _expr: &Expr) {
         self.context = ContextFrame::Unspecified;
-
-        Ok(())
     }
 
-    fn on_source_subject(
-        &mut self,
-        attrs: &mut NodeAttributes,
-        ident: &str,
-        subject: &mut Subject,
-    ) -> geth_eventql::Result<()> {
+    fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {
         let binding = Binding {
             scope: attrs.scope,
             ident: ident.to_string(),
@@ -119,8 +102,6 @@ impl QueryVisitorMut for CollectRequirements {
             .entry(binding)
             .or_default()
             .insert(subject.clone());
-
-        Ok(())
     }
 
     fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
@@ -132,16 +113,10 @@ struct CollectRequirementsFromExpr<'a> {
     inner: &'a mut CollectRequirements,
 }
 
-impl ExprVisitorMut for CollectRequirementsFromExpr<'_> {
-    fn exit_binary_op(
-        &mut self,
-        attrs: &mut NodeAttributes,
-        op: &Operation,
-        lhs: &mut Expr,
-        rhs: &mut Expr,
-    ) -> geth_eventql::Result<()> {
+impl ExprVisitor for CollectRequirementsFromExpr<'_> {
+    fn exit_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {
         if self.inner.context != ContextFrame::Where {
-            return Ok(());
+            return;
         }
 
         match (&lhs.value, &rhs.value) {
@@ -172,7 +147,5 @@ impl ExprVisitorMut for CollectRequirementsFromExpr<'_> {
 
             _ => {}
         }
-
-        Ok(())
     }
 }

@@ -1,6 +1,5 @@
 use crate::{
-    Expr, Literal, Operation, Query, Var,
-    parser::{ExprVisitorMut, QueryVisitorMut},
+    Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Var, parser::Record,
 };
 
 pub enum Instr {
@@ -12,12 +11,12 @@ pub enum Instr {
     Call(String),
 }
 
-pub fn codegen(query: &mut Query) -> crate::Result<Vec<Instr>> {
+pub fn codegen(query: &Query) -> Vec<Instr> {
     let mut state = Codegen::default();
 
-    query.dfs_post_order_mut(&mut state)?;
+    query.dfs_post_order(&mut state);
 
-    Ok(state.instrs)
+    state.instrs
 }
 
 #[derive(Default)]
@@ -25,7 +24,7 @@ pub struct Codegen {
     instrs: Vec<Instr>,
 }
 
-impl QueryVisitorMut for Codegen {
+impl QueryVisitor for Codegen {
     type Inner<'a> = ExprCodegen<'a>;
 
     fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
@@ -37,91 +36,44 @@ pub struct ExprCodegen<'a> {
     inner: &'a mut Codegen,
 }
 
-impl ExprVisitorMut for ExprCodegen<'_> {
-    fn on_literal(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        lit: &mut Literal,
-    ) -> crate::Result<()> {
+impl ExprVisitor for ExprCodegen<'_> {
+    fn on_literal(&mut self, _attrs: &NodeAttributes, lit: &Literal) {
         self.inner.instrs.push(Instr::Push(lit.clone()));
-
-        Ok(())
     }
 
-    fn on_var(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        var: &mut Var,
-    ) -> crate::Result<()> {
+    fn on_var(&mut self, _attrs: &NodeAttributes, var: &Var) {
         self.inner.instrs.push(Instr::LoadVar(var.clone()));
-
-        Ok(())
     }
 
-    fn enter_record_entry(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        key: &str,
-        _expr: &mut Expr,
-    ) -> crate::Result<()> {
+    fn enter_record_entry(&mut self, _attrs: &NodeAttributes, key: &str, _expr: &Expr) {
         self.inner
             .instrs
             .push(Instr::Push(Literal::String(key.to_string())));
-
-        Ok(())
     }
 
-    fn exit_record(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        record: &mut crate::parser::Record,
-    ) -> crate::Result<()> {
+    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &Record) {
         self.inner.instrs.push(Instr::Rec(record.fields.len()));
-
-        Ok(())
     }
 
-    fn exit_array(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        values: &mut Vec<Expr>,
-    ) -> crate::Result<()> {
+    fn exit_array(&mut self, _attrs: &NodeAttributes, values: &[Expr]) {
         self.inner.instrs.push(Instr::Array(values.len()));
-
-        Ok(())
     }
 
-    fn exit_app(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        name: &str,
-        _params: &mut Vec<Expr>,
-    ) -> crate::Result<()> {
+    fn exit_app(&mut self, _attrs: &NodeAttributes, name: &str, _params: &[Expr]) {
         self.inner.instrs.push(Instr::Call(name.to_string()));
-
-        Ok(())
     }
 
     fn exit_binary_op(
         &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
+        _attrs: &NodeAttributes,
         op: &Operation,
-        _lhs: &mut Expr,
-        _rhs: &mut Expr,
-    ) -> crate::Result<()> {
+        _lhs: &Expr,
+        _rhs: &Expr,
+    ) {
         self.inner.instrs.push(Instr::Operation(*op));
-
-        Ok(())
     }
 
-    fn exit_unary_op(
-        &mut self,
-        _attrs: &mut crate::parser::NodeAttributes,
-        op: &Operation,
-        _expr: &mut Expr,
-    ) -> crate::Result<()> {
+    fn exit_unary_op(&mut self, _attrs: &NodeAttributes, op: &Operation, _expr: &Expr) {
         self.inner.instrs.push(Instr::Operation(*op));
-
-        Ok(())
     }
 }
