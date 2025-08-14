@@ -34,20 +34,20 @@ pub struct Query {
 
 impl Query {
     pub fn dfs_post_order_mut<V: QueryVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        query_dfs_post_order_mut(vec![NT::new(self)], visitor)
+        query_dfs_post_order_mut(vec![ItemMut::new(self)], visitor)
     }
 
     pub fn dfs_post_order<V: QueryVisitor>(&self, visitor: &mut V) {
-        query_dfs_post_order(vec![NTS::new(self)], visitor);
+        query_dfs_post_order(vec![Item::new(self)], visitor);
     }
 }
 
 fn query_dfs_post_order_mut<V: QueryVisitorMut>(
-    mut stack: Vec<NT<Query>>,
+    mut stack: Vec<ItemMut<Query>>,
     visitor: &mut V,
 ) -> crate::Result<()> {
     while let Some(mut item) = stack.pop() {
-        let query = unsafe { item.node.as_mut() };
+        let query = unsafe { item.value.as_mut() };
 
         if !item.visited {
             item.visited = true;
@@ -71,7 +71,7 @@ fn query_dfs_post_order_mut<V: QueryVisitorMut>(
 
                     SourceType::Subquery(sub_query) => {
                         if visitor.on_source_subquery_mut(&mut from_stmt.attrs, &from_stmt.ident)? {
-                            stack.push(NT::new(sub_query));
+                            stack.push(ItemMut::new(sub_query));
                         }
                     }
                 }
@@ -115,9 +115,9 @@ fn on_expr_mut<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::R
     expr.dfs_post_order_mut(&mut expr_visitor)
 }
 
-fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<NTS<Query>>, visitor: &mut V) {
+fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &mut V) {
     while let Some(mut item) = stack.pop() {
-        let query = item.node;
+        let query = item.value;
         if !item.visited {
             item.visited = true;
             stack.push(item);
@@ -138,7 +138,7 @@ fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<NTS<Query>>, visitor: &m
 
                     SourceType::Subquery(sub_query) => {
                         if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
-                            stack.push(NTS::new(sub_query));
+                            stack.push(Item::new(sub_query));
                         }
                     }
                 }
@@ -330,10 +330,10 @@ impl Expr {
     }
 
     pub fn dfs_post_order_mut<V: ExprVisitorMut>(&mut self, visitor: &mut V) -> crate::Result<()> {
-        let mut stack = vec![NT::new(self)];
+        let mut stack = vec![ItemMut::new(self)];
 
         while let Some(mut item) = stack.pop() {
-            let node = unsafe { item.node.as_mut() };
+            let node = unsafe { item.value.as_mut() };
 
             match &mut node.value {
                 Value::Literal(lit) => {
@@ -356,7 +356,7 @@ impl Expr {
 
                     for (key, expr) in record.fields.iter_mut() {
                         visitor.enter_record_entry(&mut node.attrs, key, expr)?;
-                        stack.push(NT::new(expr));
+                        stack.push(ItemMut::new(expr));
                     }
                 }
 
@@ -371,7 +371,7 @@ impl Expr {
                     stack.push(item);
 
                     for expr in exprs.iter_mut().rev() {
-                        stack.push(NT::new(expr));
+                        stack.push(ItemMut::new(expr));
                     }
                 }
 
@@ -386,7 +386,7 @@ impl Expr {
                     stack.push(item);
 
                     for param in params.iter_mut().rev() {
-                        stack.push(NT::new(param));
+                        stack.push(ItemMut::new(param));
                     }
                 }
 
@@ -399,8 +399,8 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_binary_op(&mut node.attrs, op, lhs, rhs)?;
                     stack.push(item);
-                    stack.push(NT::new(rhs));
-                    stack.push(NT::new(lhs));
+                    stack.push(ItemMut::new(rhs));
+                    stack.push(ItemMut::new(lhs));
                 }
 
                 Value::Unary { op, expr } => {
@@ -412,7 +412,7 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_unary_op(&mut node.attrs, op, expr)?;
                     stack.push(item);
-                    stack.push(NT::new(expr));
+                    stack.push(ItemMut::new(expr));
                 }
             }
         }
@@ -421,117 +421,117 @@ impl Expr {
     }
 
     pub fn dfs_post_order<V: ExprVisitor>(&self, visitor: &mut V) {
-        let mut stack = vec![NTS::new(self)];
+        let mut stack = vec![Item::new(self)];
 
         while let Some(mut item) = stack.pop() {
-            match &item.node.value {
+            match &item.value.value {
                 Value::Literal(lit) => {
-                    visitor.on_literal(&item.node.attrs, lit);
+                    visitor.on_literal(&item.value.attrs, lit);
                 }
 
                 Value::Var(var) => {
-                    visitor.on_var(&item.node.attrs, var);
+                    visitor.on_var(&item.value.attrs, var);
                 }
 
                 Value::Record(record) => {
                     if item.visited {
-                        visitor.exit_record(&item.node.attrs, record);
+                        visitor.exit_record(&item.value.attrs, record);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_record(&item.node.attrs, record);
-                    let attrs = &item.node.attrs;
+                    visitor.enter_record(&item.value.attrs, record);
+                    let attrs = &item.value.attrs;
                     stack.push(item);
 
                     for (key, expr) in record.fields.iter() {
                         visitor.enter_record_entry(attrs, key, expr);
-                        stack.push(NTS::new(expr));
+                        stack.push(Item::new(expr));
                     }
                 }
 
                 Value::Array(exprs) => {
                     if item.visited {
-                        visitor.exit_array(&item.node.attrs, exprs);
+                        visitor.exit_array(&item.value.attrs, exprs);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_array(&item.node.attrs, exprs);
+                    visitor.enter_array(&item.value.attrs, exprs);
                     stack.push(item);
 
                     for expr in exprs.iter().rev() {
-                        stack.push(NTS::new(expr));
+                        stack.push(Item::new(expr));
                     }
                 }
 
                 Value::App { fun, params } => {
                     if item.visited {
-                        visitor.exit_app(&item.node.attrs, fun, params);
+                        visitor.exit_app(&item.value.attrs, fun, params);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_app(&item.node.attrs, fun, params);
+                    visitor.enter_app(&item.value.attrs, fun, params);
                     stack.push(item);
 
                     for param in params.iter().rev() {
-                        stack.push(NTS::new(param));
+                        stack.push(Item::new(param));
                     }
                 }
 
                 Value::Binary { lhs, op, rhs } => {
                     if item.visited {
-                        visitor.exit_binary_op(&item.node.attrs, op, lhs, rhs);
+                        visitor.exit_binary_op(&item.value.attrs, op, lhs, rhs);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_binary_op(&item.node.attrs, op, lhs, rhs);
+                    visitor.enter_binary_op(&item.value.attrs, op, lhs, rhs);
                     stack.push(item);
-                    stack.push(NTS::new(rhs));
-                    stack.push(NTS::new(lhs));
+                    stack.push(Item::new(rhs));
+                    stack.push(Item::new(lhs));
                 }
 
                 Value::Unary { op, expr } => {
                     if item.visited {
-                        visitor.exit_unary_op(&item.node.attrs, op, expr);
+                        visitor.exit_unary_op(&item.value.attrs, op, expr);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_unary_op(&item.node.attrs, op, expr);
+                    visitor.enter_unary_op(&item.value.attrs, op, expr);
                     stack.push(item);
-                    stack.push(NTS::new(expr));
+                    stack.push(Item::new(expr));
                 }
             }
         }
     }
 }
 
-struct NT<A> {
-    node: NonNull<A>,
+struct ItemMut<A> {
+    value: NonNull<A>,
     visited: bool,
 }
 
-impl<A> NT<A> {
+impl<A> ItemMut<A> {
     fn new(node: &mut A) -> Self {
         Self {
-            node: NonNull::from(node),
+            value: NonNull::from(node),
             visited: false,
         }
     }
 }
 
-struct NTS<'a, A> {
-    node: &'a A,
+struct Item<'a, A> {
+    value: &'a A,
     visited: bool,
 }
 
-impl<'a, A> NTS<'a, A> {
+impl<'a, A> Item<'a, A> {
     fn new(node: &'a A) -> Self {
         Self {
-            node,
+            value: node,
             visited: false,
         }
     }
@@ -875,10 +875,10 @@ pub trait ExprVisitor {
     fn enter_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
     fn enter_record_entry(&mut self, attrs: &NodeAttributes, key: &str, expr: &Expr) {}
     fn exit_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
-    fn enter_array(&mut self, attrs: &NodeAttributes, values: &Vec<Expr>) {}
-    fn exit_array(&mut self, attrs: &NodeAttributes, values: &Vec<Expr>) {}
-    fn enter_app(&mut self, attrs: &NodeAttributes, name: &str, params: &Vec<Expr>) {}
-    fn exit_app(&mut self, attrs: &NodeAttributes, name: &str, params: &Vec<Expr>) {}
+    fn enter_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
+    fn exit_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
+    fn enter_app(&mut self, attrs: &NodeAttributes, name: &str, params: &[Expr]) {}
+    fn exit_app(&mut self, attrs: &NodeAttributes, name: &str, params: &[Expr]) {}
     fn enter_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
     fn exit_binary_op(&mut self, attrs: &NodeAttributes, op: &Operation, lhs: &Expr, rhs: &Expr) {}
     fn enter_unary_op(&mut self, attrs: &NodeAttributes, op: &Operation, expr: &Expr) {}

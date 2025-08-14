@@ -20,7 +20,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
         if let Item::Stream(stream) = item
             && let Ok(QueryRequests::Query { query }) = stream.payload.try_into()
         {
-            let mut infered = match geth_eventql::parse_rename_and_infer(&query) {
+            let infered = match geth_eventql::parse_rename_and_infer(&query) {
                 Ok(q) => q,
                 Err(e) => {
                     let _ = stream.sender.send(QueryResponses::Error(e.into()).into());
@@ -28,7 +28,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
                 }
             };
 
-            let reqs = collect_requirements(infered.query_mut());
+            let reqs = collect_requirements(infered.query());
             let reader = env.client.new_reader_client().await?;
             // let mut sources = HashMap::with_capacity(reqs.subjects.len());
             let ctx = RequestContext::new();

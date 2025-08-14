@@ -55,11 +55,11 @@ impl ExprVisitor for ExprCodegen<'_> {
         self.inner.instrs.push(Instr::Rec(record.fields.len()));
     }
 
-    fn exit_array(&mut self, _attrs: &NodeAttributes, values: &Vec<Expr>) {
+    fn exit_array(&mut self, _attrs: &NodeAttributes, values: &[Expr]) {
         self.inner.instrs.push(Instr::Array(values.len()));
     }
 
-    fn exit_app(&mut self, _attrs: &NodeAttributes, name: &str, _params: &Vec<Expr>) {
+    fn exit_app(&mut self, _attrs: &NodeAttributes, name: &str, _params: &[Expr]) {
         self.inner.instrs.push(Instr::Call(name.to_string()));
     }
 
