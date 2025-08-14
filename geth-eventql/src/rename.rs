@@ -69,19 +69,19 @@ impl Analysis {
 impl QueryVisitorMut for Analysis {
     type Inner<'a> = RenameExpr<'a>;
 
-    fn enter_query(&mut self) -> crate::Result<()> {
+    fn enter_query_mut(&mut self) -> crate::Result<()> {
         self.enter_scope();
 
         Ok(())
     }
 
-    fn exit_query(&mut self) -> crate::Result<()> {
+    fn exit_query_mut(&mut self) -> crate::Result<()> {
         self.exit_scope();
 
         Ok(())
     }
 
-    fn enter_from(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
+    fn enter_from_mut(&mut self, attrs: &mut NodeAttributes, ident: &str) -> crate::Result<()> {
         let scope = self.scope_mut();
 
         if scope.contains_variable(ident) {
@@ -96,18 +96,18 @@ impl QueryVisitorMut for Analysis {
         Ok(())
     }
 
-    fn exit_from(&mut self, attrs: &mut NodeAttributes, _ident: &str) -> crate::Result<()> {
+    fn exit_from_mut(&mut self, attrs: &mut NodeAttributes, _ident: &str) -> crate::Result<()> {
         attrs.scope = self.scope_id();
         Ok(())
     }
 
-    fn exit_source(&mut self, attrs: &mut NodeAttributes) -> crate::Result<()> {
+    fn exit_source_mut(&mut self, attrs: &mut NodeAttributes) -> crate::Result<()> {
         attrs.scope = self.scope_id();
 
         Ok(())
     }
 
-    fn exit_where_clause(
+    fn exit_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         expr: &mut Expr,
@@ -116,7 +116,7 @@ impl QueryVisitorMut for Analysis {
         Ok(())
     }
 
-    fn expr_visitor(&mut self) -> Self::Inner<'_> {
+    fn expr_visitor_mut(&mut self) -> Self::Inner<'_> {
         RenameExpr { inner: self }
     }
 }

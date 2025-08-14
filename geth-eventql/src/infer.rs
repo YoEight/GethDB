@@ -183,7 +183,7 @@ impl Typecheck {
 impl QueryVisitorMut for Typecheck {
     type Inner<'a> = TypecheckExpr<'a>;
 
-    fn enter_where_clause(
+    fn enter_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
         expr: &mut Expr,
@@ -194,7 +194,7 @@ impl QueryVisitorMut for Typecheck {
         Ok(())
     }
 
-    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
+    fn expr_visitor_mut<'a>(&'a mut self) -> Self::Inner<'a> {
         TypecheckExpr { inner: self }
     }
 }
