@@ -119,10 +119,9 @@ fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &
     while let Some(mut item) = stack.pop() {
         let query = item.value;
         if !item.visited {
+            visitor.enter_query(&item.value.attrs);
             item.visited = true;
             stack.push(item);
-
-            visitor.enter_query();
 
             for from_stmt in query.from_stmts.iter() {
                 visitor.enter_from(&from_stmt.attrs, &from_stmt.ident);
@@ -896,7 +895,7 @@ pub trait QueryVisitor {
     where
         Self: 'a;
 
-    fn enter_query(&mut self) {}
+    fn enter_query(&mut self, attrs: &NodeAttributes) {}
     fn exit_query(&mut self) {}
     fn enter_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn exit_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
