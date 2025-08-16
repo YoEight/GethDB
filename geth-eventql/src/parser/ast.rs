@@ -440,11 +440,9 @@ impl Expr {
 
                     item.visited = true;
                     visitor.enter_record(&item.value.attrs, record);
-                    let attrs = &item.value.attrs;
                     stack.push(item);
 
-                    for (key, expr) in record.fields.iter() {
-                        visitor.enter_record_entry(attrs, key, expr);
+                    for expr in record.fields.values() {
                         stack.push(Item::new(expr));
                     }
                 }
