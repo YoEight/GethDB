@@ -1,4 +1,4 @@
-use std::{collections::BTreeMap, fmt::Display, ptr::NonNull};
+use std::{fmt::Display, ptr::NonNull};
 
 use crate::{
     Pos, Type,
@@ -313,9 +313,9 @@ impl Expr {
         None
     }
 
-    pub fn as_record(&self) -> Option<&Record> {
-        if let Value::Record(r) = &self.value {
-            return Some(r);
+    pub fn as_record(&self) -> Option<Rec<'_>> {
+        if let Value::Record(inner) = &self.value {
+            return Some(Rec { inner });
         }
 
         None
@@ -344,6 +344,18 @@ impl Expr {
                     visitor.on_var(&mut node.attrs, var)?;
                 }
 
+                Value::Field { label, value } => {
+                    if item.visited {
+                        visitor.exit_field(&mut node.attrs, label.as_mut_str(), value.as_mut())?;
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_field(&mut node.attrs, label.as_mut_str(), value.as_mut())?;
+                    stack.push(item);
+                    stack.push(ItemMut::new(value.as_mut()));
+                }
+
                 Value::Record(record) => {
                     if item.visited {
                         visitor.exit_record(&mut node.attrs, record)?;
@@ -354,8 +366,7 @@ impl Expr {
                     visitor.enter_record(&mut node.attrs, record)?;
                     stack.push(item);
 
-                    for (key, expr) in record.fields.iter_mut() {
-                        visitor.enter_record_entry(&mut node.attrs, key, expr)?;
+                    for expr in record.iter_mut().rev() {
                         stack.push(ItemMut::new(expr));
                     }
                 }
@@ -433,6 +444,18 @@ impl Expr {
                     visitor.on_var(&item.value.attrs, var);
                 }
 
+                Value::Field { label, value } => {
+                    if item.visited {
+                        visitor.exit_field(&item.value.attrs, label.as_str(), value);
+                        continue;
+                    }
+
+                    item.visited = true;
+                    visitor.enter_field(&item.value.attrs, label.as_str(), value);
+                    stack.push(item);
+                    stack.push(Item::new(value));
+                }
+
                 Value::Record(record) => {
                     if item.visited {
                         visitor.exit_record(&item.value.attrs, record);
@@ -441,11 +464,9 @@ impl Expr {
 
                     item.visited = true;
                     visitor.enter_record(&item.value.attrs, record);
-                    let attrs = &item.value.attrs;
                     stack.push(item);
 
-                    for (key, expr) in record.fields.iter() {
-                        visitor.enter_record_entry(attrs, key, expr);
+                    for expr in record.iter().rev() {
                         stack.push(Item::new(expr));
                     }
                 }
@@ -548,6 +569,24 @@ pub struct UnaryOp<'a> {
     pub expr: &'a Expr,
 }
 
+pub struct Rec<'a> {
+    inner: &'a Vec<Expr>,
+}
+
+impl Rec<'_> {
+    pub fn get(&self, id: &str) -> Option<&Expr> {
+        for expr in self.inner.iter() {
+            if let Value::Field { label, value } = &expr.value
+                && label == id
+            {
+                return Some(value);
+            }
+        }
+
+        None
+    }
+}
+
 pub struct ApplyFun<'a> {
     pub name: &'a String,
     pub params: &'a Vec<Expr>,
@@ -573,32 +612,33 @@ impl Display for Var {
 
 pub enum Value {
     Literal(Literal),
+
     Var(Var),
-    Record(Record),
+
+    Field {
+        label: String,
+        value: Box<Expr>,
+    },
+
+    Record(Vec<Expr>),
+
     Array(Vec<Expr>),
+
     App {
         fun: String,
         params: Vec<Expr>,
     },
+
     Binary {
         lhs: Box<Expr>,
         op: Operation,
         rhs: Box<Expr>,
     },
+
     Unary {
         op: Operation,
         expr: Box<Expr>,
     },
-}
-
-pub struct Record {
-    pub fields: BTreeMap<String, Expr>,
-}
-
-impl Record {
-    pub fn get(&self, id: &str) -> Option<&Expr> {
-        self.fields.get(id)
-    }
 }
 
 pub struct Sort {
@@ -746,16 +786,25 @@ pub trait ExprVisitorMut {
     fn enter_record(
         &mut self,
         attrs: &mut NodeAttributes,
-        record: &mut Record,
+        record: &mut [Expr],
     ) -> crate::Result<()> {
         Ok(())
     }
 
-    fn enter_record_entry(
+    fn enter_field(
         &mut self,
         attrs: &mut NodeAttributes,
-        key: &str,
-        expr: &mut Expr,
+        label: &mut str,
+        value: &mut Expr,
+    ) -> crate::Result<()> {
+        Ok(())
+    }
+
+    fn exit_field(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        label: &mut str,
+        value: &mut Expr,
     ) -> crate::Result<()> {
         Ok(())
     }
@@ -763,7 +812,7 @@ pub trait ExprVisitorMut {
     fn exit_record(
         &mut self,
         attrs: &mut NodeAttributes,
-        record: &mut Record,
+        record: &mut [Expr],
     ) -> crate::Result<()> {
         Ok(())
     }
@@ -872,9 +921,10 @@ pub trait QueryVisitor {
 pub trait ExprVisitor {
     fn on_literal(&mut self, attrs: &NodeAttributes, lit: &Literal) {}
     fn on_var(&mut self, attrs: &NodeAttributes, var: &Var) {}
-    fn enter_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
-    fn enter_record_entry(&mut self, attrs: &NodeAttributes, key: &str, expr: &Expr) {}
-    fn exit_record(&mut self, attrs: &NodeAttributes, record: &Record) {}
+    fn enter_record(&mut self, attrs: &NodeAttributes, record: &[Expr]) {}
+    fn enter_field(&mut self, attrs: &NodeAttributes, label: &str, value: &Expr) {}
+    fn exit_field(&mut self, attrs: &NodeAttributes, label: &str, value: &Expr) {}
+    fn exit_record(&mut self, attrs: &NodeAttributes, record: &[Expr]) {}
     fn enter_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
     fn exit_array(&mut self, attrs: &NodeAttributes, values: &[Expr]) {}
     fn enter_app(&mut self, attrs: &NodeAttributes, name: &str, params: &[Expr]) {}

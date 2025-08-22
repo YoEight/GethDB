@@ -1,6 +1,4 @@
-use crate::{
-    Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Var, parser::Record,
-};
+use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Var};
 
 pub enum Instr {
     Push(Literal),
@@ -45,14 +43,8 @@ impl ExprVisitor for ExprCodegen<'_> {
         self.inner.instrs.push(Instr::LoadVar(var.clone()));
     }
 
-    fn enter_record_entry(&mut self, _attrs: &NodeAttributes, key: &str, _expr: &Expr) {
-        self.inner
-            .instrs
-            .push(Instr::Push(Literal::String(key.to_string())));
-    }
-
-    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &Record) {
-        self.inner.instrs.push(Instr::Rec(record.fields.len()));
+    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &[Expr]) {
+        self.inner.instrs.push(Instr::Rec(record.len()));
     }
 
     fn exit_array(&mut self, _attrs: &NodeAttributes, values: &[Expr]) {

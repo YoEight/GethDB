@@ -3,7 +3,6 @@ use crate::{
     sym::{Keyword, Literal, Sym},
     tokenizer::{Lexer, Pos},
 };
-use std::collections::BTreeMap;
 
 mod ast;
 mod state;
@@ -406,15 +405,22 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
         Sym::LBrace => {
             state.skip_whitespace()?;
 
-            let mut fields = BTreeMap::new();
+            let mut fields = Vec::new();
 
             while let Some(Sym::Id(id)) = state.look_ahead()? {
-                let id = id.clone();
+                let label = id.clone();
+                let label_pos = state.pos();
                 state.shift()?;
                 state.skip_whitespace()?;
                 state.expect(Sym::Colon)?;
                 state.skip_whitespace()?;
-                fields.insert(id, parse_expr_single(state)?);
+                fields.push(Expr {
+                    attrs: NodeAttributes::new(label_pos),
+                    value: Value::Field {
+                        label,
+                        value: Box::new(parse_expr_single(state)?),
+                    },
+                });
                 state.skip_whitespace()?;
 
                 if let Some(Sym::Comma) = state.look_ahead()? {
@@ -430,7 +436,7 @@ fn parse_expr_single(state: &mut ParserState<'_>) -> crate::Result<Expr> {
 
             Ok(Expr {
                 attrs: NodeAttributes::new(pos),
-                value: Value::Record(Record { fields }),
+                value: Value::Record(fields),
             })
         }
 
