@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use crate::{
     Expr, Literal, Operation, Pos, Query, Scopes, Var,
     error::InferError,
-    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut, Record},
+    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut},
 };
 
 pub struct InferedQuery {
@@ -238,7 +238,7 @@ impl ExprVisitorMut for TypecheckExpr<'_> {
     fn exit_record(
         &mut self,
         attrs: &mut NodeAttributes,
-        _record: &mut Record,
+        _record: &mut [Expr],
     ) -> crate::Result<()> {
         if attrs.tpe != Type::Unspecified && attrs.tpe != Type::Record {
             bail!(attrs.pos, InferError::TypeMismatch(attrs.tpe, Type::Record));

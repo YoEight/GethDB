@@ -7,7 +7,7 @@ use std::{
 use crate::{
     Expr, Literal, Query, Value, Var,
     error::RenameError,
-    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut, Record, parse_subject},
+    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut, parse_subject},
 };
 
 pub fn rename(query: &mut Query) -> crate::Result<Scopes> {
@@ -163,7 +163,7 @@ impl ExprVisitorMut for RenameExpr<'_> {
     fn exit_record(
         &mut self,
         attrs: &mut NodeAttributes,
-        _record: &mut Record,
+        _record: &mut [Expr],
     ) -> crate::Result<()> {
         attrs.scope = self.inner.scope_id();
 
