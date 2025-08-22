@@ -353,6 +353,7 @@ impl Expr {
                     item.visited = true;
                     visitor.enter_field(&mut node.attrs, label.as_mut_str(), value.as_mut())?;
                     stack.push(item);
+                    stack.push(ItemMut::new(value.as_mut()));
                 }
 
                 Value::Record(record) => {
@@ -445,13 +446,14 @@ impl Expr {
 
                 Value::Field { label, value } => {
                     if item.visited {
-                        visitor.exit_field(&item.value.attrs, label.as_str(), &value);
+                        visitor.exit_field(&item.value.attrs, label.as_str(), value);
                         continue;
                     }
 
                     item.visited = true;
-                    visitor.enter_field(&item.value.attrs, label.as_str(), &value);
-                    stack.push(Item::new(&value));
+                    visitor.enter_field(&item.value.attrs, label.as_str(), value);
+                    stack.push(item);
+                    stack.push(Item::new(value));
                 }
 
                 Value::Record(record) => {

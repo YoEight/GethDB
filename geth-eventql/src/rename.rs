@@ -160,6 +160,16 @@ impl ExprVisitorMut for RenameExpr<'_> {
         Ok(())
     }
 
+    fn exit_field(
+        &mut self,
+        attrs: &mut NodeAttributes,
+        _label: &mut str,
+        value: &mut Expr,
+    ) -> crate::Result<()> {
+        attrs.scope = value.attrs.scope;
+        Ok(())
+    }
+
     fn exit_record(
         &mut self,
         attrs: &mut NodeAttributes,
