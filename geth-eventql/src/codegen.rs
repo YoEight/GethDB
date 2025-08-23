@@ -1,6 +1,4 @@
-use crate::{
-    Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Subject, Var,
-};
+use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Var, Where};
 
 pub trait IntoLiteral {
     fn into_literal(self) -> Literal;
@@ -42,13 +40,19 @@ impl IntoLiteral for usize {
     }
 }
 
+impl IntoLiteral for Literal {
+    fn into_literal(self) -> Literal {
+        self
+    }
+}
+
 pub enum Instr {
     Push(Literal),
     LoadVar(Var),
     Operation(Operation),
     Array(usize),
     Rec(usize),
-    Call(String, usize),
+    Call(String),
 }
 
 impl Instr {
@@ -62,7 +66,7 @@ pub fn codegen_where_clause(where_clause: &Where) -> Vec<Instr> {
 
     where_clause.expr.dfs_post_order(&mut state);
 
-    state.emit
+    state.emit.inner
 }
 
 #[derive(Default)]
@@ -71,7 +75,10 @@ struct Emit {
 }
 
 impl Emit {
-    fn push(&mut self, lit: impl IntoLiteral) {
+    fn push<L>(&mut self, lit: L)
+    where
+        L: IntoLiteral,
+    {
         self.inner.push(Instr::lit(lit));
     }
 
@@ -81,6 +88,18 @@ impl Emit {
 
     fn rec(&mut self, siz: usize) {
         self.inner.push(Instr::Rec(siz));
+    }
+
+    fn array(&mut self, siz: usize) {
+        self.inner.push(Instr::Array(siz));
+    }
+
+    fn call(&mut self, name: &str) {
+        self.inner.push(Instr::Call(name.to_string()));
+    }
+
+    fn op(&mut self, op: Operation) {
+        self.inner.push(Instr::Operation(op));
     }
 }
 
@@ -99,13 +118,19 @@ impl ExprVisitor for ExprCodegen {
     }
 
     fn exit_array(&mut self, _attrs: &NodeAttributes, values: &[Expr]) {
-        self.emit.push(Instr::lit(values.len()));
-        self.emit.push(Instr::Array);
+        self.emit.array(values.len());
+    }
+
+    fn exit_field(&mut self, _attrs: &NodeAttributes, label: &str, _value: &Expr) {
+        self.emit.push(label);
+    }
+
+    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &[Expr]) {
+        self.emit.rec(record.len());
     }
 
     fn exit_app(&mut self, _attrs: &NodeAttributes, name: &str, _params: &[Expr]) {
-        self.emit.push(Instr::lit(name));
-        self.emit.push(Instr::Call);
+        self.emit.call(name);
     }
 
     fn exit_binary_op(
@@ -115,10 +140,10 @@ impl ExprVisitor for ExprCodegen {
         _lhs: &Expr,
         _rhs: &Expr,
     ) {
-        self.emit.push(Instr::Operation(*op));
+        self.emit.op(*op);
     }
 
     fn exit_unary_op(&mut self, _attrs: &NodeAttributes, op: &Operation, _expr: &Expr) {
-        self.emit.push(Instr::Operation(*op));
+        self.emit.op(*op);
     }
 }

@@ -74,14 +74,6 @@ impl Stack {
         }
     }
 
-    fn pop_as_integral_or_bail(&mut self) -> Result<i64> {
-        if let Either::Left(int) = self.pop_as_number_or_bail()? {
-            return Ok(int);
-        }
-
-        Err(EvalError::UnexpectedRuntimeError)
-    }
-
     fn pop_as_bool_or_bail(&mut self) -> Result<bool> {
         match self.pop_as_literal_or_bail()? {
             Literal::Bool(b) => Ok(b),
@@ -95,22 +87,6 @@ impl Stack {
         }
 
         Err(EvalError::UnexpectedRuntimeError)
-    }
-
-    fn pop_as_array_of_strings_or_bail(&mut self) -> Result<Vec<String>> {
-        let vec_of_items = self.pop_as_array_or_bail()?;
-        let mut result = Vec::with_capacity(vec_of_items.len());
-
-        for item in vec_of_items {
-            if let Item::Literal(Literal::String(s)) = item {
-                result.push(s);
-                continue;
-            }
-
-            return Err(EvalError::UnexpectedRuntimeError);
-        }
-
-        Ok(result)
     }
 
     fn push_literal(&mut self, lit: Literal) {
@@ -133,11 +109,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
         match instr {
             Instr::Push(lit) => stack.push_literal(lit),
 
-            Instr::LoadVar => {
-                let name = stack.pop_as_string_or_bail()?;
-                let path = stack.pop_as_array_of_strings_or_bail()?;
-                let var = Var { name, path };
-
+            Instr::LoadVar(var) => {
                 stack.push_literal(dict.lookup(&var)?);
             }
 
@@ -469,8 +441,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                 }
             },
 
-            Instr::Array => {
-                let siz = stack.pop_as_integral_or_bail()? as usize;
+            Instr::Array(siz) => {
                 let mut array = Vec::with_capacity(siz);
 
                 for _ in 0..siz {
@@ -480,14 +451,12 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                 stack.push_array(array);
             }
 
-            Instr::Rec => {
-                let siz = stack.pop_as_integral_or_bail()? as usize;
+            Instr::Rec(siz) => {
                 let mut fields = HashMap::with_capacity(siz);
 
-                todo!("the keys come first now, then the values");
                 for _ in 0..siz {
-                    let value = stack.pop_or_bail()?;
                     let key = stack.pop_as_string_or_bail()?;
+                    let value = stack.pop_or_bail()?;
 
                     fields.insert(key, value);
                 }
@@ -495,43 +464,39 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                 stack.push_record(Rec { fields });
             }
 
-            Instr::Call => {
-                let fun_name = stack.pop_as_string_or_bail()?;
+            Instr::Call(fun_name) => match fun_name.as_str() {
+                "abs" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Integral(i.abs())),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.abs())),
+                },
 
-                match fun_name.as_str() {
-                    "abs" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Integral(i.abs())),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.abs())),
-                    },
+                "ceil" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Integral(i)),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.ceil())),
+                },
 
-                    "ceil" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Integral(i)),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.ceil())),
-                    },
+                "floor" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Integral(i)),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.floor())),
+                },
 
-                    "floor" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Integral(i)),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.floor())),
-                    },
+                "sin" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Float((i as f64).sin())),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.sin())),
+                },
 
-                    "sin" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Float((i as f64).sin())),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.sin())),
-                    },
+                "cos" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Float((i as f64).cos())),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.cos())),
+                },
 
-                    "cos" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Float((i as f64).cos())),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.cos())),
-                    },
+                "tan" => match stack.pop_as_number_or_bail()? {
+                    Either::Left(i) => stack.push_literal(Literal::Float((i as f64).tan())),
+                    Either::Right(f) => stack.push_literal(Literal::Float(f.tan())),
+                },
 
-                    "tan" => match stack.pop_as_number_or_bail()? {
-                        Either::Left(i) => stack.push_literal(Literal::Float((i as f64).tan())),
-                        Either::Right(f) => stack.push_literal(Literal::Float(f.tan())),
-                    },
-
-                    _ => return Err(EvalError::UnexpectedRuntimeError),
-                }
-            }
+                _ => return Err(EvalError::UnexpectedRuntimeError),
+            },
         }
     }
 
