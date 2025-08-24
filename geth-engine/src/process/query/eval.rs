@@ -1,19 +1,81 @@
 use std::collections::HashMap;
 
-use crate::{Instr, Literal, Operation, Var};
+use geth_eventql::{Instr, Literal, Operation, Subject, Var};
 
 pub enum EvalError {
     UnexpectedRuntimeError,
     UnexpectedVarNotFoundError(Var),
 }
 
+pub struct Mapping {
+    spec_revision: String,
+    id: String,
+    time: String,
+    source: String,
+    subject: Subject,
+    r#type: String,
+    data_content_type: String,
+    data: Option<serde_json::Map<String, serde_json::Value>>,
+    predecessorhash: String,
+    hash: String,
+}
+
 pub struct Dictionary {
-    pub inner: HashMap<String, Literal>,
+    inner: HashMap<String, Mapping>,
 }
 
 impl Dictionary {
-    fn lookup(&self, _var: &Var) -> Result<Literal> {
-        todo!()
+    pub fn insert(&mut self, name: &str, m: Mapping) {
+        self.inner.insert(name.to_string(), m);
+    }
+
+    pub fn lookup(&self, var: &Var) -> Result<Literal> {
+        let mapping = if let Some(m) = self.inner.get(var.name.as_str()) {
+            m
+        } else {
+            return Err(EvalError::UnexpectedVarNotFoundError(var.clone()));
+        };
+
+        let path = var.path.as_slice();
+
+        if path == ["specrevision"] {
+            return Ok(Literal::String(mapping.spec_revision.clone()));
+        }
+
+        if path == ["id"] {
+            return Ok(Literal::String(mapping.id.clone()));
+        }
+
+        if path == ["time"] {
+            return Ok(Literal::String(mapping.time.clone()));
+        }
+
+        if path == ["source"] {
+            return Ok(Literal::String(mapping.source.clone()));
+        }
+
+        if path == ["subject"] {
+            return Ok(Literal::Subject(mapping.subject.clone()));
+        }
+
+        if path == ["type"] {
+            return Ok(Literal::String(mapping.r#type.clone()));
+        }
+
+        if path == ["datacontenttype"] {
+            return Ok(Literal::String(mapping.data_content_type.clone()));
+        }
+
+        if path == ["predecessorhash"] {
+            return Ok(Literal::String(mapping.predecessorhash.clone()));
+        }
+
+        if path == ["hash"] {
+            return Ok(Literal::String(mapping.hash.clone()));
+        }
+
+        // TODO - find better error in this case.
+        return Err(EvalError::UnexpectedVarNotFoundError(var.clone()));
     }
 }
 
