@@ -1,4 +1,4 @@
-use std::{fmt::Display, ptr::NonNull};
+use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
 use crate::{
     Pos, Type,
@@ -39,6 +39,13 @@ impl Query {
 
     pub fn dfs_post_order<V: QueryVisitor>(&self, visitor: &mut V) {
         query_dfs_post_order(vec![Item::new(self)], visitor);
+    }
+
+    pub fn dfs_pre_order<V: QueryVisitor>(&self, visitor: &mut V) {
+        let mut queue = VecDeque::new();
+        queue.push_back(self);
+
+        query_dfs_pre_order(queue, visitor);
     }
 }
 
@@ -113,6 +120,56 @@ fn query_dfs_post_order_mut<V: QueryVisitorMut>(
 fn on_expr_mut<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::Result<()> {
     let mut expr_visitor = visitor.expr_visitor_mut();
     expr.dfs_post_order_mut(&mut expr_visitor)
+}
+
+fn query_dfs_pre_order<V: QueryVisitor>(mut queue: VecDeque<&Query>, visitor: &mut V) {
+    while let Some(query) = queue.pop_front() {
+        visitor.enter_query(&query.attrs);
+
+        for from_stmt in query.from_stmts.iter() {
+            visitor.enter_from(&from_stmt.attrs, &from_stmt.ident);
+
+            match &from_stmt.source.inner {
+                SourceType::Events => visitor.on_source_events(&from_stmt.attrs, &from_stmt.ident),
+
+                SourceType::Subject(subject) => {
+                    visitor.on_source_subject(&from_stmt.attrs, &from_stmt.ident, subject)
+                }
+
+                SourceType::Subquery(query) => {
+                    if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
+                        queue.push_back(query);
+                    }
+                }
+            }
+
+            visitor.exit_source(&from_stmt.source.attrs);
+            visitor.exit_from(&from_stmt.attrs, &from_stmt.ident);
+        }
+
+        if let Some(predicate) = query.predicate.as_ref() {
+            visitor.enter_where_clause(&predicate.attrs, &predicate.expr);
+            on_expr(visitor, &predicate.expr);
+            visitor.exit_where_clause(&predicate.attrs, &predicate.expr);
+        }
+
+        if let Some(expr) = query.group_by.as_ref() {
+            visitor.enter_group_by(expr);
+            on_expr(visitor, expr);
+            visitor.leave_group_by(expr);
+        }
+
+        if let Some(sort) = query.order_by.as_ref() {
+            visitor.enter_order_by(&sort.order, &sort.expr);
+            on_expr(visitor, &sort.expr);
+            visitor.leave_order_by(&sort.order, &sort.expr);
+        }
+
+        visitor.enter_projection(&query.projection);
+        on_expr(visitor, &query.projection);
+        visitor.leave_projection(&query.projection);
+        visitor.exit_query();
+    }
 }
 
 fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &mut V) {
