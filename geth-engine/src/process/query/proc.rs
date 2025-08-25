@@ -14,6 +14,8 @@ use crate::{
     },
 };
 
+use super::eval::Dictionary;
+
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     while let Some(item) = env.recv().await {
@@ -33,7 +35,7 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
             // let mut sources = HashMap::with_capacity(reqs.subjects.len());
             let ctx = RequestContext::new();
 
-            for (_, subjects) in reqs.subjects.iter() {
+            for (binding, subjects) in reqs.subjects.iter() {
                 for subject in subjects.iter() {
                     // TODO - need to support true subject instead of relaying on stream name.
                     let stream_name = subject.to_string();

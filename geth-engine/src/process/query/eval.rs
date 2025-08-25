@@ -1,11 +1,6 @@
 use std::collections::HashMap;
 
-use geth_eventql::{Instr, Literal, Operation, Subject, Var};
-
-pub enum EvalError {
-    UnexpectedRuntimeError,
-    UnexpectedVarNotFoundError(Var),
-}
+use geth_eventql::{Instr, IntoLiteral, Literal, Operation, Subject, Var};
 
 pub struct Mapping {
     spec_revision: String,
@@ -15,67 +10,121 @@ pub struct Mapping {
     subject: Subject,
     r#type: String,
     data_content_type: String,
-    data: Option<serde_json::Map<String, serde_json::Value>>,
+    data: Option<serde_json::Value>,
     predecessorhash: String,
     hash: String,
+    cache: HashMap<String, Literal>,
 }
 
-pub struct Dictionary {
+#[derive(Default)]
+struct Scope {
     inner: HashMap<String, Mapping>,
 }
 
+#[derive(Default)]
+pub struct Dictionary {
+    inner: HashMap<u64, Scope>,
+}
+
 impl Dictionary {
-    pub fn insert(&mut self, name: &str, m: Mapping) {
-        self.inner.insert(name.to_string(), m);
+    pub fn insert(&mut self, scope: u64, name: &str, m: Mapping) {
+        self.inner
+            .entry(scope)
+            .or_default()
+            .inner
+            .insert(name.to_string(), m);
     }
 
-    pub fn lookup(&self, var: &Var) -> Result<Literal> {
-        let mapping = if let Some(m) = self.inner.get(var.name.as_str()) {
+    pub fn lookup(&mut self, scope: u64, var: &Var, stack: &mut Stack) {
+        let mapping = if let Some(m) = self
+            .inner
+            .get_mut(&scope)
+            .and_then(|s| s.inner.get_mut(var.name.as_str()))
+        {
             m
         } else {
-            return Err(EvalError::UnexpectedVarNotFoundError(var.clone()));
+            return;
         };
 
-        let path = var.path.as_slice();
+        let mut path_iter = var.path.iter();
 
-        if path == ["specrevision"] {
-            return Ok(Literal::String(mapping.spec_revision.clone()));
+        let path = if let Some(p) = path_iter.next() {
+            p
+        } else {
+            todo!(
+                "implement producing a record when the user is asking for returning the whole thing"
+            );
+        };
+
+        if path == "specrevision" {
+            stack.push_literal(&mapping.spec_revision);
+            return;
         }
 
-        if path == ["id"] {
-            return Ok(Literal::String(mapping.id.clone()));
+        if path == "id" {
+            stack.push_literal(&mapping.id);
+            return;
         }
 
-        if path == ["time"] {
-            return Ok(Literal::String(mapping.time.clone()));
+        if path == "time" {
+            stack.push_literal(&mapping.time);
+            return;
         }
 
-        if path == ["source"] {
-            return Ok(Literal::String(mapping.source.clone()));
+        if path == "source" {
+            stack.push_literal(&mapping.source);
+            return;
         }
 
-        if path == ["subject"] {
-            return Ok(Literal::Subject(mapping.subject.clone()));
+        if path == "subject" {
+            stack.push_literal(&mapping.subject);
+            return;
         }
 
-        if path == ["type"] {
-            return Ok(Literal::String(mapping.r#type.clone()));
+        if path == "type" {
+            stack.push_literal(&mapping.r#type);
+            return;
         }
 
-        if path == ["datacontenttype"] {
-            return Ok(Literal::String(mapping.data_content_type.clone()));
+        if path == "datacontenttype" {
+            stack.push_literal(&mapping.data_content_type);
+            return;
         }
 
-        if path == ["predecessorhash"] {
-            return Ok(Literal::String(mapping.predecessorhash.clone()));
+        if path == "predecessorhash" {
+            stack.push_literal(&mapping.predecessorhash);
+            return;
         }
 
-        if path == ["hash"] {
-            return Ok(Literal::String(mapping.hash.clone()));
+        if path == "hash" {
+            stack.push_literal(&mapping.hash);
+            return;
         }
 
-        // TODO - find better error in this case.
-        return Err(EvalError::UnexpectedVarNotFoundError(var.clone()));
+        if path == "data" {
+            if let Some(mut payload) = mapping.data.as_ref() {
+                let mut cache_key = String::new();
+
+                while let Some(seg) = path_iter.next() {
+                    if let serde_json::Value::Object(obj) = &payload
+                        && let Some(value) = obj.get(seg)
+                    {
+                        payload = value;
+                        cache_key.push(':');
+                        cache_key.push_str(seg);
+                        continue;
+                    }
+
+                    stack.push_null();
+                    return;
+                }
+            }
+
+            stack.push_null();
+            return;
+        }
+
+        stack.push_null();
     }
 }
 
@@ -83,8 +132,6 @@ pub enum Either<A, B> {
     Left(A),
     Right(B),
 }
-
-type Result<A> = std::result::Result<A, EvalError>;
 
 pub struct Rec {
     pub fields: HashMap<String, Item>,
@@ -106,53 +153,56 @@ impl Stack {
         self.inner.pop()
     }
 
-    fn pop_or_bail(&mut self) -> Result<Item> {
+    fn pop_or_bail(&mut self) -> Option<Item> {
         if let Some(item) = self.pop() {
-            return Ok(item);
+            return Some(item);
         }
 
-        Err(EvalError::UnexpectedRuntimeError)
+        None
     }
 
-    fn pop_as_literal_or_bail(&mut self) -> Result<Literal> {
-        match self.pop_or_bail()? {
-            Item::Literal(lit) => Ok(lit),
-            _ => Err(EvalError::UnexpectedRuntimeError),
+    fn pop_as_literal_or_bail(&mut self) -> Option<Literal> {
+        if let Item::Literal(lit) = self.pop_or_bail()? {
+            return Some(lit);
         }
+
+        None
     }
 
-    fn pop_as_string_or_bail(&mut self) -> Result<String> {
+    fn pop_as_string_or_bail(&mut self) -> Option<String> {
+        if let Literal::String(s) = self.pop_as_literal_or_bail()? {
+            return Some(s);
+        }
+
+        None
+    }
+
+    fn pop_as_number_or_bail(&mut self) -> Option<Either<i64, f64>> {
         match self.pop_as_literal_or_bail()? {
-            Literal::String(s) => Ok(s),
-            _ => Err(EvalError::UnexpectedRuntimeError),
+            Literal::Integral(i) => Some(Either::Left(i)),
+            Literal::Float(f) => Some(Either::Right(f)),
+            _ => None,
         }
     }
 
-    fn pop_as_number_or_bail(&mut self) -> Result<Either<i64, f64>> {
-        match self.pop_as_literal_or_bail()? {
-            Literal::Integral(i) => Ok(Either::Left(i)),
-            Literal::Float(f) => Ok(Either::Right(f)),
-            _ => Err(EvalError::UnexpectedRuntimeError),
+    fn pop_as_bool_or_bail(&mut self) -> Option<bool> {
+        if let Literal::Bool(b) = self.pop_as_literal_or_bail()? {
+            return Some(b);
         }
+
+        None
     }
 
-    fn pop_as_bool_or_bail(&mut self) -> Result<bool> {
-        match self.pop_as_literal_or_bail()? {
-            Literal::Bool(b) => Ok(b),
-            _ => Err(EvalError::UnexpectedRuntimeError),
-        }
-    }
-
-    fn pop_as_array_or_bail(&mut self) -> Result<Vec<Item>> {
+    fn pop_as_array_or_bail(&mut self) -> Option<Vec<Item>> {
         if let Item::Array(xs) = self.pop_or_bail()? {
-            return Ok(xs);
+            return Some(xs);
         }
 
-        Err(EvalError::UnexpectedRuntimeError)
+        None
     }
 
-    fn push_literal(&mut self, lit: Literal) {
-        self.inner.push(Item::Literal(lit));
+    fn push_literal(&mut self, lit: impl IntoLiteral) {
+        self.inner.push(Item::Literal(lit.into_literal()));
     }
 
     fn push_array(&mut self, array: Vec<Item>) {
@@ -162,9 +212,17 @@ impl Stack {
     fn push_record(&mut self, rec: Rec) {
         self.inner.push(Item::Record(rec));
     }
+
+    fn push_null(&mut self) {
+        self.inner.push(Item::Literal(Literal::Null));
+    }
 }
 
-pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> {
+pub fn eval_where_clause(dict: &mut Dictionary, scope: u64, instrs: Vec<Instr>) -> bool {
+    eval_where_clause_opt(dict, scope, instrs).unwrap_or_default()
+}
+
+fn eval_where_clause_opt(dict: &mut Dictionary, scope: u64, instrs: Vec<Instr>) -> Option<bool> {
     let mut stack = Stack::default();
 
     for instr in instrs {
@@ -172,7 +230,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
             Instr::Push(lit) => stack.push_literal(lit),
 
             Instr::LoadVar(var) => {
-                stack.push_literal(dict.lookup(&var)?);
+                dict.lookup(scope, &var, &mut stack);
             }
 
             Instr::Operation(op) => match op {
@@ -214,7 +272,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                                 Item::Literal(Literal::Integral(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
@@ -222,7 +280,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                                 Item::Literal(Literal::Float(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
@@ -230,7 +288,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                                 Item::Literal(Literal::Bool(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
@@ -238,7 +296,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                                 Item::Literal(Literal::String(elem)),
                             ) if value == &elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
@@ -246,10 +304,10 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                                 Item::Literal(Literal::Subject(elem)),
                             ) if value == &elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
-                            _ => {}
+                            _ => return None,
                         }
                     }
 
@@ -293,7 +351,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs == rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -334,7 +392,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs != rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -375,7 +433,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs < rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -416,7 +474,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs > rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -457,7 +515,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs <= rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -498,7 +556,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                             stack.push_literal(Literal::Bool(lhs >= rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
             },
@@ -557,7 +615,7 @@ pub fn eval_where_clause(dict: &Dictionary, instrs: Vec<Instr>) -> Result<bool> 
                     Either::Right(f) => stack.push_literal(Literal::Float(f.tan())),
                 },
 
-                _ => return Err(EvalError::UnexpectedRuntimeError),
+                _ => return None,
             },
         }
     }

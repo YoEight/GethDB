@@ -1,4 +1,4 @@
-use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Var, Where};
+use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Subject, Var, Where};
 
 pub trait IntoLiteral {
     fn into_literal(self) -> Literal;
@@ -43,6 +43,18 @@ impl IntoLiteral for usize {
 impl IntoLiteral for Literal {
     fn into_literal(self) -> Literal {
         self
+    }
+}
+
+impl IntoLiteral for Subject {
+    fn into_literal(self) -> Literal {
+        Literal::Subject(self)
+    }
+}
+
+impl IntoLiteral for &'_ Subject {
+    fn into_literal(self) -> Literal {
+        Literal::Subject(self.clone())
     }
 }
 
