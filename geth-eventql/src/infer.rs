@@ -80,6 +80,7 @@ impl Type {
             Literal::Float(_) => Type::Float,
             Literal::Bool(_) => Type::Bool,
             Literal::Subject(_) => Type::Subject,
+            Literal::Null => Type::Unspecified,
         }
     }
 }
