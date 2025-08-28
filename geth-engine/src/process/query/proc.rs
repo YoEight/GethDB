@@ -14,8 +14,6 @@ use crate::{
     },
 };
 
-use super::eval::Dictionary;
-
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
 pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     while let Some(item) = env.recv().await {
@@ -32,26 +30,26 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 
             let reqs = collect_requirements(infered.query());
             let reader = env.client.new_reader_client().await?;
-            // let mut sources = HashMap::with_capacity(reqs.subjects.len());
-            let ctx = RequestContext::new();
+            // // let mut sources = HashMap::with_capacity(reqs.subjects.len());
+            // let ctx = RequestContext::new();
 
-            for (binding, subjects) in reqs.subjects.iter() {
-                for subject in subjects.iter() {
-                    // TODO - need to support true subject instead of relaying on stream name.
-                    let stream_name = subject.to_string();
-                    let _stream = reader
-                        .read(
-                            ctx,
-                            &stream_name,
-                            Revision::Start,
-                            Direction::Forward,
-                            usize::MAX,
-                        )
-                        .await?;
+            // for (binding, subjects) in reqs.subjects.iter() {
+            //     for subject in subjects.iter() {
+            //         // TODO - need to support true subject instead of relaying on stream name.
+            //         let stream_name = subject.to_string();
+            //         let _stream = reader
+            //             .read(
+            //                 ctx,
+            //                 &stream_name,
+            //                 Revision::Start,
+            //                 Direction::Forward,
+            //                 usize::MAX,
+            //             )
+            //             .await?;
 
-                    // TODO need to load them stream readers in a better way for all the sources.
-                }
-            }
+            //         // TODO need to load them stream readers in a better way for all the sources.
+            //     }
+            // }
         }
     }
 
@@ -59,15 +57,17 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
 }
 
 struct Requirements {
-    subjects: HashMap<Binding, HashSet<Subject>>,
+    parent_queries: HashMap<u64, ParentQuery>,
+    scoped_reqs: HashMap<u64, HashMap<String, ScopedRequirements>>,
 }
 
 fn collect_requirements(query: &Query) -> Requirements {
     let mut collect_reqs = CollectRequirements::default();
-    query.dfs_post_order(&mut collect_reqs);
+    query.dfs_pre_order(&mut collect_reqs);
 
     Requirements {
-        subjects: collect_reqs.subjects,
+        parent_queries: collect_reqs.parent_queries,
+        scoped_reqs: collect_reqs.scoped_reqs,
     }
 }
 
@@ -77,10 +77,23 @@ struct Binding {
     ident: String,
 }
 
+struct ParentQuery {
+    scope: u64,
+    ident: String,
+}
+
+#[derive(Default)]
+struct ScopedRequirements {
+    needed_props: HashSet<Vec<String>>,
+    pushable_preds: HashMap<Vec<String>, Vec<Expr>>,
+    subjects: HashSet<Subject>,
+}
+
 #[derive(Default)]
 struct CollectRequirements {
     context: ContextFrame,
-    subjects: HashMap<Binding, HashSet<Subject>>,
+    parent_queries: HashMap<u64, ParentQuery>,
+    scoped_reqs: HashMap<u64, HashMap<String, ScopedRequirements>>,
 }
 
 impl QueryVisitor for CollectRequirements {
@@ -90,20 +103,30 @@ impl QueryVisitor for CollectRequirements {
         self.context = ContextFrame::Where;
     }
 
-    fn exit_where_clause(&mut self, _attrs: &NodeAttributes, _expr: &Expr) {
+    fn exit_where_clause(&mut self, _attrs: &NodeAttributes, expr: &Expr) {
         self.context = ContextFrame::Unspecified;
     }
 
     fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {
-        let binding = Binding {
-            scope: attrs.scope,
-            ident: ident.to_string(),
-        };
-
-        self.subjects
-            .entry(binding)
+        self.scoped_reqs
+            .entry(attrs.scope)
             .or_default()
+            .entry(ident.to_string())
+            .or_default()
+            .subjects
             .insert(subject.clone());
+    }
+
+    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str, query: &Query) -> bool {
+        self.parent_queries.insert(
+            query.attrs.scope,
+            ParentQuery {
+                scope: attrs.scope,
+                ident: ident.to_string(),
+            },
+        );
+
+        true
     }
 
     fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
@@ -131,19 +154,32 @@ impl ExprVisitor for CollectRequirementsFromExpr<'_> {
                 // those to a much direct one.
             }
 
-            (Value::Var(x), Value::Literal(Literal::Subject(sub)))
-            | (Value::Literal(Literal::Subject(sub)), Value::Var(x)) => {
-                if x.path.as_slice() == ["subject"] && op == &Operation::Equal {
-                    let binding = Binding {
-                        scope: attrs.scope,
-                        ident: x.name.clone(),
-                    };
+            (Value::Var(x), Value::Literal(lit)) | (Value::Literal(lit), Value::Var(x)) => {
+                let reqs = self
+                    .inner
+                    .scoped_reqs
+                    .entry(attrs.scope)
+                    .or_default()
+                    .entry(x.name.clone())
+                    .or_default();
 
-                    self.inner
-                        .subjects
-                        .entry(binding)
-                        .or_default()
-                        .insert(sub.clone());
+                reqs.pushable_preds
+                    .entry(x.path.clone())
+                    .or_default()
+                    .push(Expr {
+                        attrs: *attrs,
+                        value: Value::Binary {
+                            lhs: Box::new(lhs.clone()),
+                            op: *op,
+                            rhs: Box::new(rhs.clone()),
+                        },
+                    });
+
+                if let Literal::Subject(sub) = lit
+                    && x.path.as_slice() == ["subject"]
+                    && op == &Operation::Equal
+                {
+                    reqs.subjects.insert(sub.clone());
                 }
             }
 

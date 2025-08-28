@@ -137,7 +137,7 @@ fn query_dfs_pre_order<V: QueryVisitor>(mut queue: VecDeque<&Query>, visitor: &m
                 }
 
                 SourceType::Subquery(query) => {
-                    if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
+                    if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident, query) {
                         queue.push_back(query);
                     }
                 }
@@ -193,7 +193,8 @@ fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &
                     }
 
                     SourceType::Subquery(sub_query) => {
-                        if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
+                        if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident, sub_query)
+                        {
                             stack.push(Item::new(sub_query));
                         }
                     }
@@ -313,6 +314,7 @@ pub struct Where {
     pub expr: Expr,
 }
 
+#[derive(Clone)]
 pub struct Expr {
     pub attrs: NodeAttributes,
     pub value: Value,
@@ -666,6 +668,7 @@ impl Display for Var {
     }
 }
 
+#[derive(Clone)]
 pub enum Value {
     Literal(Literal),
 
@@ -958,7 +961,7 @@ pub trait QueryVisitor {
     fn exit_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {}
-    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str) -> bool {
+    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str, query: &Query) -> bool {
         true
     }
     fn exit_source(&mut self, attrs: &NodeAttributes) {}
