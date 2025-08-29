@@ -1,8 +1,8 @@
 use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
 use crate::{
-    sym::{Literal, Operation}, Pos,
-    Type,
+    Pos, Type,
+    sym::{Literal, Operation},
 };
 
 #[derive(Copy, Clone)]

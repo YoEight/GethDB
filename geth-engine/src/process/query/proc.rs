@@ -1,10 +1,13 @@
 use std::collections::{HashMap, HashSet};
 
-use geth_eventql::{ContextFrame, Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Subject, Value, Var};
+use geth_eventql::{
+    ContextFrame, Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor,
+    Subject, Value, Var,
+};
 
 use crate::process::{
-    messages::{QueryRequests, QueryResponses}, Item, Managed,
-    ProcessEnv,
+    Item, Managed, ProcessEnv,
+    messages::{QueryRequests, QueryResponses},
 };
 
 #[tracing::instrument(skip_all, fields(proc_id = env.client.id(), proc = ?env.proc))]
@@ -49,6 +52,19 @@ pub async fn run(mut env: ProcessEnv<Managed>) -> eyre::Result<()> {
     Ok(())
 }
 
+#[derive(PartialEq, Eq)]
+enum SourceType {
+    Subject(Subject),
+    Events,
+    Subquery(u64),
+}
+
+struct SourceDecl {
+    scope: u64,
+    ident: String,
+    r#type: SourceType,
+}
+
 struct Requirements {
     parent_queries: HashMap<u64, ParentQuery>,
     scoped_reqs: HashMap<u64, HashMap<String, ScopedRequirements>>,
@@ -75,14 +91,27 @@ struct ParentQuery {
     ident: String,
 }
 
-#[derive(Default)]
 struct ScopedRequirements {
+    scope: u64,
+    ident: String,
+    source_type: SourceType,
     needed_props: HashSet<Vec<String>>,
     pushable_preds: HashMap<Vec<String>, Vec<Expr>>,
     subjects: HashSet<Subject>,
 }
 
 impl ScopedRequirements {
+    fn new(scope: u64, ident: String, source_type: SourceType) -> Self {
+        Self {
+            scope,
+            ident,
+            source_type,
+            needed_props: HashSet::new(),
+            pushable_preds: HashMap::new(),
+            subjects: HashSet::new(),
+        }
+    }
+
     fn push_needed_props(&mut self, path: &Vec<String>) {
         if path.is_empty() {
             return;
@@ -90,26 +119,52 @@ impl ScopedRequirements {
 
         self.needed_props.insert(path.clone());
     }
+
+    fn push_subject(&mut self, new_sub: &Subject) {
+        if let SourceType::Subject(sub) = &self.source_type
+            && sub == new_sub
+        {
+            return;
+        }
+
+        self.subjects.insert(new_sub.clone());
+    }
 }
 
 #[derive(Default)]
 struct CollectRequirements {
     context: ContextFrame,
+    sources: Vec<SourceDecl>,
     parent_queries: HashMap<u64, ParentQuery>,
     scoped_reqs: HashMap<u64, HashMap<String, ScopedRequirements>>,
+}
+
+impl CollectRequirements {
+    fn create_requirement(&mut self, scope: u64, ident: &str, source_type: SourceType) {
+        self.scoped_reqs.entry(scope).or_default().insert(
+            ident.to_string(),
+            ScopedRequirements::new(scope, ident.to_string(), source_type),
+        );
+    }
+
+    fn get_requirement_mut(&mut self, scope: u64, ident: &str) -> &mut ScopedRequirements {
+        self.scoped_reqs
+            .get_mut(&scope)
+            .expect("unexistent scope")
+            .get_mut(ident)
+            .expect("missing requirement")
+    }
 }
 
 impl QueryVisitor for CollectRequirements {
     type Inner<'a> = CollectRequirementsFromExpr<'a>;
 
+    fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {
+        self.create_requirement(attrs.scope, ident, SourceType::Events);
+    }
+
     fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {
-        self.scoped_reqs
-            .entry(attrs.scope)
-            .or_default()
-            .entry(ident.to_string())
-            .or_default()
-            .subjects
-            .insert(subject.clone());
+        self.create_requirement(attrs.scope, ident, SourceType::Subject(subject.clone()));
     }
 
     fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str, query: &Query) -> bool {
@@ -120,6 +175,8 @@ impl QueryVisitor for CollectRequirements {
                 ident: ident.to_string(),
             },
         );
+
+        self.create_requirement(attrs.scope, ident, SourceType::Subquery(query.attrs.scope));
 
         true
     }
@@ -143,28 +200,16 @@ struct CollectRequirementsFromExpr<'a> {
 
 impl ExprVisitor for CollectRequirementsFromExpr<'_> {
     fn on_var(&mut self, attrs: &NodeAttributes, var: &Var) {
-        let reqs = self
-            .inner
-            .scoped_reqs
-            .entry(attrs.scope)
-            .or_default()
-            .entry(var.name.clone())
-            .or_default();
-
-        reqs.push_needed_props(&var.path);
+        self.inner
+            .get_requirement_mut(attrs.scope, &var.name)
+            .push_needed_props(&var.path);
     }
 
     fn exit_field(&mut self, attrs: &NodeAttributes, label: &str, value: &Expr) {
         if let Value::Var(x) = &value.value {
-            let reqs = self
-                .inner
-                .scoped_reqs
-                .entry(attrs.scope)
-                .or_default()
-                .entry(x.name.clone())
-                .or_default();
-
-            reqs.push_needed_props(&x.path);
+            self.inner
+                .get_requirement_mut(attrs.scope, &x.name)
+                .push_needed_props(&x.path);
         }
     }
 
@@ -184,13 +229,7 @@ impl ExprVisitor for CollectRequirementsFromExpr<'_> {
                     return;
                 }
 
-                let reqs = self
-                    .inner
-                    .scoped_reqs
-                    .entry(attrs.scope)
-                    .or_default()
-                    .entry(x.name.clone())
-                    .or_default();
+                let reqs = self.inner.get_requirement_mut(attrs.scope, &x.name);
 
                 match value {
                     Value::Literal(lit) => {
@@ -198,7 +237,7 @@ impl ExprVisitor for CollectRequirementsFromExpr<'_> {
                             && x.path.as_slice() == ["subject"]
                             && op == &Operation::Equal
                         {
-                            reqs.subjects.insert(sub.clone());
+                            reqs.push_subject(&sub);
                         }
                     }
 
@@ -238,13 +277,7 @@ impl ExprVisitor for CollectRequirementsFromExpr<'_> {
                 return;
             }
 
-            let reqs = self
-                .inner
-                .scoped_reqs
-                .entry(attrs.scope)
-                .or_default()
-                .entry(x.name.clone())
-                .or_default();
+            let reqs = self.inner.get_requirement_mut(attrs.scope, &x.name);
 
             reqs.pushable_preds
                 .entry(x.path.clone())

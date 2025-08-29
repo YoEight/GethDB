@@ -184,6 +184,13 @@ impl Typecheck {
 impl QueryVisitorMut for Typecheck {
     type Inner<'a> = TypecheckExpr<'a>;
 
+    fn exit_query_mut(&mut self) -> crate::Result<()> {
+        // TODO - Detect that the subquery  is projecting the fields that we are expecting in the
+        // parent query. If not then it becomes a type error.
+
+        Ok(())
+    }
+
     fn enter_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
@@ -195,7 +202,7 @@ impl QueryVisitorMut for Typecheck {
         Ok(())
     }
 
-    fn expr_visitor_mut<'a>(&'a mut self) -> Self::Inner<'a> {
+    fn expr_visitor_mut(&mut self) -> Self::Inner<'_> {
         TypecheckExpr { inner: self }
     }
 }
