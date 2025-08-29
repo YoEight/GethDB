@@ -1,18 +1,18 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    Expr, Literal, Operation, Pos, Query, Scopes, Var,
-    error::InferError,
-    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut},
+    error::InferError, parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut}, Expr, Literal, Operation, Pos, Query,
+    Scopes,
+    Var,
 };
 
-pub struct InferedQuery {
+pub struct InferredQuery {
     assumptions: Assumptions,
     scopes: Scopes,
     query: Query,
 }
 
-impl InferedQuery {
+impl InferredQuery {
     pub fn assumptions(&self) -> &Assumptions {
         &self.assumptions
     }
@@ -101,7 +101,7 @@ impl Assumptions {
     }
 }
 
-pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
+pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferredQuery> {
     let mut inner = HashMap::new();
 
     for scope in scopes.iter() {
@@ -140,7 +140,7 @@ pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
 
     query.dfs_post_order_mut(&mut type_check)?;
 
-    Ok(InferedQuery {
+    Ok(InferredQuery {
         assumptions: Assumptions {
             inner: type_check.assumptions,
         },

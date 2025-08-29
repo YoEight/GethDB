@@ -1,8 +1,8 @@
 use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
 use crate::{
-    Pos, Type,
-    sym::{Literal, Operation},
+    sym::{Literal, Operation}, Pos,
+    Type,
 };
 
 #[derive(Copy, Clone)]
@@ -361,6 +361,14 @@ impl Expr {
         }
 
         None
+    }
+
+    pub fn is_literal(&self) -> bool {
+        if let Value::Literal(_) = self.value {
+            return true;
+        }
+
+        false
     }
 
     pub fn as_i64_literal(&self) -> Option<i64> {
