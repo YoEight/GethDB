@@ -1,9 +1,9 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    error::InferError, parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut}, Expr, Literal, Operation, Pos, Query,
-    Scopes,
-    Var,
+    Expr, Literal, Operation, Pos, Query, Scopes, Var,
+    error::InferError,
+    parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut},
 };
 
 pub struct InferredQuery {
