@@ -1,6 +1,4 @@
-use crate::process::query::requirements::{
-    ParentQuery, Requirements, ScopedRequirements,
-};
+use crate::process::query::requirements::{ParentQuery, Requirements, ScopedRequirements};
 use crate::reading::Streaming;
 use crate::{ReaderClient, RequestContext};
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
@@ -99,7 +97,8 @@ impl QueryStream {
                                 let stream_name = if reqs.subjects.is_empty() {
                                     sub.to_string()
                                 } else {
-                                    sub.common_subject(reqs.subjects.iter().collect()).to_string()
+                                    sub.common_subject(reqs.subjects.iter().collect())
+                                        .to_string()
                                 };
 
                                 let resp = self
@@ -118,7 +117,9 @@ impl QueryStream {
                                         eyre::bail!("stream '{}' was deleted", sub);
                                     }
 
-                                    ReadStreamCompleted::Success(s) => DataStream::from_streaming(s),
+                                    ReadStreamCompleted::Success(s) => {
+                                        DataStream::from_streaming(s)
+                                    }
                                 }
                             }
 
@@ -126,7 +127,8 @@ impl QueryStream {
                                 let stream_name = if reqs.subjects.is_empty() {
                                     "$all".to_string()
                                 } else {
-                                    Subject::from_subjects(reqs.subjects.iter().collect()).to_string()
+                                    Subject::from_subjects(reqs.subjects.iter().collect())
+                                        .to_string()
                                 };
 
                                 let s = self
@@ -138,7 +140,8 @@ impl QueryStream {
                                         Direction::Forward,
                                         usize::MAX,
                                     )
-                                    .await?.success()?;
+                                    .await?
+                                    .success()?;
 
                                 DataStream::from_streaming(s)
                             }

@@ -1,6 +1,6 @@
 use crate::{
-    sym::{Literal, Operation}, Pos,
-    Type,
+    Pos, Type,
+    sym::{Literal, Operation},
 };
 use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
