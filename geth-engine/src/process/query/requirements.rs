@@ -4,16 +4,9 @@ use geth_eventql::{
 };
 use std::collections::{HashMap, HashSet};
 
-#[derive(PartialEq, Eq, Clone)]
-pub enum SourceType {
-    Subject(Subject),
-    Events,
-    Subquery(u64),
-}
 pub struct SourceDecl {
     pub scope: u64,
     pub ident: String,
-    pub r#type: SourceType,
 }
 
 pub struct Requirements {
@@ -41,18 +34,16 @@ pub struct ParentQuery {
 pub struct ScopedRequirements {
     pub scope: u64,
     pub ident: String,
-    pub source_type: SourceType,
     pub needed_props: HashSet<Vec<String>>,
     pub pushable_preds: HashMap<Vec<String>, Vec<Expr>>,
     pub subjects: HashSet<Subject>,
 }
 
 impl ScopedRequirements {
-    fn new(scope: u64, ident: String, source_type: SourceType) -> Self {
+    fn new(scope: u64, ident: String) -> Self {
         Self {
             scope,
             ident,
-            source_type,
             needed_props: HashSet::new(),
             pushable_preds: HashMap::new(),
             subjects: HashSet::new(),
@@ -68,12 +59,6 @@ impl ScopedRequirements {
     }
 
     fn push_subject(&mut self, new_sub: &Subject) {
-        if let SourceType::Subject(sub) = &self.source_type
-            && sub == new_sub
-        {
-            return;
-        }
-
         self.subjects.insert(new_sub.clone());
     }
 }
@@ -87,10 +72,10 @@ struct CollectRequirements {
 }
 
 impl CollectRequirements {
-    fn create_requirement(&mut self, scope: u64, ident: &str, source_type: SourceType) {
+    fn create_requirement(&mut self, scope: u64, ident: &str) {
         self.scoped_reqs.entry(scope).or_default().insert(
             ident.to_string(),
-            ScopedRequirements::new(scope, ident.to_string(), source_type),
+            ScopedRequirements::new(scope, ident.to_string()),
         );
     }
 
@@ -107,11 +92,11 @@ impl QueryVisitor for CollectRequirements {
     type Inner<'a> = CollectRequirementsFromExpr<'a>;
 
     fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {
-        self.create_requirement(attrs.scope, ident, SourceType::Events);
+        self.create_requirement(attrs.scope, ident);
     }
 
-    fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {
-        self.create_requirement(attrs.scope, ident, SourceType::Subject(subject.clone()));
+    fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, _: &Subject) {
+        self.create_requirement(attrs.scope, ident);
     }
 
     fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str, query: &Query) -> bool {
@@ -123,7 +108,7 @@ impl QueryVisitor for CollectRequirements {
             },
         );
 
-        self.create_requirement(attrs.scope, ident, SourceType::Subquery(query.attrs.scope));
+        self.create_requirement(attrs.scope, ident);
 
         true
     }

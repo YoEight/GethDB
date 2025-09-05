@@ -1,9 +1,8 @@
-use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
-
 use crate::{
-    Pos, Type,
-    sym::{Literal, Operation},
+    sym::{Literal, Operation}, Pos,
+    Type,
 };
+use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
 #[derive(Copy, Clone)]
 pub struct NodeAttributes {
@@ -237,7 +236,7 @@ fn on_expr<V: QueryVisitor>(visitor: &mut V, expr: &Expr) {
     expr.dfs_post_order(&mut expr_visitor);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
 pub struct Subject {
     pub(crate) inner: Vec<String>,
 }
@@ -261,6 +260,41 @@ impl Subject {
 
     pub fn path(&self) -> &[String] {
         self.inner.as_slice()
+    }
+
+    pub fn common_subject(&self, others: Vec<&Subject>) -> Self {
+        if others.is_empty() {
+            return self.clone();
+        }
+
+        let mut new_sub = Self::default();
+        let mut depth = 0usize;
+
+        for seg in &self.inner {
+            for other in &others {
+                match other.inner.get(depth) {
+                    None => return new_sub,
+                    Some(other_seg) => {
+                        if seg != other_seg {
+                            return new_sub;
+                        }
+                    }
+                }
+            }
+
+            new_sub.inner.push(seg.clone());
+            depth += 1;
+        }
+
+        new_sub
+    }
+
+    pub fn from_subjects(mut subs: Vec<&Subject>) -> Self {
+        if let Some(sub) = subs.pop() {
+            return sub.common_subject(subs);
+        }
+
+        Self::default()
     }
 }
 

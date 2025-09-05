@@ -1,10 +1,10 @@
 use crate::process::query::requirements::{
-    ParentQuery, Requirements, ScopedRequirements, SourceType,
+    ParentQuery, Requirements, ScopedRequirements,
 };
 use crate::reading::Streaming;
 use crate::{ReaderClient, RequestContext};
 use geth_common::{Direction, ReadStreamCompleted, Record, Revision};
-use geth_eventql::Query;
+use geth_eventql::{Query, SourceType, Subject};
 use std::collections::HashMap;
 
 struct N<A> {
@@ -21,10 +21,31 @@ impl<A> N<A> {
     }
 }
 
-struct Source {
+struct DataStream {
+    sub_query_scope: u64,
+    streaming: Option<Streaming>,
+}
+
+impl DataStream {
+    fn from_streaming(streaming: Streaming) -> Self {
+        Self {
+            sub_query_scope: 0,
+            streaming: Some(streaming),
+        }
+    }
+
+    fn from_sub_query(scope: u64) -> Self {
+        Self {
+            sub_query_scope: scope,
+            streaming: None,
+        }
+    }
+}
+
+struct DataProvider {
     parent_query: Option<ParentQuery>,
     requirements: ScopedRequirements,
-    streaming: Streaming,
+    data_stream: DataStream,
 }
 
 enum State {
@@ -39,7 +60,7 @@ struct Binding {
 
 #[derive(Default)]
 struct Sources {
-    inner: HashMap<Binding, Source>,
+    inner: HashMap<u64, HashMap<Binding, DataProvider>>,
 }
 
 pub struct QueryStream {
@@ -55,114 +76,103 @@ impl QueryStream {
         loop {
             match self.state {
                 State::Init => {
-                    self.init_sources().await;
+                    self.init_sources().await?;
                 }
             }
         }
     }
 
     async fn init_sources(&mut self) -> eyre::Result<()> {
-        let mut stack = vec![N::new(&self.query)];
+        let mut stack = vec![&self.query];
         let mut sources = Sources::default();
 
-        while let Some(mut item) = stack.pop() {
-            if item.visited {
-                continue;
-            }
-
-            let stmts = item.node.from_stmts.iter();
-            let query_scope = item.node.attrs.scope;
-            item.visited = true;
-            stack.push(item);
+        while let Some(query) = stack.pop() {
+            let stmts = query.from_stmts.iter();
+            let query_scope = query.attrs.scope;
+            stack.push(query);
 
             for stmt in stmts {
                 if let Some(idents) = self.requirements.scoped_reqs.get(&stmt.attrs.scope) {
                     if let Some(reqs) = idents.get(&stmt.ident) {
-                        match &reqs.source_type {
+                        let data_stream = match &stmt.source.inner {
                             SourceType::Subject(sub) => {
+                                let stream_name = if reqs.subjects.is_empty() {
+                                    sub.to_string()
+                                } else {
+                                    sub.common_subject(reqs.subjects.iter().collect()).to_string()
+                                };
+
                                 let resp = self
                                     .client
                                     .read(
                                         self.ctx.clone(),
-                                        &sub.to_string(),
+                                        &stream_name,
                                         Revision::Start,
                                         Direction::Forward,
                                         usize::MAX,
                                     )
                                     .await?;
 
-                                let streaming = match resp {
+                                match resp {
                                     ReadStreamCompleted::StreamDeleted => {
                                         eyre::bail!("stream '{}' was deleted", sub);
                                     }
 
-                                    ReadStreamCompleted::Success(s) => s,
-                                };
-
-                                sources.inner.insert(
-                                    Binding {
-                                        scope: stmt.attrs.scope,
-                                        ident: stmt.ident.to_string(),
-                                    },
-                                    Source {
-                                        parent_query: self
-                                            .requirements
-                                            .parent_queries
-                                            .get(&query_scope)
-                                            .cloned(),
-
-                                        requirements: self
-                                            .requirements
-                                            .scoped_reqs
-                                            .get(&stmt.attrs.scope)
-                                            .unwrap()
-                                            .get(&stmt.ident)
-                                            .cloned()
-                                            .unwrap(),
-                                        streaming,
-                                    },
-                                );
+                                    ReadStreamCompleted::Success(s) => DataStream::from_streaming(s),
+                                }
                             }
 
                             SourceType::Events => {
-                                let streaming = self
+                                let stream_name = if reqs.subjects.is_empty() {
+                                    "$all".to_string()
+                                } else {
+                                    Subject::from_subjects(reqs.subjects.iter().collect()).to_string()
+                                };
+
+                                let s = self
                                     .client
                                     .read(
                                         self.ctx.clone(),
-                                        "$all",
+                                        &stream_name,
                                         Revision::Start,
                                         Direction::Forward,
                                         usize::MAX,
                                     )
                                     .await?.success()?;
 
-                                sources.inner.insert(
-                                    Binding {
-                                        scope: stmt.attrs.scope,
-                                        ident: stmt.ident.to_string(),
-                                    },
-                                    Source {
-                                        parent_query: self
-                                            .requirements
-                                            .parent_queries
-                                            .get(&query_scope)
-                                            .cloned(),
-
-                                        requirements: self
-                                            .requirements
-                                            .scoped_reqs
-                                            .get(&stmt.attrs.scope)
-                                            .unwrap()
-                                            .get(&stmt.ident)
-                                            .cloned()
-                                            .unwrap(),
-                                        streaming,
-                                    },
-                                );
+                                DataStream::from_streaming(s)
                             }
 
-                            SourceType::Subquery(query) => {}
-                        }
+                            SourceType::Subquery(sub_query) => {
+                                let sub_query_scope = sub_query.attrs.scope;
+                                stack.push(sub_query);
+                                DataStream::from_sub_query(sub_query_scope)
+                            }
+                        };
+
+                        sources.inner.entry(query_scope).or_default().insert(
+                            Binding {
+                                scope: stmt.attrs.scope,
+                                ident: stmt.ident.to_string(),
+                            },
+                            DataProvider {
+                                parent_query: self
+                                    .requirements
+                                    .parent_queries
+                                    .get(&query_scope)
+                                    .cloned(),
+
+                                requirements: self
+                                    .requirements
+                                    .scoped_reqs
+                                    .get(&stmt.attrs.scope)
+                                    .unwrap()
+                                    .get(&stmt.ident)
+                                    .cloned()
+                                    .unwrap(),
+                                data_stream,
+                            },
+                        );
                     }
                 }
             }
