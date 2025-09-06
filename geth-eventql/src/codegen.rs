@@ -1,4 +1,62 @@
-use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Query, QueryVisitor, Var};
+use crate::{Expr, ExprVisitor, Literal, NodeAttributes, Operation, Subject, Var, Where};
+
+pub trait IntoLiteral {
+    fn into_literal(self) -> Literal;
+}
+
+impl IntoLiteral for String {
+    fn into_literal(self) -> Literal {
+        Literal::String(self)
+    }
+}
+
+impl IntoLiteral for &'_ str {
+    fn into_literal(self) -> Literal {
+        Literal::String(self.to_string())
+    }
+}
+
+impl IntoLiteral for &'_ String {
+    fn into_literal(self) -> Literal {
+        Literal::String(self.to_string())
+    }
+}
+
+impl IntoLiteral for u64 {
+    fn into_literal(self) -> Literal {
+        Literal::Integral(self as i64)
+    }
+}
+
+impl IntoLiteral for i64 {
+    fn into_literal(self) -> Literal {
+        Literal::Integral(self)
+    }
+}
+
+impl IntoLiteral for usize {
+    fn into_literal(self) -> Literal {
+        Literal::Integral(self as i64)
+    }
+}
+
+impl IntoLiteral for Literal {
+    fn into_literal(self) -> Literal {
+        self
+    }
+}
+
+impl IntoLiteral for Subject {
+    fn into_literal(self) -> Literal {
+        Literal::Subject(self)
+    }
+}
+
+impl IntoLiteral for &'_ Subject {
+    fn into_literal(self) -> Literal {
+        Literal::Subject(self.clone())
+    }
+}
 
 pub enum Instr {
     Push(Literal),
@@ -9,50 +67,82 @@ pub enum Instr {
     Call(String),
 }
 
-pub fn codegen(query: &Query) -> Vec<Instr> {
-    let mut state = Codegen::default();
+impl Instr {
+    fn lit(value: impl IntoLiteral) -> Self {
+        Instr::Push(value.into_literal())
+    }
+}
 
-    query.dfs_post_order(&mut state);
+pub fn codegen_where_clause(where_clause: &Where) -> Vec<Instr> {
+    let mut state = ExprCodegen::default();
 
-    state.instrs
+    where_clause.expr.dfs_post_order(&mut state);
+
+    state.emit.inner
 }
 
 #[derive(Default)]
-pub struct Codegen {
-    instrs: Vec<Instr>,
+struct Emit {
+    inner: Vec<Instr>,
 }
 
-impl QueryVisitor for Codegen {
-    type Inner<'a> = ExprCodegen<'a>;
+impl Emit {
+    fn push<L>(&mut self, lit: L)
+    where
+        L: IntoLiteral,
+    {
+        self.inner.push(Instr::lit(lit));
+    }
 
-    fn expr_visitor<'a>(&'a mut self) -> Self::Inner<'a> {
-        ExprCodegen { inner: self }
+    fn load(&mut self, var: Var) {
+        self.inner.push(Instr::LoadVar(var.clone()));
+    }
+
+    fn rec(&mut self, siz: usize) {
+        self.inner.push(Instr::Rec(siz));
+    }
+
+    fn array(&mut self, siz: usize) {
+        self.inner.push(Instr::Array(siz));
+    }
+
+    fn call(&mut self, name: &str) {
+        self.inner.push(Instr::Call(name.to_string()));
+    }
+
+    fn op(&mut self, op: Operation) {
+        self.inner.push(Instr::Operation(op));
     }
 }
 
-pub struct ExprCodegen<'a> {
-    inner: &'a mut Codegen,
+#[derive(Default)]
+pub struct ExprCodegen {
+    emit: Emit,
 }
 
-impl ExprVisitor for ExprCodegen<'_> {
+impl ExprVisitor for ExprCodegen {
     fn on_literal(&mut self, _attrs: &NodeAttributes, lit: &Literal) {
-        self.inner.instrs.push(Instr::Push(lit.clone()));
+        self.emit.push(lit.clone());
     }
 
     fn on_var(&mut self, _attrs: &NodeAttributes, var: &Var) {
-        self.inner.instrs.push(Instr::LoadVar(var.clone()));
-    }
-
-    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &[Expr]) {
-        self.inner.instrs.push(Instr::Rec(record.len()));
+        self.emit.load(var.clone());
     }
 
     fn exit_array(&mut self, _attrs: &NodeAttributes, values: &[Expr]) {
-        self.inner.instrs.push(Instr::Array(values.len()));
+        self.emit.array(values.len());
+    }
+
+    fn exit_field(&mut self, _attrs: &NodeAttributes, label: &str, _value: &Expr) {
+        self.emit.push(label);
+    }
+
+    fn exit_record(&mut self, _attrs: &NodeAttributes, record: &[Expr]) {
+        self.emit.rec(record.len());
     }
 
     fn exit_app(&mut self, _attrs: &NodeAttributes, name: &str, _params: &[Expr]) {
-        self.inner.instrs.push(Instr::Call(name.to_string()));
+        self.emit.call(name);
     }
 
     fn exit_binary_op(
@@ -62,10 +152,10 @@ impl ExprVisitor for ExprCodegen<'_> {
         _lhs: &Expr,
         _rhs: &Expr,
     ) {
-        self.inner.instrs.push(Instr::Operation(*op));
+        self.emit.op(*op);
     }
 
     fn exit_unary_op(&mut self, _attrs: &NodeAttributes, op: &Operation, _expr: &Expr) {
-        self.inner.instrs.push(Instr::Operation(*op));
+        self.emit.op(*op);
     }
 }

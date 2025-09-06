@@ -1,9 +1,8 @@
-use std::{fmt::Display, ptr::NonNull};
-
 use crate::{
     Pos, Type,
     sym::{Literal, Operation},
 };
+use std::{collections::VecDeque, fmt::Display, ptr::NonNull};
 
 #[derive(Copy, Clone)]
 pub struct NodeAttributes {
@@ -39,6 +38,13 @@ impl Query {
 
     pub fn dfs_post_order<V: QueryVisitor>(&self, visitor: &mut V) {
         query_dfs_post_order(vec![Item::new(self)], visitor);
+    }
+
+    pub fn dfs_pre_order<V: QueryVisitor>(&self, visitor: &mut V) {
+        let mut queue = VecDeque::new();
+        queue.push_back(self);
+
+        query_dfs_pre_order(queue, visitor);
     }
 }
 
@@ -115,14 +121,63 @@ fn on_expr_mut<V: QueryVisitorMut>(visitor: &mut V, expr: &mut Expr) -> crate::R
     expr.dfs_post_order_mut(&mut expr_visitor)
 }
 
+fn query_dfs_pre_order<V: QueryVisitor>(mut queue: VecDeque<&Query>, visitor: &mut V) {
+    while let Some(query) = queue.pop_front() {
+        visitor.enter_query(&query.attrs);
+
+        for from_stmt in query.from_stmts.iter() {
+            visitor.enter_from(&from_stmt.attrs, &from_stmt.ident);
+
+            match &from_stmt.source.inner {
+                SourceType::Events => visitor.on_source_events(&from_stmt.attrs, &from_stmt.ident),
+
+                SourceType::Subject(subject) => {
+                    visitor.on_source_subject(&from_stmt.attrs, &from_stmt.ident, subject)
+                }
+
+                SourceType::Subquery(query) => {
+                    if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident, query) {
+                        queue.push_back(query);
+                    }
+                }
+            }
+
+            visitor.exit_source(&from_stmt.source.attrs);
+            visitor.exit_from(&from_stmt.attrs, &from_stmt.ident);
+        }
+
+        if let Some(predicate) = query.predicate.as_ref() {
+            visitor.enter_where_clause(&predicate.attrs, &predicate.expr);
+            on_expr(visitor, &predicate.expr);
+            visitor.exit_where_clause(&predicate.attrs, &predicate.expr);
+        }
+
+        if let Some(expr) = query.group_by.as_ref() {
+            visitor.enter_group_by(expr);
+            on_expr(visitor, expr);
+            visitor.leave_group_by(expr);
+        }
+
+        if let Some(sort) = query.order_by.as_ref() {
+            visitor.enter_order_by(&sort.order, &sort.expr);
+            on_expr(visitor, &sort.expr);
+            visitor.leave_order_by(&sort.order, &sort.expr);
+        }
+
+        visitor.enter_projection(&query.projection);
+        on_expr(visitor, &query.projection);
+        visitor.leave_projection(&query.projection);
+        visitor.exit_query();
+    }
+}
+
 fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &mut V) {
     while let Some(mut item) = stack.pop() {
         let query = item.value;
         if !item.visited {
+            visitor.enter_query(&item.value.attrs);
             item.visited = true;
             stack.push(item);
-
-            visitor.enter_query();
 
             for from_stmt in query.from_stmts.iter() {
                 visitor.enter_from(&from_stmt.attrs, &from_stmt.ident);
@@ -137,7 +192,8 @@ fn query_dfs_post_order<V: QueryVisitor>(mut stack: Vec<Item<Query>>, visitor: &
                     }
 
                     SourceType::Subquery(sub_query) => {
-                        if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident) {
+                        if visitor.on_source_subquery(&from_stmt.attrs, &from_stmt.ident, sub_query)
+                        {
                             stack.push(Item::new(sub_query));
                         }
                     }
@@ -180,7 +236,7 @@ fn on_expr<V: QueryVisitor>(visitor: &mut V, expr: &Expr) {
     expr.dfs_post_order(&mut expr_visitor);
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Ord, PartialOrd, Default)]
 pub struct Subject {
     pub(crate) inner: Vec<String>,
 }
@@ -198,12 +254,53 @@ impl Display for Subject {
 }
 
 impl Subject {
+    pub fn from_path(path: &str) -> Self {
+        Self {
+            inner: vec![path.to_string()],
+        }
+    }
+
     pub fn is_root(&self) -> bool {
         self.inner.is_empty()
     }
 
     pub fn path(&self) -> &[String] {
         self.inner.as_slice()
+    }
+
+    pub fn common_subject(&self, others: Vec<&Subject>) -> Self {
+        if others.is_empty() {
+            return self.clone();
+        }
+
+        let mut new_sub = Self::default();
+        let mut depth = 0usize;
+
+        for seg in &self.inner {
+            for other in &others {
+                match other.inner.get(depth) {
+                    None => return new_sub,
+                    Some(other_seg) => {
+                        if seg != other_seg {
+                            return new_sub;
+                        }
+                    }
+                }
+            }
+
+            new_sub.inner.push(seg.clone());
+            depth += 1;
+        }
+
+        new_sub
+    }
+
+    pub fn from_subjects(mut subs: Vec<&Subject>) -> Self {
+        if let Some(sub) = subs.pop() {
+            return sub.common_subject(subs);
+        }
+
+        Self::default()
     }
 }
 
@@ -257,6 +354,7 @@ pub struct Where {
     pub expr: Expr,
 }
 
+#[derive(Clone)]
 pub struct Expr {
     pub attrs: NodeAttributes,
     pub value: Value,
@@ -303,6 +401,14 @@ impl Expr {
         }
 
         None
+    }
+
+    pub fn is_literal(&self) -> bool {
+        if let Value::Literal(_) = self.value {
+            return true;
+        }
+
+        false
     }
 
     pub fn as_i64_literal(&self) -> Option<i64> {
@@ -610,6 +716,7 @@ impl Display for Var {
     }
 }
 
+#[derive(Clone)]
 pub enum Value {
     Literal(Literal),
 
@@ -896,13 +1003,13 @@ pub trait QueryVisitor {
     where
         Self: 'a;
 
-    fn enter_query(&mut self) {}
+    fn enter_query(&mut self, attrs: &NodeAttributes) {}
     fn exit_query(&mut self) {}
     fn enter_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn exit_from(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn on_source_events(&mut self, attrs: &NodeAttributes, ident: &str) {}
     fn on_source_subject(&mut self, attrs: &NodeAttributes, ident: &str, subject: &Subject) {}
-    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str) -> bool {
+    fn on_source_subquery(&mut self, attrs: &NodeAttributes, ident: &str, query: &Query) -> bool {
         true
     }
     fn exit_source(&mut self, attrs: &NodeAttributes) {}

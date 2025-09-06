@@ -5,7 +5,6 @@ use crate::tokenizer::Lexer;
 
 mod codegen;
 mod error;
-mod eval;
 mod infer;
 mod parser;
 mod rename;
@@ -34,16 +33,15 @@ pub fn parse(query: &str) -> crate::Result<Query> {
     parser::parse(lexer)
 }
 
-pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferedQuery> {
+pub fn parse_rename_and_infer(query: &str) -> crate::Result<InferredQuery> {
     let mut query = parse(query)?;
     let scopes = rename(&mut query)?;
 
     infer(scopes, query)
 }
 
-pub use codegen::{Instr, codegen};
-pub use eval::{Dictionary, Entry, EvalError, eval};
+pub use codegen::{Instr, IntoLiteral, codegen_where_clause};
 pub use infer::infer;
-pub use infer::{Infer, InferedQuery, Type};
+pub use infer::{Infer, InferredQuery, Type};
 pub use rename::rename;
 pub use rename::{Properties, Scope, Scopes};
