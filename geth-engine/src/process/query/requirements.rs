@@ -14,6 +14,16 @@ pub struct Requirements {
     pub scoped_reqs: HashMap<u64, HashMap<String, ScopedRequirements>>,
 }
 
+impl Requirements {
+    pub fn get_requirements(&self, scope: u64, ident: &str) -> &ScopedRequirements {
+        self.scoped_reqs
+            .get(&scope)
+            .expect("unexistent scope")
+            .get(ident)
+            .expect("missing requirement")
+    }
+}
+
 pub fn collect_requirements(query: &Query) -> Requirements {
     let mut collect_reqs = CollectRequirements::default();
     query.dfs_pre_order(&mut collect_reqs);

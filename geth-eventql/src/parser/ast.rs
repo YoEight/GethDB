@@ -254,6 +254,12 @@ impl Display for Subject {
 }
 
 impl Subject {
+    pub fn from_path(path: &str) -> Self {
+        Self {
+            inner: vec![path.to_string()],
+        }
+    }
+
     pub fn is_root(&self) -> bool {
         self.inner.is_empty()
     }
