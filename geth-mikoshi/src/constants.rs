@@ -5,7 +5,7 @@ pub const _CHUNK_FILE_SIZE: usize =
     _aligned_size(CHUNK_SIZE + CHUNK_HEADER_SIZE + CHUNK_FOOTER_SIZE);
 
 const fn _aligned_size(size: usize) -> usize {
-    if size % 4_096 == 0 {
+    if size.is_multiple_of(4_096) {
         return size;
     }
 
