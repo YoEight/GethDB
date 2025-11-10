@@ -664,19 +664,14 @@ pub enum Order {
     Desc,
 }
 
-#[derive(PartialEq, Eq, Copy, Clone)]
+#[derive(PartialEq, Eq, Copy, Clone, Default)]
 pub enum ContextFrame {
+    #[default]
     Unspecified,
     Where,
     GroupBy,
     OrderBy,
     Projection,
-}
-
-impl Default for ContextFrame {
-    fn default() -> Self {
-        Self::Unspecified
-    }
 }
 
 #[allow(unused_variables)]
