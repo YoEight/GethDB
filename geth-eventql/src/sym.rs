@@ -85,6 +85,7 @@ pub enum Literal {
     Float(f64),
     Bool(bool),
     Subject(Subject),
+    Null,
 }
 
 impl Literal {
@@ -123,6 +124,7 @@ impl Display for Literal {
             Literal::Float(float) => write!(f, "{float}"),
             Literal::Bool(b) => write!(f, "{b}"),
             Literal::Subject(sub) => write!(f, "{sub}"),
+            Literal::Null => write!(f, "NULL"),
         }
     }
 }

@@ -6,13 +6,13 @@ use crate::{
     parser::{ExprVisitorMut, NodeAttributes, QueryVisitorMut},
 };
 
-pub struct InferedQuery {
+pub struct InferredQuery {
     assumptions: Assumptions,
     scopes: Scopes,
     query: Query,
 }
 
-impl InferedQuery {
+impl InferredQuery {
     pub fn assumptions(&self) -> &Assumptions {
         &self.assumptions
     }
@@ -80,6 +80,7 @@ impl Type {
             Literal::Float(_) => Type::Float,
             Literal::Bool(_) => Type::Bool,
             Literal::Subject(_) => Type::Subject,
+            Literal::Null => Type::Unspecified,
         }
     }
 }
@@ -100,7 +101,7 @@ impl Assumptions {
     }
 }
 
-pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
+pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferredQuery> {
     let mut inner = HashMap::new();
 
     for scope in scopes.iter() {
@@ -139,7 +140,7 @@ pub fn infer(scopes: Scopes, mut query: Query) -> crate::Result<InferedQuery> {
 
     query.dfs_post_order_mut(&mut type_check)?;
 
-    Ok(InferedQuery {
+    Ok(InferredQuery {
         assumptions: Assumptions {
             inner: type_check.assumptions,
         },
@@ -183,6 +184,13 @@ impl Typecheck {
 impl QueryVisitorMut for Typecheck {
     type Inner<'a> = TypecheckExpr<'a>;
 
+    fn exit_query_mut(&mut self) -> crate::Result<()> {
+        // TODO - Detect that the subquery  is projecting the fields that we are expecting in the
+        // parent query. If not then it becomes a type error.
+
+        Ok(())
+    }
+
     fn enter_where_clause_mut(
         &mut self,
         attrs: &mut NodeAttributes,
@@ -194,7 +202,7 @@ impl QueryVisitorMut for Typecheck {
         Ok(())
     }
 
-    fn expr_visitor_mut<'a>(&'a mut self) -> Self::Inner<'a> {
+    fn expr_visitor_mut(&mut self) -> Self::Inner<'_> {
         TypecheckExpr { inner: self }
     }
 }

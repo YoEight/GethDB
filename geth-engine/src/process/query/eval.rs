@@ -1,19 +1,130 @@
 use std::collections::HashMap;
 
-use crate::{Instr, Literal, Operation, Var};
+use geth_eventql::{Instr, IntoLiteral, Literal, Operation, Subject, Var};
 
-pub enum EvalError {
-    UnexpectedRuntimeError,
-    UnexpectedVarNotFoundError(Var),
+pub struct Mapping {
+    spec_revision: String,
+    id: String,
+    time: String,
+    source: String,
+    subject: Subject,
+    r#type: String,
+    data_content_type: String,
+    data: Option<serde_json::Value>,
+    predecessorhash: String,
+    hash: String,
+    cache: HashMap<String, Literal>,
 }
 
+#[derive(Default)]
+struct Scope {
+    inner: HashMap<String, Mapping>,
+}
+
+#[derive(Default)]
 pub struct Dictionary {
-    pub inner: HashMap<String, Literal>,
+    inner: HashMap<u64, Scope>,
 }
 
 impl Dictionary {
-    fn lookup(&self, _var: &Var) -> Result<Literal> {
-        todo!()
+    pub fn insert(&mut self, scope: u64, name: &str, m: Mapping) {
+        self.inner
+            .entry(scope)
+            .or_default()
+            .inner
+            .insert(name.to_string(), m);
+    }
+
+    pub fn lookup(&mut self, scope: u64, var: &Var, stack: &mut Stack) {
+        let mapping = if let Some(m) = self
+            .inner
+            .get_mut(&scope)
+            .and_then(|s| s.inner.get_mut(var.name.as_str()))
+        {
+            m
+        } else {
+            return;
+        };
+
+        let mut path_iter = var.path.iter();
+
+        let path = if let Some(p) = path_iter.next() {
+            p
+        } else {
+            todo!(
+                "implement producing a record when the user is asking for returning the whole thing"
+            );
+        };
+
+        if path == "specrevision" {
+            stack.push_literal(&mapping.spec_revision);
+            return;
+        }
+
+        if path == "id" {
+            stack.push_literal(&mapping.id);
+            return;
+        }
+
+        if path == "time" {
+            stack.push_literal(&mapping.time);
+            return;
+        }
+
+        if path == "source" {
+            stack.push_literal(&mapping.source);
+            return;
+        }
+
+        if path == "subject" {
+            stack.push_literal(&mapping.subject);
+            return;
+        }
+
+        if path == "type" {
+            stack.push_literal(&mapping.r#type);
+            return;
+        }
+
+        if path == "datacontenttype" {
+            stack.push_literal(&mapping.data_content_type);
+            return;
+        }
+
+        if path == "predecessorhash" {
+            stack.push_literal(&mapping.predecessorhash);
+            return;
+        }
+
+        if path == "hash" {
+            stack.push_literal(&mapping.hash);
+            return;
+        }
+
+        if path == "data" {
+            if let Some(mut payload) = mapping.data.as_ref() {
+                let mut cache_key = String::new();
+
+                while let Some(seg) = path_iter.next() {
+                    if let serde_json::Value::Object(obj) = &payload
+                        && let Some(value) = obj.get(seg)
+                    {
+                        payload = value;
+                        cache_key.push(':');
+                        cache_key.push_str(seg);
+                        continue;
+                    }
+
+                    stack.push_null();
+                    return;
+                }
+            }
+
+            stack.push_null();
+            return;
+        }
+
+        stack.push_null();
     }
 }
 
@@ -22,87 +133,96 @@ pub enum Either<A, B> {
     Right(B),
 }
 
-type Result<A> = std::result::Result<A, EvalError>;
-
 pub struct Rec {
-    pub fields: HashMap<String, Entry>,
+    pub fields: HashMap<String, Item>,
 }
 
-pub enum Entry {
+pub enum Item {
     Literal(Literal),
-    Array(Vec<Entry>),
+    Array(Vec<Item>),
     Record(Rec),
 }
 
 #[derive(Default)]
 pub struct Stack {
-    inner: Vec<Entry>,
+    inner: Vec<Item>,
 }
 
 impl Stack {
-    fn pop(&mut self) -> Option<Entry> {
+    fn pop(&mut self) -> Option<Item> {
         self.inner.pop()
     }
 
-    fn pop_or_bail(&mut self) -> Result<Entry> {
+    fn pop_or_bail(&mut self) -> Option<Item> {
         if let Some(item) = self.pop() {
-            return Ok(item);
+            return Some(item);
         }
 
-        Err(EvalError::UnexpectedRuntimeError)
+        None
     }
 
-    fn pop_as_literal_or_bail(&mut self) -> Result<Literal> {
-        match self.pop_or_bail()? {
-            Entry::Literal(lit) => Ok(lit),
-            _ => Err(EvalError::UnexpectedRuntimeError),
+    fn pop_as_literal_or_bail(&mut self) -> Option<Literal> {
+        if let Item::Literal(lit) = self.pop_or_bail()? {
+            return Some(lit);
         }
+
+        None
     }
 
-    fn pop_as_string_or_bail(&mut self) -> Result<String> {
+    fn pop_as_string_or_bail(&mut self) -> Option<String> {
+        if let Literal::String(s) = self.pop_as_literal_or_bail()? {
+            return Some(s);
+        }
+
+        None
+    }
+
+    fn pop_as_number_or_bail(&mut self) -> Option<Either<i64, f64>> {
         match self.pop_as_literal_or_bail()? {
-            Literal::String(s) => Ok(s),
-            _ => Err(EvalError::UnexpectedRuntimeError),
+            Literal::Integral(i) => Some(Either::Left(i)),
+            Literal::Float(f) => Some(Either::Right(f)),
+            _ => None,
         }
     }
 
-    fn pop_as_number_or_bail(&mut self) -> Result<Either<i64, f64>> {
-        match self.pop_as_literal_or_bail()? {
-            Literal::Integral(i) => Ok(Either::Left(i)),
-            Literal::Float(f) => Ok(Either::Right(f)),
-            _ => Err(EvalError::UnexpectedRuntimeError),
-        }
-    }
-
-    fn pop_as_bool_or_bail(&mut self) -> Result<bool> {
-        match self.pop_as_literal_or_bail()? {
-            Literal::Bool(b) => Ok(b),
-            _ => Err(EvalError::UnexpectedRuntimeError),
-        }
-    }
-
-    fn pop_as_array_or_bail(&mut self) -> Result<Vec<Entry>> {
-        if let Entry::Array(xs) = self.pop_or_bail()? {
-            return Ok(xs);
+    fn pop_as_bool_or_bail(&mut self) -> Option<bool> {
+        if let Literal::Bool(b) = self.pop_as_literal_or_bail()? {
+            return Some(b);
         }
 
-        Err(EvalError::UnexpectedRuntimeError)
+        None
     }
 
-    fn push_literal(&mut self, lit: Literal) {
-        self.inner.push(Entry::Literal(lit));
+    fn pop_as_array_or_bail(&mut self) -> Option<Vec<Item>> {
+        if let Item::Array(xs) = self.pop_or_bail()? {
+            return Some(xs);
+        }
+
+        None
     }
 
-    fn push_array(&mut self, array: Vec<Entry>) {
-        self.inner.push(Entry::Array(array));
+    fn push_literal(&mut self, lit: impl IntoLiteral) {
+        self.inner.push(Item::Literal(lit.into_literal()));
+    }
+
+    fn push_array(&mut self, array: Vec<Item>) {
+        self.inner.push(Item::Array(array));
     }
 
     fn push_record(&mut self, rec: Rec) {
-        self.inner.push(Entry::Record(rec));
+        self.inner.push(Item::Record(rec));
+    }
+
+    fn push_null(&mut self) {
+        self.inner.push(Item::Literal(Literal::Null));
     }
 }
 
-pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
+pub fn eval_where_clause(dict: &mut Dictionary, scope: u64, instrs: Vec<Instr>) -> bool {
+    eval_where_clause_opt(dict, scope, instrs).unwrap_or_default()
+}
+
+fn eval_where_clause_opt(dict: &mut Dictionary, scope: u64, instrs: Vec<Instr>) -> Option<bool> {
     let mut stack = Stack::default();
 
     for instr in instrs {
@@ -110,8 +230,7 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
             Instr::Push(lit) => stack.push_literal(lit),
 
             Instr::LoadVar(var) => {
-                let lit = dict.lookup(&var)?;
-                stack.push_literal(lit);
+                dict.lookup(scope, &var, &mut stack);
             }
 
             Instr::Operation(op) => match op {
@@ -149,46 +268,46 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                     for elem in array {
                         match (&value, elem) {
                             (
-                                Entry::Literal(Literal::Integral(value)),
-                                Entry::Literal(Literal::Integral(elem)),
+                                Item::Literal(Literal::Integral(value)),
+                                Item::Literal(Literal::Integral(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
-                                Entry::Literal(Literal::Float(value)),
-                                Entry::Literal(Literal::Float(elem)),
+                                Item::Literal(Literal::Float(value)),
+                                Item::Literal(Literal::Float(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
-                                Entry::Literal(Literal::Bool(value)),
-                                Entry::Literal(Literal::Bool(elem)),
+                                Item::Literal(Literal::Bool(value)),
+                                Item::Literal(Literal::Bool(elem)),
                             ) if *value == elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
-                                Entry::Literal(Literal::String(value)),
-                                Entry::Literal(Literal::String(elem)),
+                                Item::Literal(Literal::String(value)),
+                                Item::Literal(Literal::String(elem)),
                             ) if value == &elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
                             (
-                                Entry::Literal(Literal::Subject(value)),
-                                Entry::Literal(Literal::Subject(elem)),
+                                Item::Literal(Literal::Subject(value)),
+                                Item::Literal(Literal::Subject(elem)),
                             ) if value == &elem => {
                                 stack.push_literal(Literal::Bool(true));
-                                continue;
+                                break;
                             }
 
-                            _ => {}
+                            _ => return None,
                         }
                     }
 
@@ -201,41 +320,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs == rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs == rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
+                            stack.push_literal(Literal::Bool(lhs == rhs));
+                        }
+
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(lhs == rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs == rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
-                        ) => {
-                            stack.push_literal(Literal::Bool(lhs == rhs));
-                        }
-
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -245,41 +361,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs != rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs != rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
+                            stack.push_literal(Literal::Bool(lhs != rhs));
+                        }
+
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(lhs != rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs != rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
-                        ) => {
-                            stack.push_literal(Literal::Bool(lhs != rhs));
-                        }
-
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -289,41 +402,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs < rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs < rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs < rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
-                        ) => {
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(!lhs & rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs < rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -333,41 +443,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs > rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs > rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs > rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
-                        ) => {
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(lhs & !rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs > rhs));
                         }
 
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -377,41 +484,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs <= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs <= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
+                            stack.push_literal(Literal::Bool(lhs <= rhs));
+                        }
+
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(lhs <= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs <= rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
-                        ) => {
-                            stack.push_literal(Literal::Bool(lhs <= rhs));
-                        }
-
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
 
@@ -421,41 +525,38 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
 
                     match (lhs, rhs) {
                         (
-                            Entry::Literal(Literal::Integral(lhs)),
-                            Entry::Literal(Literal::Integral(rhs)),
+                            Item::Literal(Literal::Integral(lhs)),
+                            Item::Literal(Literal::Integral(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs >= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Float(lhs)),
-                            Entry::Literal(Literal::Float(rhs)),
+                            Item::Literal(Literal::Float(lhs)),
+                            Item::Literal(Literal::Float(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs >= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::String(lhs)),
-                            Entry::Literal(Literal::String(rhs)),
+                            Item::Literal(Literal::String(lhs)),
+                            Item::Literal(Literal::String(rhs)),
                         ) => {
+                            stack.push_literal(Literal::Bool(lhs >= rhs));
+                        }
+
+                        (Item::Literal(Literal::Bool(lhs)), Item::Literal(Literal::Bool(rhs))) => {
                             stack.push_literal(Literal::Bool(lhs >= rhs));
                         }
 
                         (
-                            Entry::Literal(Literal::Bool(lhs)),
-                            Entry::Literal(Literal::Bool(rhs)),
+                            Item::Literal(Literal::Subject(lhs)),
+                            Item::Literal(Literal::Subject(rhs)),
                         ) => {
                             stack.push_literal(Literal::Bool(lhs >= rhs));
                         }
 
-                        (
-                            Entry::Literal(Literal::Subject(lhs)),
-                            Entry::Literal(Literal::Subject(rhs)),
-                        ) => {
-                            stack.push_literal(Literal::Bool(lhs >= rhs));
-                        }
-
-                        _ => stack.push_literal(Literal::Bool(false)),
+                        _ => return None,
                     }
                 }
             },
@@ -474,8 +575,8 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                 let mut fields = HashMap::with_capacity(siz);
 
                 for _ in 0..siz {
-                    let value = stack.pop_or_bail()?;
                     let key = stack.pop_as_string_or_bail()?;
+                    let value = stack.pop_or_bail()?;
 
                     fields.insert(key, value);
                 }
@@ -514,10 +615,10 @@ pub fn eval(dict: &Dictionary, instrs: Vec<Instr>) -> Result<Option<Entry>> {
                     Either::Right(f) => stack.push_literal(Literal::Float(f.tan())),
                 },
 
-                _ => return Err(EvalError::UnexpectedRuntimeError),
+                _ => return None,
             },
         }
     }
 
-    Ok(stack.pop())
+    stack.pop_as_bool_or_bail()
 }
